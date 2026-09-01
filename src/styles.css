@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+@theme {
+  --color-table: #1c1612;
+  --color-panel: #efe6d6;
+  --color-raised: #e4d8c4;
+  --color-foreground: #2a221c;
+  --color-muted-foreground: #6d6458;
+  --color-accent: #2a221c;
+  --color-accent-foreground: #efe6d6;
+  --color-border: #cfc3ae;
+  --color-ring: #4a3f36;
+  --color-danger: #8f3d32;
+  --color-muted: #e4d8c4;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Source Serif 4", "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --shadow-panel: 0 18px 40px rgba(28, 22, 18, 0.28);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --motion-quick: 150ms;
+  --radius: 0.75rem;
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+
+  .kletka-hud {
+    --hud-top: calc(env(safe-area-inset-top, 0px) + 4rem);
+    --hud-dock: calc(env(safe-area-inset-bottom, 0px) + 5.25rem);
+  }
+
+  html,
+  body,
+  #app {
+    width: 100%;
+    height: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    overscroll-behavior: none;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-table);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+  }
+
+  .kletka-floater {
+    animation: kletka-float 1.35s var(--ease-out) forwards;
+  }
+
+  @keyframes kletka-float {
+    0% {
+      opacity: 0;
+      transform: translate(-50%, 10px) scale(0.94);
+    }
+    14% {
+      opacity: 1;
+      transform: translate(-50%, 0) scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-50%, -52px) scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .kletka-floater {
+      animation-duration: 0.8s;
+    }
+  }
+}

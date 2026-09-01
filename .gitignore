@@ -1,0 +1,24 @@
+# deps & build
+node_modules/
+.tanstack/
+.output/
+.nitro/
+dist/
+*.local
+
+# sandbox / preview internals
+.vercel/
+.grok/
+.project_id
+.node_modules.lock
+screenshots/
+artifacts/
+attachments/
+AGENTS.md
+assets/
+*.log
+
+# env
+.env
+.env.*
+!.env.example

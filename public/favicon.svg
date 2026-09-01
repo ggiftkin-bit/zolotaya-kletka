@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Золотая Клетка">
+  <rect width="32" height="32" rx="7" fill="#1c1612"/>
+  <rect x="4" y="4" width="24" height="24" rx="3" fill="#efe6d6"/>
+  <rect x="5.4" y="5.4" width="21.2" height="21.2" rx="2" fill="none" stroke="#6f7d55" stroke-width="1.4"/>
+  <g fill="#2a221c">
+    <circle cx="16" cy="11.8" r="3.2"/>
+    <path d="M9.7 15.2c0-1 2.5-1.85 6.3-1.85s6.3.85 6.3 1.85v1.3h-2.15v5.1c0 .5.22 1.15.95 1.7l.8 1.05h-3.85L16 21.85 14.4 24.4h-3.85l.8-1.05c.73-.55.95-1.2.95-1.7v-5.1H9.7z"/>
+  </g>
+</svg>
