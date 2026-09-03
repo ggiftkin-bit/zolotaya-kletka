@@ -182,17 +182,17 @@ function widenRiver(tiles: Tile[], rng: () => number) {
 }
 
 function carveLake(tiles: Tile[], cx: number, cy: number, rInner: number, rOuter: number) {
-  for (let y = cy - rOuter - 1; y <= cy + rOuter + 1; y++) {
-    for (let x = cx - rOuter - 1; x <= cx + rOuter + 1; x++) {
+  const r = Math.ceil(rOuter);
+  for (let y = cy - r; y <= cy + r; y++) {
+    for (let x = cx - r; x <= cx + r; x++) {
       if (!inBounds(x, y)) continue;
-      const d = Math.hypot(x - cx, y - cy);
-      if (d <= rOuter) {
-        const t = tiles[idx(x, y)]!;
-        t.biome = "river";
-        t.resource = null;
-        t.amount = 0;
-        t.road = "none";
-      }
+      if (Math.hypot(x - cx, y - cy) > rOuter) continue;
+      const t = tiles[idx(x, y)];
+      if (!t) continue;
+      t.biome = "river";
+      t.resource = null;
+      t.amount = 0;
+      t.road = "none";
     }
   }
   void rInner;
