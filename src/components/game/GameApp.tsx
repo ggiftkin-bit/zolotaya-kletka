@@ -8,6 +8,7 @@ import { useGame } from "@/game/store";
 import { tileAt } from "@/game/worldgen";
 import { fogAt } from "@/game/book";
 import { pullSpot } from "@/game/book-sync";
+import { pileAdd } from "@/game/pile";
 import { BoardCanvas } from "./BoardCanvas";
 import { Hud } from "./Hud";
 import { StartScreen } from "./StartScreen";
@@ -316,7 +317,7 @@ export function GameApp() {
         if (life === "down" && c.life === "alive") {
           const tile = s.world.tiles[c.y * s.world.width + c.x];
           if (tile && c.inventory.wood > 0) {
-            tile.pile = { item: "wood", amount: (tile.pile?.item === "wood" ? tile.pile.amount : 0) + c.inventory.wood };
+            pileAdd(tile, "wood", c.inventory.wood);
             c.inventory = { ...c.inventory, wood: 0 };
           }
           useGame.setState({

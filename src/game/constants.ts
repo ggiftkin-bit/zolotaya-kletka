@@ -190,7 +190,7 @@ export const GATHER_TABLE: Partial<Record<Biome, { item: ItemId; yield: number }
   mountain: { item: "stone", yield: 2 },
   ore: { item: "ore", yield: 1 },
   fertile: { item: "food", yield: 2 },
-  plains: { item: "food", yield: 1 },
+  plains: { item: "herb", yield: 1 },
   ford: { item: "fish", yield: 2 },
   swamp: { item: "herb", yield: 1 },
 };
@@ -243,28 +243,7 @@ export const BUILD_OK: Record<Exclude<BuildingKind, "none">, Biome[]> = {
   camp: ["plains", "fertile", "forest", "swamp", "mountain"],
 };
 
-/** Ноша: только то, что есть, три квадрата в ряд. */
-export const BAG_CELLS: ItemId[] = [
-  "wood",
-  "stone",
-  "ore",
-  "food",
-  "fish",
-  "herb",
-  "clay",
-  "rope",
-  "rod",
-  "spear",
-  "shovel",
-  "bucket",
-  "coal",
-  "plank",
-  "bread",
-  "smoked",
-  "bar",
-  "tonic",
-  "axe",
-  "pick",
-];
+/** Ноша: все ненулевые, три квадрата в ряд. */
+export const BAG_CELLS: ItemId[] = [...ITEMS];
 
 

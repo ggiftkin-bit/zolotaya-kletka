@@ -72,6 +72,7 @@ export type PawnBody = {
   resting: boolean;
   busy: Busy | null;
   wear: Character["wear"];
+  bagWear?: Character["bagWear"];
   pacts: Record<string, "friend" | "feud">;
   village: string;
 };
@@ -283,6 +284,7 @@ export function packPawn(c: Character): PawnBody {
     resting: c.resting,
     busy: c.busy,
     wear: c.wear ?? {},
+    bagWear: c.bagWear ?? {},
     pacts: c.pacts,
     village: c.village,
   };
@@ -326,6 +328,7 @@ export function unpackPawn(row: PawnRow): Character {
     resting: !!body.resting,
     busy: body.busy ?? null,
     wear: body.wear ?? {},
+    bagWear: body.bagWear ?? {},
     pacts: body.pacts ?? {},
     village: body.village ?? "",
   };

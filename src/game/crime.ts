@@ -1,5 +1,6 @@
 import { JAIL_MS } from "./pace";
 import { plotBounds, yardStrength } from "./fence";
+import { asPile } from "./pile";
 import type { Character, ItemId, Tile, World } from "./types";
 import { tileAt } from "./worldgen";
 
@@ -55,9 +56,11 @@ export function lootFrom(tile: Tile): { item: ItemId; n: number } | null {
       }
     }
   }
-  if (tile.pile && tile.pile.amount > 0) {
-    const n = Math.min(tile.pile.amount, 1 + Math.floor(Math.random() * 2));
-    return { item: tile.pile.item, n };
+  const pile = asPile(tile.pile);
+  const first = (["food", "wood", "herb", "fish", "stone", "crystal"] as ItemId[]).find((k) => (pile[k] ?? 0) > 0);
+  if (first) {
+    const n = Math.min(pile[first] ?? 0, 1 + Math.floor(Math.random() * 2));
+    return { item: first, n };
   }
   if (tile.building === "field" && tile.amount > 0) {
     return { item: "food", n: Math.min(tile.amount, 2) };

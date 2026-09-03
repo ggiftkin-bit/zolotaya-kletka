@@ -176,7 +176,7 @@ function AbcTab() {
   const pacts = useGame((s) => s.character.pacts);
   const village = useGame((s) => s.character.village);
   const friends = friendNames(pacts);
-  const extra = (["clay", "crystal", "wheel", "lock", "shovel"] as const).filter((k) => !BAG_CELLS.includes(k));
+  const extra = (["crystal", "wheel", "lock"] as const).filter((k) => !BAG_CELLS.includes(k));
   return (
     <div className="space-y-4">
       <ul className="space-y-3">

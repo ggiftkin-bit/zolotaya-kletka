@@ -10,6 +10,7 @@ import type { Biome, Tile, World } from "@/game/types";
 import { viewPos } from "@/game/view-pos";
 import { tileAt } from "@/game/worldgen";
 import { FOG_DARK, FOG_MEM, fogAt } from "@/game/book";
+import { asPile, pileTotal } from "@/game/pile";
 
 const BIOME_FILL: Record<Biome, string> = {
   plains: "#c5b48a",
@@ -489,7 +490,8 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
     }
   }
 
-  if ((tile.pile && tile.pile.amount > 0) || (tile.goldDrop ?? 0) > 0) {
+  const pileN = pileTotal(asPile(tile.pile));
+  if (pileN > 0 || (tile.goldDrop ?? 0) > 0) {
     ctx.fillStyle = "#6b4a2f";
     ctx.beginPath();
     ctx.ellipse(x + TILE * 0.72, y + TILE * 0.72, 9, 7, 0, 0, Math.PI * 2);
@@ -497,7 +499,7 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
     ctx.fillStyle = "#efe6d6";
     ctx.font = "700 9px Manrope, sans-serif";
     ctx.textAlign = "center";
-    const n = tile.pile?.amount || tile.goldDrop || 0;
+    const n = pileN || tile.goldDrop || 0;
     ctx.fillText(String(Math.min(99, n)), x + TILE * 0.72, y + TILE * 0.76);
     ctx.textAlign = "start";
   }

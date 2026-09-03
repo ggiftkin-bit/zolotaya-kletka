@@ -1,5 +1,6 @@
 import { ITEM_LABEL } from "./constants";
 import { BUILDING_LABEL } from "./economy";
+import { asPile, pileLabel, pileTotal } from "./pile";
 import type { ItemId, Tile, World } from "./types";
 import { canFishOn } from "./work";
 
@@ -13,13 +14,14 @@ export type Loot = {
 
 export function lootOn(tile: Tile): Loot[] {
   const out: Loot[] = [];
-  if (tile.pile && tile.pile.amount > 0) {
+  const pile = asPile(tile.pile);
+  if (pileTotal(pile) > 0) {
     out.push({
       id: "pile",
       kind: "pile",
-      item: tile.pile.item,
-      n: tile.pile.amount,
-      label: `На клетке ${ITEM_LABEL[tile.pile.item]} ×${tile.pile.amount}`,
+      item: (Object.keys(pile) as ItemId[]).find((k) => (pile[k] ?? 0) > 0) ?? "wood",
+      n: pileTotal(pile),
+      label: `На клетке ${pileLabel(pile)}`,
     });
   }
   if (tile.goldDrop > 0) {

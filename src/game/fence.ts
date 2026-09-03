@@ -1,4 +1,5 @@
 import type { FenceKind, Tile, World } from "./types";
+import { asPile, pileSet } from "./pile";
 import { tileAt } from "./worldgen";
 
 export const FENCE_LABEL: Record<FenceKind, string> = {
@@ -274,10 +275,14 @@ export function raidNight(world: World, gold: number): { gold: number; notes: st
   const seen = new Set<string>();
   for (const t of world.tiles) {
     if (!t.plot && !t.owned) {
-      if (t.pile && t.pile.amount > 0 && Math.random() < 0.22) {
-        const n = Math.min(t.pile.amount, 1 + Math.floor(Math.random() * 3));
-        t.pile.amount -= n;
-        if (t.pile.amount <= 0) t.pile = null;
+      const pile = asPile(t.pile);
+      const keys = (Object.keys(pile) as Array<keyof typeof pile>).filter((k) => (pile[k] ?? 0) > 0);
+      if (keys.length && Math.random() < 0.22) {
+        const item = keys[0]!;
+        const n = Math.min(pile[item] ?? 0, 1 + Math.floor(Math.random() * 3));
+        pile[item] = (pile[item] ?? 0) - n;
+        if ((pile[item] ?? 0) <= 0) delete pile[item];
+        pileSet(t, pile);
         notes.push(`Ночью с кучи утащили ${n}. Двор без забора не держит.`);
       }
       continue;

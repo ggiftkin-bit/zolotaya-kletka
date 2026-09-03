@@ -224,10 +224,7 @@ function sprinkleResources(tiles: Tile[], rng: () => number) {
       }
     } else if (t.biome === "plains") {
       if (t.commons) continue;
-      if (rng() < 0.1) {
-        t.resource = "food";
-        t.amount = 2 + Math.floor(rng() * 2);
-      } else if (rng() < 0.28) {
+      if (rng() < 0.32) {
         t.resource = "herb";
         t.amount = 2 + Math.floor(rng() * 3);
       }

@@ -37,10 +37,10 @@ export const TOOL_LIFE = {
 export type WearId = keyof typeof TOOL_LIFE;
 
 export const TOOL_BREAK: Record<WearId, string> = {
-  axe: "топор сломался",
-  pick: "кирка сломалась",
-  spear: "копьё сломалось",
-  shovel: "лопата сломалась",
+  axe: "топор кончился",
+  pick: "кирка кончилась",
+  spear: "копьё кончилось",
+  shovel: "лопата кончилась",
 };
 
 export const CLAD_STONE = 16;
@@ -146,27 +146,48 @@ export function makeBusy(
 }
 
 export function remainingWear(c: Character, id: WearId): number {
-  const n = c.wear?.[id];
-  if (typeof n === "number") return n;
+  if (c.hand === id) {
+    const n = c.wear?.[id];
+    if (typeof n === "number") return n;
+    return TOOL_LIFE[id];
+  }
+  const bag = c.bagWear?.[id];
+  if (typeof bag === "number") return bag;
   return TOOL_LIFE[id];
 }
 
-/** Минус одно использование в начале дела. На нуле вещь пропадает. */
+export function isWearId(id: string | null | undefined): id is WearId {
+  return id === "axe" || id === "pick" || id === "spear" || id === "shovel";
+}
+
+/** Минус одно использование в начале дела. На нуле вещь пропадает. Удар с руки. */
 export function useTool(
   c: Character,
   id: WearId,
 ): { c: Character; broke: boolean; missing: boolean } {
   if ((c.inventory[id] ?? 0) <= 0 && c.hand !== id) return { c, broke: false, missing: true };
-  const left = remainingWear(c, id) - 1;
   const wear = { ...(c.wear ?? {}) };
+  const bagWear = { ...(c.bagWear ?? {}) };
+  const inHand = c.hand === id;
+  const current = inHand ? (typeof wear[id] === "number" ? wear[id]! : TOOL_LIFE[id]) : (bagWear[id] ?? TOOL_LIFE[id]);
+  const left = current - 1;
   if (left > 0) {
-    wear[id] = left;
-    return { c: { ...c, wear }, broke: false, missing: false };
+    if (inHand) wear[id] = left;
+    else bagWear[id] = left;
+    return { c: { ...c, wear, bagWear }, broke: false, missing: false };
   }
   const inv = { ...c.inventory, [id]: Math.max(0, (c.inventory[id] ?? 0) - 1) };
-  const hand = c.hand === id && inv[id] <= 0 ? null : c.hand;
-  wear[id] = inv[id] > 0 ? TOOL_LIFE[id] : 0;
-  return { c: { ...c, inventory: inv, hand, wear }, broke: true, missing: false };
+  let hand = c.hand;
+  if (inv[id] > 0) {
+    const next = bagWear[id] ?? TOOL_LIFE[id];
+    delete bagWear[id];
+    if (inHand) wear[id] = next;
+  } else {
+    wear[id] = 0;
+    delete bagWear[id];
+    if (hand === id) hand = null;
+  }
+  return { c: { ...c, inventory: inv, hand, wear, bagWear }, broke: true, missing: false };
 }
 
 export function burnableFence(tile: Tile, world: World): { side: "n" | "w" | "s" | "e" } | null {

@@ -9,6 +9,7 @@ import { TOOL_ITEMS } from "@/game/life";
 import { BUSY_LABEL, isRoof, remainingWear, type WearId } from "@/game/work";
 import { useGame } from "@/game/store";
 import { cargoWeight } from "@/game/travel";
+import { asPile, pileEmpty, pileLabel } from "@/game/pile";
 import type { BuildingKind, ItemId, Profession, Skill, ToolMode, Weather } from "@/game/types";
 import { tileAt } from "@/game/worldgen";
 import { Button } from "@/components/ui/button";
@@ -575,15 +576,15 @@ export function Hud() {
                     Выпить настой · раны, не сила
                   </Button>
                 )}
-                {here?.pile && here.pile.amount > 0 && (
+                {here && !pileEmpty(asPile(here.pile)) && (
                   <button
                     type="button"
                     className="flex h-12 w-full items-center justify-between rounded-[14px] bg-accent px-3 text-accent-foreground"
                     onClick={() => g.pickupPile()}
                   >
                     <span>Поднять</span>
-                    <span className="font-display">
-                      {ITEM_LABEL[here.pile.item]} ×{here.pile.amount}
+                    <span className="font-display text-right text-[13px] leading-tight">
+                      {pileLabel(asPile(here.pile))}
                     </span>
                   </button>
                 )}
@@ -618,7 +619,22 @@ export function Hud() {
                       <p className="text-[11px] text-muted-foreground">{ITEM_LABEL[k]}</p>
                       <p className="font-display text-lg leading-none tabular-nums">{inv[k]}</p>
                       {(k === "axe" || k === "pick" || k === "spear" || k === "shovel") && inv[k] > 0 && (
-                        <p className="text-[11px] text-muted-foreground">ещё {remainingWear(g.character, k as WearId)}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {g.character.hand === k
+                            ? `в руке ещё ${remainingWear(g.character, k as WearId)}`
+                            : ""}
+                          {inv[k] - (g.character.hand === k ? 1 : 0) > 0
+                            ? `${g.character.hand === k ? " · " : ""}${
+                                g.character.bagWear?.[k as WearId]
+                                  ? `сумка ещё ${g.character.bagWear[k as WearId]}`
+                                  : "в сумке новый"
+                              }`
+                            : g.character.hand === k
+                              ? ""
+                              : g.character.bagWear?.[k as WearId]
+                                ? `ещё ${g.character.bagWear[k as WearId]}`
+                                : "новый"}
+                        </p>
                       )}
                     </div>
                     <Button

@@ -156,7 +156,7 @@ export type Tile = {
   owned: boolean;
   building: BuildingKind;
   caravan: boolean;
-  pile: { item: ItemId; amount: number } | null;
+  pile: Partial<Record<ItemId, number>> | null;
   goldDrop: number;
   chest: Inventory;
   scarred: boolean;
@@ -264,8 +264,10 @@ export type Character = {
   stillUntil: number;
   resting: boolean;
   busy: Busy | null;
-  /** Остаток ударов у снасти в руке/стопе. Старый сейв = полный запас. */
+  /** Остаток ударов снасти в руке. Старый сейв = полный запас. */
   wear: Partial<Record<"axe" | "pick" | "spear" | "shovel", number>>;
+  /** Износ снятой снасти в сумке (один экземпляр на тип). Второй без записи — новый. */
+  bagWear?: Partial<Record<"axe" | "pick" | "spear" | "shovel", number>>;
   pacts: Record<string, "friend" | "feud">;
   village: string;
 };

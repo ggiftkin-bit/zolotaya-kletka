@@ -1,4 +1,5 @@
 import { MAP_H, MAP_W } from "./constants";
+import { asPile, pileEmpty } from "./pile";
 import type { BuildingKind, FenceKind, Inventory, ItemId, Matter, RoadKind, Tile, GameState } from "./types";
 import { defaultMatter, MATTER_HP } from "./work";
 
@@ -20,7 +21,7 @@ export type SlimTile = {
   ow?: 1;
   bd?: BuildingKind;
   cv?: 1;
-  pl?: { item: ItemId; amount: number };
+  pl?: Partial<Record<ItemId, number>> | { item: ItemId; amount: number };
   gd?: number;
   ch?: Partial<Inventory>;
   sc?: 1;
@@ -98,7 +99,8 @@ export function slimTile(t: Tile): SlimTile {
   if (t.owned) o.ow = 1;
   if (t.building !== "none") o.bd = t.building;
   if (t.caravan) o.cv = 1;
-  if (t.pile && t.pile.amount > 0) o.pl = t.pile;
+  const pile = asPile(t.pile);
+  if (!pileEmpty(pile)) o.pl = pile;
   if (t.goldDrop) o.gd = t.goldDrop;
   const ch = slimChest(t.chest);
   if (ch) o.ch = ch;
@@ -143,7 +145,10 @@ export function fatTile(raw: Partial<Tile> & { b?: Tile["biome"] }, x: number, y
     owned: !!(raw.owned ?? slim.ow),
     building,
     caravan: !!(raw.caravan ?? slim.cv),
-    pile: raw.pile ?? slim.pl ?? null,
+    pile: (() => {
+      const p = asPile(raw.pile ?? slim.pl ?? null);
+      return pileEmpty(p) ? null : p;
+    })(),
     goldDrop: raw.goldDrop ?? slim.gd ?? 0,
     chest: { ...emptyChest(), ...(raw.chest ?? slim.ch ?? {}) },
     scarred: !!(raw.scarred ?? slim.sc),
