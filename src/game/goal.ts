@@ -75,7 +75,7 @@ export function skillHow(key: keyof Skills): string {
     trade: "лавка",
     agro: "поле, загон, лошадь",
     mine: "горы и жила",
-    fight: "охота с копьём",
+    fight: "охота, встреча",
     stealth: "кража, взлом, ночь",
     speech: "пока спит",
     lead: "пока спит",

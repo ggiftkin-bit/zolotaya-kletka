@@ -6,6 +6,7 @@ import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, waterHint } from "@/game/life";
 import { LIFE_INDEX } from "@/game/art";
 import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/places";
 import { FOG_DARK, fogAt } from "@/game/book";
+import { dummyAt } from "@/game/fight";
 import { canFoundVillage, clusterHint, hamletTitle, hasOwnYard } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
 import { canDigReason, fillPay } from "@/game/pit";
@@ -282,6 +283,7 @@ function PickPane({
   const emptyYard = atOwn && tile.building === "none" && !tile.caravan;
   const shackUp = atOwn && tile.building === "shack" && g.character.inventory.wood >= 10 && g.character.inventory.stone >= 4;
   const down = g.character.life === "down";
+  const dummy = dummyAt(g.dummies ?? [], tile.x, tile.y);
   const locked =
     (g.character.jailedUntil ?? 0) > Date.now() ||
     g.character.life === "jailed" ||
@@ -427,6 +429,21 @@ function PickPane({
           }}
         />
       ))}
+      {dummy && (
+        <Sticker
+          title={dummy.life !== "alive" ? `${dummy.name} лежит` : `Встреча · ${dummy.name}`}
+          sub={
+            dummy.life !== "alive"
+              ? "не добивать"
+              : near
+                ? "ударить, отойти, сдаться"
+                : "подойди в соседнюю клетку"
+          }
+          ico={<Ico i={ICO.stake} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => g.startMeet(dummy.id)}
+          dim={!near || dummy.life !== "alive" || down || locked}
+        />
+      )}
       {here && !tile.pit && canDigReason(g.world, tile, g.character.hand) == null && (
         <Sticker
           title="Копать"

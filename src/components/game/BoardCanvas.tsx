@@ -375,6 +375,26 @@ function draw(
     ctx.stroke();
   }
 
+  for (const d of g.dummies ?? []) {
+    if (fogAt(g.world, d.x, d.y) !== 2 && fogAt(g.world, d.x, d.y) !== 1) continue;
+    const same = d.x === g.character.x && d.y === g.character.y;
+    const ox = d.x * TILE + TILE / 2 + (same ? 8 : 0);
+    const oy = d.y * TILE + TILE / 2 + (same ? -6 : 0);
+    ctx.globalAlpha = d.life === "down" ? 0.4 : 1;
+    ctx.fillStyle = "rgba(28,22,18,0.22)";
+    ctx.beginPath();
+    ctx.ellipse(ox, oy + 11, 9, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = d.color || "#6b3a2a";
+    ctx.beginPath();
+    ctx.arc(ox, oy - 2, d.life === "down" ? 7 : 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#efe6d6";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   ctx.restore();
 
   if (g.weather === "rain" || g.weather === "snow") {

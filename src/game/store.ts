@@ -36,17 +36,7 @@ import { requestLook } from "./cam";
 import { findPath, pathTotal } from "./path";
 import { canDigReason, fillNeedLine, fillPay, giveOrPile, takePaid } from "./pit";
 import { asPile, dumpAllOn, pileAdd, pileEmpty, pileTake } from "./pile";
-import {
-  MAX_PLOT,
-  clearYard,
-  normRect,
-  plotBounds,
-  putGate,
-  setYardGateLock,
-  stampYard,
-  upgradeYard,
-  yardWoodCost,
-} from "./fence";
+import { canCrossDiag, MAX_PLOT, clearYard, normRect, plotBounds, putGate, setYardGateLock, stampYard, upgradeYard, yardWoodCost } from "./fence";
 import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, SKIP_GOLD, deathFee, energyPeriod, formatWait, splitBodyWater } from "./pace";
 import { applyCatch, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, ownerOf, stealChance } from "./crime";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
@@ -85,7 +75,9 @@ import type {
   AnimalKind,
   BuildingKind,
   Character,
+  Dummy,
   Floater,
+  Meet,
   GameState,
   Inventory,
   ItemId,
@@ -97,6 +89,7 @@ import type {
   Trader,
   Weather,
 } from "./types";
+import { chebyshev, dummyHome, leaveChance, makeHamletDummies, strikeDmg, talkChance, youFighter } from "./fight";
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, allDarkFog, fogAt, maskLiveFog } from "./book";
@@ -264,6 +257,10 @@ function walkTo(x: number, y: number) {
   const hold = heldLine(c);
   if (hold) {
     speak(hold, c.x, c.y, c.life === "dead" ? "погиб" : c.life === "down" ? "упал" : isStill(c) ? "сутки" : "в яме", "bad");
+    return;
+  }
+  if (s.meet) {
+    speak("Встреча. Сначала шаг листа.", c.x, c.y, "встреча", "ok");
     return;
   }
   if (fogAt(s.world, x, y) === FOG_DARK) {
@@ -501,6 +498,12 @@ type Actions = {
   drinkTonic: () => void;
   buyFromShop: (item: ItemId, qty: number) => void;
   sellToShop: (item: ItemId, qty: number) => void;
+  startMeet: (foeId: string) => void;
+  meetHit: () => void;
+  meetLeave: () => void;
+  meetDrop: () => void;
+  meetYield: () => void;
+  meetTalk: () => void;
 };
 
 function ctxOf(s: GameState) {
@@ -550,6 +553,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   bookAt: "",
   bookStatus: "idle",
   others: [],
+  meet: null,
+  dummies: [],
 
   boot: () => {
     const saved = loadGame();
@@ -628,6 +633,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         bookOn: false,
         bookStatus: "offline",
         others: [],
+        meet: saved.meet ?? null,
+        dummies: makeHamletDummies(world, saved.dummies),
       });
       queueMicrotask(() => useGame.getState().catchUp());
     }
@@ -677,6 +684,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
           "Клетка пишется в книгу мира. Пятно едет за фишкой. Даль — тьма, не жила.",
           "Сила капает сама. Дома быстрее. Кружка за золото — сразу. Тап — наклейки, Пойти — ход.",
         ],
+        meet: null,
+        dummies: makeHamletDummies(world),
       });
       window.setTimeout(() => {
         noteDeed("pawn");
@@ -724,6 +733,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         "Охота и рыба — ждут. Шалаш из хвороста горит, камень нет. Двор соседа к юго-западу.",
         "Забор: нижний ряд «Двор», два угла — участок. Внутри поле и дом без столбов. Ночью без тына воруют. Калитка без замка — дыра.",
       ],
+      meet: null,
+      dummies: makeHamletDummies(world),
     });
     window.setTimeout(() => useGame.getState().persist(), 250);
   },
@@ -732,7 +743,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     clearGame();
     void resetBookPawn();
     worldAcc = 0;
-    set({ started: false, travel: null, preview: null, log: [], jobs: [], floaters: [], inspect: null, plotMark: null, hint: null, others: [] });
+    set({ started: false, travel: null, preview: null, log: [], jobs: [], floaters: [], inspect: null, plotMark: null, hint: null, others: [], meet: null, dummies: [] });
   },
 
   setTool: (tool) => set({ tool, preview: null, inspect: null, plotMark: tool === "claim" ? get().plotMark : null }),
@@ -749,6 +760,10 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   clickTile: (x, y) => {
     const s = get();
     if (!s.started) return;
+    if (s.meet) {
+      speak("Встреча. Сначала шаг листа.", s.character.x, s.character.y, "встреча", "ok");
+      return;
+    }
     if (isJailed(s.character) || s.character.life === "dead") {
       const hold = heldLine(s.character) ?? "Не ходит.";
       const short = s.character.life === "dead" ? "погиб" : "в яме";
@@ -1109,6 +1124,12 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   drinkTonic: () => drinkTonic(),
   buyFromShop: (item, qty) => buyFromShop(item, qty),
   sellToShop: (item, qty) => sellToShop(item, qty),
+  startMeet: (foeId) => startMeet(foeId),
+  meetHit: () => meetHit(),
+  meetLeave: () => meetLeave(),
+  meetDrop: () => meetDrop(),
+  meetYield: () => meetYield(),
+  meetTalk: () => meetTalk(),
 }));
 
 bindBookStore({
@@ -1121,6 +1142,26 @@ function catchUpSim(dt: number) {
   const s = useGame.getState();
   if (!s.started) return;
   const now = Date.now();
+  let dummies = s.dummies ?? [];
+  let dummyTouched = false;
+  dummies = dummies.map((d) => {
+    if (d.life !== "down") return d;
+    if (now - (d.downAt || 0) < DOWN_MS) return d;
+    dummyTouched = true;
+    const home = dummyHome(s.world, d.id);
+    const hasLoot = Object.values(d.inventory ?? {}).some((n) => (n ?? 0) > 0);
+    return {
+      ...d,
+      life: "alive" as const,
+      hp: 40,
+      energy: 18,
+      downAt: 0,
+      x: home?.x ?? d.x,
+      y: home?.y ?? d.y,
+      inventory: hasLoot ? d.inventory : { food: 3, wood: 2 },
+    };
+  });
+  if (dummyTouched) useGame.setState({ dummies });
   const roof =
     hasRoofAt(s, s.character.x, s.character.y) ||
     (s.character.profession === "hireling" && s.character.resting);
@@ -4190,5 +4231,415 @@ function fillPitHere() {
   const ms = workMs("fill", null, c);
   startBusy(c, makeBusy("fill", tile.x, tile.y, Date.now() + ms), `Засыпаю · ${Math.ceil(ms / 1000)} с.`, tile.x, tile.y, "засыпаю");
 }
+
+function foeOf(s: GameState) {
+  if (!s.meet) return null;
+  return s.dummies.find((d) => d.id === s.meet!.foeId) ?? null;
+}
+
+function meetWhy(s: GameState, foe: Dummy): string | null {
+  const c = s.character;
+  if (s.travel) return "Сначала дойди.";
+  const hold = actHeld(c);
+  if (hold) return hold;
+  if (isBusy(c) && !c.busy?.hired) return `Занят: ${BUSY_LABEL[c.busy!.kind]}.`;
+  if (foe.life !== "alive") return "Лежит. Не добивать.";
+  const dist = chebyshev(c.x, c.y, foe.x, foe.y);
+  if (dist > 1) return "Подойди в соседнюю клетку.";
+  if (!canCrossDiag(s.world, c.x, c.y, foe.x, foe.y, "you")) return "Калитка или тын. Засов — взлом, река — мост.";
+  return null;
+}
+
+function dumpBagKeepHand(c: Character, tile: NonNullable<ReturnType<typeof tileAt>>): Character {
+  const drop = { ...c.inventory };
+  const hand = c.hand;
+  if (hand && (drop[hand] ?? 0) > 0) drop[hand] = Math.max(0, drop[hand] - 1);
+  dumpAllOn(tile, drop, 0);
+  const keep = emptyTheInv(c.inventory);
+  if (hand) keep[hand] = Math.min(1, c.inventory[hand] ?? 0);
+  return { ...c, inventory: keep, hand: hand && keep[hand] ? hand : null };
+}
+
+function yardFlags(s: GameState, x: number, y: number, who: string) {
+  const tile = tileAt(s.world, x, y);
+  const owner = tile?.owner || "";
+  return {
+    ownYard: !!owner && owner === who,
+    foreignYard: !!owner && owner !== who,
+    atYard: !!tile?.plot,
+    tile,
+  };
+}
+
+function startMeet(foeId: string) {
+  const s = useGame.getState();
+  const foe = s.dummies.find((d) => d.id === foeId);
+  if (!foe) {
+    speak("Никого.", s.character.x, s.character.y, "пусто", "bad");
+    return;
+  }
+  const why = meetWhy(s, foe);
+  if (why) {
+    speak(why, foe.x, foe.y, "нельзя", "bad");
+    return;
+  }
+  useGame.setState({
+    meet: { foeId, turn: "you", steps: 0, spoke: false, firstDone: false },
+    inspect: { x: foe.x, y: foe.y },
+    travel: null,
+    preview: null,
+    log: pushLog(s.log, `Встреча с ${foe.name}. Один шаг — один выбор.`),
+    hint: { text: `Встреча: ${foe.name}. Удар, отойти, сдаться.`, tone: "ok" },
+  });
+  useGame.getState().persist();
+}
+
+function closeMeet(extra?: Partial<GameState>) {
+  useGame.setState({ meet: null, ...extra });
+  useGame.getState().persist();
+}
+
+function applyDummy(dummies: Dummy[], next: Dummy): Dummy[] {
+  return dummies.map((d) => (d.id === next.id ? next : d));
+}
+
+function meetHit() {
+  const s = useGame.getState();
+  if (!s.meet || s.meet.turn !== "you") return;
+  const foe = foeOf(s);
+  if (!foe) {
+    closeMeet();
+    return;
+  }
+  const why = meetWhy(s, foe);
+  if (why) {
+    speak(why, foe.x, foe.y, "нельзя", "bad");
+    return;
+  }
+  let c = { ...s.character, energy: Math.max(0, s.character.energy - 2), resting: false };
+  const strikeHand = c.hand;
+  if (isWearId(c.hand)) {
+    const worn = takeWear(c, c.hand);
+    c = worn.c;
+  }
+  const you = youFighter({ ...c, hand: strikeHand });
+  const flags = yardFlags(s, c.x, c.y, "you");
+  const first = !s.meet.firstDone;
+  const hit = strikeDmg(you, {
+    night: s.phase === "night",
+    first,
+    winter: s.season === "winter",
+    roof: isRoof(flags.tile),
+    ownYard: flags.ownYard,
+    foreignYard: flags.foreignYard,
+    atYard: flags.atYard,
+    foeStealth: foe.skills.stealth ?? 0,
+  });
+  let nextFoe: Dummy = { ...foe, hp: Math.max(0, foe.hp - hit.dmg), energy: Math.max(0, foe.energy) };
+  c = bumpSkill(c, "fight", 0.12);
+  if (hit.sneak) c = bumpSkill(c, "stealth", 0.08);
+  if (c.pacts[foe.id] === "friend") {
+    c = { ...c, pacts: { ...c.pacts, [foe.id]: "feud" } };
+  }
+  const tile = tileAt(s.world, foe.x, foe.y);
+  const lawNow = tile ? hasLaw(s.world, tile) && isForeignYard(tile) : false;
+  let jailed = false;
+  if (lawNow) {
+    const p = stealChance(s.world, tile!, c, s.phase === "night");
+    if (Math.random() < p) {
+      c = applyCatch(c, true, `удар у ${foe.name}`);
+      jailed = isJailed(c);
+      if (jailed) {
+        const spot = jailSpot(s.world, tile!.x, tile!.y);
+        c = { ...c, x: spot.x, y: spot.y, px: spot.x, py: spot.y, busy: null };
+        viewPos.x = spot.x;
+        viewPos.y = spot.y;
+        c = bumpSkill(c, "law", 0.08);
+      }
+    }
+  }
+  const bits = [`удар ${hit.dmg}`];
+  if (hit.sneak) bits.unshift("сбоку");
+  if (nextFoe.hp <= 0) {
+    nextFoe = { ...nextFoe, hp: 0, life: "down", downAt: Date.now() };
+    if (tile) {
+      const drop = { ...emptyTheInv(c.inventory), ...nextFoe.inventory };
+      dumpAllOn(tile, drop, 0);
+      nextFoe = { ...nextFoe, inventory: {} };
+    }
+    useGame.setState({
+      character: c,
+      dummies: applyDummy(s.dummies, nextFoe),
+      meet: null,
+      world: { ...s.world, tiles: s.world.tiles },
+      log: pushLog(s.log, `${foe.name} упал. Ноша на клетке. Не добивать.`),
+      hint: { text: `${foe.name} упал.`, tone: "ok" },
+      floaters: [...s.floaters, { id: ++floaterSeq, x: foe.x, y: foe.y, text: bits.join(" · "), tone: "ok" as const }].slice(-10),
+    });
+    useGame.getState().persist();
+    return;
+  }
+  if (jailed) {
+    useGame.setState({
+      character: c,
+      dummies: applyDummy(s.dummies, nextFoe),
+      meet: null,
+      travel: null,
+      preview: null,
+      inspect: null,
+      log: pushLog(s.log, `Удар прошёл (${hit.dmg}). Закон двора — яма.`),
+      hint: { text: "Поймали после удара. Яма.", tone: "bad" },
+      floaters: [...s.floaters, { id: ++floaterSeq, x: foe.x, y: foe.y, text: bits.join(" · "), tone: "bad" as const }].slice(-10),
+    });
+    useGame.getState().persist();
+    return;
+  }
+  useGame.setState({
+    character: c,
+    dummies: applyDummy(s.dummies, nextFoe),
+    meet: { ...s.meet, turn: "foe", steps: s.meet.steps + 1, firstDone: true },
+    log: pushLog(s.log, `Ударил ${foe.name}: −${hit.dmg} ран. Ждёт ответа.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: foe.x, y: foe.y, text: bits.join(" · "), tone: "ok" as const }].slice(-10),
+  });
+  useGame.getState().persist();
+  window.setTimeout(() => dummyAnswer(), 420);
+}
+
+function dummyAnswer() {
+  const s = useGame.getState();
+  if (!s.meet || s.meet.turn !== "foe") return;
+  const foe = foeOf(s);
+  if (!foe || foe.life !== "alive") {
+    closeMeet();
+    return;
+  }
+  const c0 = s.character;
+  if (chebyshev(c0.x, c0.y, foe.x, foe.y) > 1) {
+    closeMeet({ log: pushLog(s.log, "Встреча закрылась.") });
+    return;
+  }
+  const scared = foe.hp < 22 || foe.energy < 2;
+  if (scared && Math.random() < 0.55) {
+    const tile = tileAt(s.world, foe.x, foe.y);
+    if (tile && foe.inventory) dumpAllOn(tile, { ...emptyTheInv(c0.inventory), ...foe.inventory }, 0);
+    const home = dummyHome(s.world, foe.id);
+    const nextFoe: Dummy = {
+      ...foe,
+      inventory: {},
+      energy: Math.max(0, foe.energy - 1),
+      x: home?.x ?? foe.x,
+      y: home?.y ?? foe.y,
+    };
+    useGame.setState({
+      dummies: applyDummy(s.dummies, nextFoe),
+      meet: null,
+      world: { ...s.world, tiles: s.world.tiles },
+      log: pushLog(s.log, `${foe.name} отступил. Ноша на клетке.`),
+      hint: { text: `${foe.name} отступил.`, tone: "ok" },
+    });
+    useGame.getState().persist();
+    return;
+  }
+  const flags = yardFlags(s, foe.x, foe.y, foe.id);
+  const hit = strikeDmg(foe, {
+    night: s.phase === "night",
+    first: !s.meet.firstDone,
+    winter: s.season === "winter",
+    roof: isRoof(flags.tile),
+    ownYard: flags.ownYard,
+    foreignYard: flags.foreignYard,
+    atYard: flags.atYard,
+    foeStealth: c0.skills.stealth ?? 0,
+  });
+  const hp = Math.max(0, c0.hp - hit.dmg);
+  let c: Character = { ...c0, hp, energy: Math.max(0, c0.energy) };
+  const nextFoe: Dummy = { ...foe, energy: Math.max(0, foe.energy - 2) };
+  if (hp <= 0) {
+    dumpCargo(s.world, c.x, c.y, c.inventory, 0);
+    c = {
+      ...c,
+      inventory: emptyTheInv(c.inventory),
+      hand: null,
+      hp: 0,
+      life: "down",
+      downAt: Date.now(),
+      busy: null,
+      resting: false,
+    };
+    useGame.setState({
+      character: c,
+      dummies: applyDummy(s.dummies, nextFoe),
+      meet: null,
+      travel: null,
+      preview: null,
+      world: { ...s.world, tiles: s.world.tiles },
+      log: pushLog(s.log, `Упал от удара ${foe.name}. Ноша на клетке. Ползи к шалашу.`),
+      hint: { text: "Упал. Не погиб — ползи под крышу.", tone: "bad" },
+      floaters: [...s.floaters, { id: ++floaterSeq, x: c.x, y: c.y, text: `−${hit.dmg}`, tone: "bad" as const }].slice(-10),
+    });
+    useGame.getState().persist();
+    return;
+  }
+  useGame.setState({
+    character: c,
+    dummies: applyDummy(s.dummies, nextFoe),
+    meet: { ...s.meet, turn: "you", firstDone: true },
+    log: pushLog(s.log, `${foe.name} ударил: −${hit.dmg} ран.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: c.x, y: c.y, text: `−${hit.dmg}`, tone: "bad" as const }].slice(-10),
+  });
+  useGame.getState().persist();
+}
+
+function stepAwayCell(s: GameState, fromX: number, fromY: number, foeX: number, foeY: number) {
+  const opts: { x: number; y: number; d: number }[] = [];
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const x = fromX + dx;
+      const y = fromY + dy;
+      const t = tileAt(s.world, x, y);
+      if (!t || !isWalkable(t, s.world)) continue;
+      if (!canCrossDiag(s.world, fromX, fromY, x, y, "you")) continue;
+      const d = chebyshev(x, y, foeX, foeY);
+      if (d < chebyshev(fromX, fromY, foeX, foeY)) continue;
+      opts.push({ x, y, d });
+    }
+  }
+  opts.sort((a, b) => b.d - a.d);
+  return opts[0] ?? null;
+}
+
+function meetLeave() {
+  const s = useGame.getState();
+  if (!s.meet || s.meet.turn !== "you") return;
+  const foe = foeOf(s);
+  if (!foe) {
+    closeMeet();
+    return;
+  }
+  const c0 = { ...s.character, energy: Math.max(0, s.character.energy - 1) };
+  if (s.phase === "night" && Math.random() > leaveChance(true, c0.skills.stealth ?? 0)) {
+    useGame.setState({
+      character: c0,
+      meet: { ...s.meet, turn: "foe", steps: s.meet.steps + 1, firstDone: true },
+      log: pushLog(s.log, "Не оторвался. Ночь держит."),
+      hint: { text: "Не оторвался.", tone: "bad" },
+    });
+    useGame.getState().persist();
+    window.setTimeout(() => dummyAnswer(), 420);
+    return;
+  }
+  const step = stepAwayCell(s, c0.x, c0.y, foe.x, foe.y);
+  if (!step) {
+    speak("Отойти некуда.", c0.x, c0.y, "некуда", "bad");
+    return;
+  }
+  const c = { ...c0, x: step.x, y: step.y, px: step.x, py: step.y };
+  viewPos.x = step.x;
+  viewPos.y = step.y;
+  const far = chebyshev(step.x, step.y, foe.x, foe.y) >= 2;
+  useGame.setState({
+    character: c,
+    meet: far ? null : { ...s.meet, turn: "foe", steps: s.meet.steps + 1, firstDone: true },
+    inspect: far ? null : { x: foe.x, y: foe.y },
+    log: pushLog(s.log, far ? "Отошёл. Встреча закрылась." : "Шаг назад. Ещё рядом."),
+    hint: { text: far ? "Встреча закрылась." : "Ещё рядом.", tone: "ok" },
+  });
+  useGame.getState().persist();
+  if (!far) window.setTimeout(() => dummyAnswer(), 420);
+}
+
+function meetDrop() {
+  const s = useGame.getState();
+  if (!s.meet || s.meet.turn !== "you") return;
+  const foe = foeOf(s);
+  if (!foe) {
+    closeMeet();
+    return;
+  }
+  const tile = tileAt(s.world, s.character.x, s.character.y);
+  if (!tile) return;
+  const c = dumpBagKeepHand(s.character, tile);
+  useGame.setState({
+    character: c,
+    meet: null,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, "Кинул ношу. Рука и золото при себе. Встреча закрылась."),
+    hint: { text: "Ноша на клетке. Встреча закрылась.", tone: "ok" },
+  });
+  useGame.getState().persist();
+}
+
+function meetYield() {
+  const s = useGame.getState();
+  if (!s.meet || s.meet.turn !== "you") return;
+  const foe = foeOf(s);
+  if (!foe) {
+    closeMeet();
+    return;
+  }
+  const tile = tileAt(s.world, s.character.x, s.character.y);
+  if (!tile) return;
+  let c = dumpBagKeepHand(s.character, tile);
+  const step = stepAwayCell(s, c.x, c.y, foe.x, foe.y);
+  if (step) {
+    c = { ...c, x: step.x, y: step.y, px: step.x, py: step.y };
+    viewPos.x = step.x;
+    viewPos.y = step.y;
+  }
+  useGame.setState({
+    character: c,
+    meet: null,
+    world: { ...s.world, tiles: s.world.tiles },
+    inspect: null,
+    log: pushLog(s.log, "Сдался. Ноша на клетке. Живой."),
+    hint: { text: "Сдался. Не упал.", tone: "ok" },
+  });
+  useGame.getState().persist();
+}
+
+function meetTalk() {
+  const s = useGame.getState();
+  if (!s.meet || s.meet.turn !== "you") return;
+  const foe = foeOf(s);
+  if (!foe) {
+    closeMeet();
+    return;
+  }
+  if (s.meet.spoke) {
+    speak("Уже говорил.", s.character.x, s.character.y, "уже", "ok");
+    return;
+  }
+  const friend = s.character.pacts[foe.id] === "friend";
+  if ((s.character.skills.speech ?? 0) < 3 && !friend) {
+    speak("Говорить — красноречие 3 или друг.", s.character.x, s.character.y, "молчит", "bad");
+    return;
+  }
+  const you = youFighter(s.character);
+  const ok = Math.random() < talkChance(you, s.character.profession === "trader") || friend;
+  if (!ok) {
+    useGame.setState({
+      meet: { ...s.meet, turn: "foe", spoke: true, firstDone: true, steps: s.meet.steps + 1 },
+      log: pushLog(s.log, `${foe.name} не отдал. Молчание.`),
+      hint: { text: "Не вышло.", tone: "bad" },
+    });
+    useGame.getState().persist();
+    window.setTimeout(() => dummyAnswer(), 420);
+    return;
+  }
+  const tile = tileAt(s.world, foe.x, foe.y);
+  if (tile) dumpAllOn(tile, { ...emptyTheInv(s.character.inventory), ...foe.inventory }, 0);
+  const c = bumpSkill(s.character, "speech", 0.2);
+  useGame.setState({
+    character: c,
+    dummies: applyDummy(s.dummies, { ...foe, inventory: {} }),
+    meet: null,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, `${foe.name} отдал ношу без крови.`),
+    hint: { text: "Отдал. Встреча закрылась.", tone: "ok" },
+  });
+  useGame.getState().persist();
+}
+
 
 

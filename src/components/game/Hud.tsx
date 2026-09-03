@@ -151,7 +151,8 @@ export function Hud() {
   return (
     <>
       <Floaters />
-      {!bag && !help && <TileBubble />}
+      {g.meet && <MeetSheet />}
+      {!g.meet && !bag && !help && <TileBubble />}
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-50 px-2 pt-[max(0.4rem,env(safe-area-inset-top))]">
         <div className="pointer-events-auto mx-auto flex max-w-lg items-stretch gap-1">
@@ -797,6 +798,69 @@ export function Hud() {
         </div>
       )}
     </>
+  );
+}
+
+function MeetSheet() {
+  const g = useGame();
+  const meet = g.meet;
+  if (!meet) return null;
+  const foe = g.dummies.find((d) => d.id === meet.foeId);
+  if (!foe) return null;
+  const you = g.character;
+  const mine = meet.turn === "you";
+  const friend = you.pacts[foe.id] === "friend";
+  const canTalk = !meet.spoke && ((you.skills.speech ?? 0) >= 3 || friend);
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[42]">
+      <div
+        className="pointer-events-auto absolute inset-x-0 bottom-[var(--hud-dock)] mx-auto max-w-lg overflow-y-auto rounded-t-[24px] border border-border bg-panel px-4 pb-4 pt-3 shadow-panel"
+        style={{ maxHeight: "min(62vh, 28rem)" }}
+      >
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" />
+        <p className="font-display text-2xl leading-none">Встреча</p>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          {foe.name}
+          {friend ? " · друг" : you.pacts[foe.id] === "feud" ? " · вражда" : ""}
+          {foe.dummy ? " · манекен хутора" : ""}
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+          <p>
+            Ты · раны <span className="font-display text-lg tabular-nums">{Math.round(you.hp)}</span>
+          </p>
+          <p>
+            {foe.name} · <span className="font-display text-lg tabular-nums">{Math.round(foe.hp)}</span>
+          </p>
+        </div>
+        <p className="mt-1 text-[12px] text-muted-foreground">
+          {mine ? "Твой шаг." : "Ждёт ответа."} Сила {Math.floor(you.energy)} · в руке{" "}
+          {you.hand ? ITEM_LABEL[you.hand] : "пусто"}
+          {foe.hand ? ` · у него ${ITEM_LABEL[foe.hand]}` : " · у него пусто"}
+        </p>
+        <div className="mt-3 space-y-2">
+          <Button className="h-12 w-full" disabled={!mine} onClick={() => g.meetHit()}>
+            Ударить · −2 силы
+          </Button>
+          <Button className="h-12 w-full" variant="secondary" disabled={!mine} onClick={() => g.meetLeave()}>
+            Отойти
+          </Button>
+          <Button className="h-12 w-full" variant="secondary" disabled={!mine} onClick={() => g.meetDrop()}>
+            Кинуть ношу
+          </Button>
+          <Button className="h-12 w-full" variant="secondary" disabled={!mine} onClick={() => g.meetYield()}>
+            Сдаться
+          </Button>
+          {canTalk && (
+            <Button className="h-12 w-full" variant="secondary" disabled={!mine} onClick={() => g.meetTalk()}>
+              Говорить · ноша без удара
+            </Button>
+          )}
+        </div>
+        <p className="mt-3 text-[12px] leading-snug text-muted-foreground">
+          Упал — не погиб. Закон после удара, не вместо. Добивать лежачего нельзя.
+        </p>
+      </div>
+    </div>
   );
 }
 

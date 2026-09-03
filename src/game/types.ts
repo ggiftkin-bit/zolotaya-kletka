@@ -295,6 +295,34 @@ export type OtherPawn = {
   y: number;
 };
 
+export type Meet = {
+  foeId: string;
+  turn: "you" | "foe";
+  steps: number;
+  spoke: boolean;
+  firstDone: boolean;
+};
+
+export type Dummy = {
+  id: string;
+  name: string;
+  color: string;
+  x: number;
+  y: number;
+  hp: number;
+  energy: number;
+  satiety: number;
+  warmth: number;
+  water: number;
+  hand: ItemId | null;
+  profession: Profession;
+  skills: Skills;
+  life: "alive" | "down";
+  dummy: true;
+  downAt: number;
+  inventory: Partial<Inventory>;
+};
+
 export type GameState = {
   world: World;
   character: Character;
@@ -329,4 +357,8 @@ export type GameState = {
   bookAt: string;
   bookStatus: "idle" | "loading" | "ready" | "offline";
   others: OtherPawn[];
+  /** Встреча двух фишек. Нет — листа боя нет. */
+  meet: Meet | null;
+  /** Манекены хуторов. Пока нет второго человека. */
+  dummies: Dummy[];
 };

@@ -276,6 +276,8 @@ export function saveGame(state: GameState): boolean {
     travel: state.travel,
     clockAt: state.clockAt ?? Date.now(),
     log: (state.log ?? []).slice(0, 16),
+    meet: state.meet ?? null,
+    dummies: state.dummies ?? [],
   };
   try {
     localStorage.setItem(KEY, JSON.stringify(blob));
