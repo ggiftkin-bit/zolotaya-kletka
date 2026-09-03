@@ -15,6 +15,7 @@ export const ITEMS: ItemId[] = [
   "clay",
   "crystal",
   "axe",
+  "pick",
   "rope",
   "bucket",
   "spear",
@@ -37,6 +38,7 @@ export const ITEM_WEIGHT: Record<ItemId, number> = {
   food: 0.5,
   fish: 0.4,
   axe: 2,
+  pick: 2.4,
   herb: 0.2,
   clay: 1.5,
   crystal: 0.8,
@@ -100,6 +102,7 @@ export const ITEM_LABEL: Record<ItemId, string> = {
   food: "еда",
   fish: "рыба",
   axe: "топор",
+  pick: "кирка",
   herb: "трава",
   clay: "глина",
   crystal: "кристалл",
@@ -166,6 +169,7 @@ export const GATHER_YIELD: Record<ItemId, number> = {
   clay: 2,
   crystal: 1,
   axe: 0,
+  pick: 0,
   rope: 0,
   bucket: 0,
   spear: 0,
@@ -235,6 +239,7 @@ export const BUILD_OK: Record<Exclude<BuildingKind, "none">, Biome[]> = {
   jail: ["plains", "fertile", "forest"],
   stakes: ["plains", "fertile", "forest", "mountain", "swamp"],
   moat: ["plains", "fertile", "forest", "swamp"],
+  net: ["plains", "fertile", "forest", "swamp", "ford"],
 };
 
 /** Ноша: только то, что есть, три квадрата в ряд. */
@@ -258,6 +263,7 @@ export const BAG_CELLS: ItemId[] = [
   "bar",
   "tonic",
   "axe",
+  "pick",
 ];
 
 

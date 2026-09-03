@@ -1,6 +1,6 @@
 import type { ItemId, Profession, Tile } from "./types";
 
-export type CraftKind = "coal" | "plank" | "bar" | "axe" | "bread" | "smoked" | "tonic" | "rope" | "bucket" | "spear" | "shovel" | "rod" | "wheel" | "lock";
+export type CraftKind = "coal" | "plank" | "bar" | "axe" | "pick" | "bread" | "smoked" | "tonic" | "rope" | "bucket" | "spear" | "shovel" | "rod" | "wheel" | "lock";
 
 export type BenchId = "home" | "bench" | "forge" | "oven" | "smoke" | "herbs" | "coalpit" | "workshop";
 
@@ -22,6 +22,7 @@ export const CRAFTS: CraftDef[] = [
   { id: "coal", out: "coal", n: 2, need: { wood: 3 }, who: "lumberjack", bench: "coalpit", energy: 1, label: "уголь", hint: "3 дерева → 2 угля · дровосек · дровница" },
   { id: "bar", out: "bar", n: 1, need: { ore: 1, coal: 1 }, who: "smith", bench: "forge", energy: 2, label: "слиток", hint: "руда + уголь · кузнец · горн. Сдать 10 золота" },
   { id: "axe", out: "axe", n: 1, need: { bar: 1, wood: 1 }, who: "smith", bench: "forge", energy: 2, label: "топор", hint: "слиток + дерево · кузнец" },
+  { id: "pick", out: "pick", n: 1, need: { bar: 1, wood: 1 }, who: "smith", bench: "forge", energy: 2, label: "кирка", hint: "слиток + дерево · кузнец. Камень и руда" },
   { id: "lock", out: "lock", n: 1, need: { bar: 1 }, who: "smith", bench: "forge", energy: 2, label: "замок", hint: "слиток · кузнец · горн. На калитку или сундук" },
   { id: "bread", out: "bread", n: 1, need: { food: 2 }, who: "baker", bench: "oven", energy: 1, label: "хлеб", hint: "2 еды · пекарь · печь. Сдать 6 золота" },
   { id: "smoked", out: "smoked", n: 1, need: { fish: 1 }, who: "fisher", bench: "smoke", energy: 1, label: "копчёное", hint: "рыба · рыбак · коптильня. Сдать 6 золота" },
@@ -41,7 +42,7 @@ export const PROF_BLURB: Record<Profession, string> = {
   farmer: "Поле и загон. Верёвку дома сколотит любой.",
   baker: "Печь: 2 еды → хлеб. Сдать 6 золота.",
   carpenter: "Верстак: доска, колесо. Телега — 2 колеса, 4 дерева и слиток. В сумку не кладётся.",
-  smith: "Горн: руда+уголь → слиток, топор, замок. Замок — на калитку или сундук. Свой открывается сам.",
+  smith: "Горн: руда+уголь → слиток, топор, кирка, замок. Замок — на калитку или сундук. Свой открывается сам.",
   trader: "Прилавок у калитки. Курс как у тракта, сдача на 1 хуже.",
   healer: "Стол трав: 3 травы → настой. Сдать 8 золота.",
   hireling: "Башня. Вахта. Копьё дома сколотит любой.",

@@ -36,6 +36,7 @@ const BUILDINGS: Exclude<BuildingKind, "none" | "workshop" | "shop" | "board" | 
   "adit",
   "stakes",
   "moat",
+  "net",
 ];
 
 type Pane = "pick" | "place" | "gather" | "build" | "yard";
@@ -540,6 +541,9 @@ function PlacePane({ tile, here }: { tile: Tile; here: boolean; near: boolean })
   if (tile.building === "board") return <BoardBody />;
   if (tile.building === "mine" || tile.building === "adit") return <MineBody tile={tile} />;
   if (tile.building === "tower") return <TowerBody tile={tile} />;
+  if (tile.building === "net") {
+    return <p className="mt-4 text-sm text-muted-foreground">Сеть. Стой на клетке и лови. Удочка не нужна.</p>;
+  }
   if (tile.building === "jail") {
     return <p className="mt-4 text-sm text-muted-foreground">Яма. Сажают только по закону. Залог 12 золота.</p>;
   }

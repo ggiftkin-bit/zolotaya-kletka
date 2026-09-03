@@ -14,13 +14,29 @@ export type FenceKind = "none" | "wood" | "palisade" | "wall" | "gate";
 
 export type Matter = "wattle" | "wood" | "stone";
 
-export type BusyKind = "hunt" | "catch" | "fish";
+export type BusyKind =
+  | "hunt"
+  | "catch"
+  | "fish"
+  | "chop"
+  | "mine"
+  | "forage"
+  | "build"
+  | "craft"
+  | "dig"
+  | "fill"
+  | "road";
 
 export type Busy = {
   kind: BusyKind;
   x: number;
   y: number;
   until: number;
+  item?: ItemId;
+  build?: BuildingKind;
+  craft?: string;
+  road?: "dirt" | "stone" | "bridge";
+  hired?: boolean;
 };
 
 export type Weather = "clear" | "rain" | "snow";
@@ -62,7 +78,8 @@ export type BuildingKind =
   | "shed"
   | "jail"
   | "stakes"
-  | "moat";
+  | "moat"
+  | "net";
 
 export type Profession =
   | "wanderer"
@@ -98,6 +115,7 @@ export type ItemId =
   | "food"
   | "fish"
   | "axe"
+  | "pick"
   | "herb"
   | "clay"
   | "crystal"
@@ -122,6 +140,8 @@ export type Herd = {
   count: number;
   wild: boolean;
   hunger: number;
+  /** Дни коровы во дворе. Дикие без срока. */
+  age?: number;
 };
 
 export type Tile = {
@@ -243,6 +263,8 @@ export type Character = {
   stillUntil: number;
   resting: boolean;
   busy: Busy | null;
+  /** Остаток ударов у снасти в руке/стопе. Старый сейв = полный запас. */
+  wear: Partial<Record<"axe" | "pick" | "spear" | "shovel", number>>;
   pacts: Record<string, "friend" | "feud">;
   village: string;
 };

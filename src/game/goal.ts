@@ -19,7 +19,7 @@ export const BUILD_HINT: Record<Exclude<BuildingKind, "none">, string> = {
   mine: "руда",
   tower: "смотрит ночь, не стреляет",
   bench: "доска · плотник",
-  forge: "слиток, топор, замок · кузнец",
+  forge: "слиток, топор, кирка, замок · кузнец",
   oven: "хлеб · пекарь",
   smoke: "копчёное · рыбак",
   herbs: "настой · целитель",
@@ -30,6 +30,7 @@ export const BUILD_HINT: Record<Exclude<BuildingKind, "none">, string> = {
   jail: "яма. Без закона не сажают",
   stakes: "колья снаружи тына",
   moat: "ров как река. Нужен мост",
+  net: "сеть на берегу. Ловят без удочки",
 };
 
 export function nextGoal(s: GameState): string {

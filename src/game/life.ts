@@ -8,7 +8,7 @@ export const ANIMAL_LABEL: Record<AnimalKind, string> = {
   cow: "корова",
 };
 
-export const TOOL_ITEMS = ["axe", "rope", "bucket", "spear", "shovel", "rod"] as const;
+export const TOOL_ITEMS = ["axe", "pick", "rope", "bucket", "spear", "shovel", "rod"] as const;
 
 export const COW_PRICE = 32;
 export const HORSE_PRICE = 40;
@@ -65,10 +65,20 @@ export function tickDayLife(world: World, season: GameState["season"]): string[]
       herd.hunger += 1;
     }
     if (herd.kind === "cow" && t.building === "pen") {
+      herd.age = (herd.age ?? 0) + 1;
+      if (herd.age >= 36) {
+        herd.count = 0;
+        t.herd = null;
+        notes.push("корова пала");
+        continue;
+      }
       if (feed && wet) {
-        const milk = season === "winter" ? 1 : 2;
-        chest.food += milk;
-        if (notes.length < 2) notes.push(`Коровы дали молоко (+${milk} еды).`);
+        const old = herd.age >= 24;
+        const milk = old ? (season === "winter" ? 0 : 1) : season === "winter" ? 1 : 2;
+        if (milk > 0) {
+          chest.food += milk;
+          if (notes.length < 2) notes.push(old ? `Корова слабее. Молока +${milk}.` : `Коровы дали молоко (+${milk} еды).`);
+        } else if (notes.length < 2) notes.push("Корова стара. Зимой молока нет.");
       } else if (!wet && feed) {
         if (notes.length < 2) notes.push("Загон без воды — молока нет. Колодец, река или ведро.");
       }

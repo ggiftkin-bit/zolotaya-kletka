@@ -8,6 +8,7 @@ export const ENERGY_SLEEP_MS = 8_000;
 export const BOOST_GOLD = 6;
 export const BOOST_ENERGY = 4;
 export const SKIP_GOLD = 8;
+export const HIRE_GOLD = 12;
 export const JAIL_MS = 80_000;
 export const BAIL_GOLD = 12;
 export const DOWN_MS = 90_000;

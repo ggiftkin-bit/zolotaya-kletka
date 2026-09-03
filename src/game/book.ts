@@ -71,6 +71,7 @@ export type PawnBody = {
   stillUntil: number;
   resting: boolean;
   busy: Busy | null;
+  wear: Character["wear"];
   pacts: Record<string, "friend" | "feud">;
   village: string;
 };
@@ -214,6 +215,7 @@ function emptyInv(): Inventory {
     food: 0,
     fish: 0,
     axe: 0,
+    pick: 0,
     herb: 0,
     clay: 0,
     crystal: 0,
@@ -280,6 +282,7 @@ export function packPawn(c: Character): PawnBody {
     stillUntil: c.stillUntil,
     resting: c.resting,
     busy: c.busy,
+    wear: c.wear ?? {},
     pacts: c.pacts,
     village: c.village,
   };
@@ -322,6 +325,7 @@ export function unpackPawn(row: PawnRow): Character {
     stillUntil: body.stillUntil ?? 0,
     resting: !!body.resting,
     busy: body.busy ?? null,
+    wear: body.wear ?? {},
     pacts: body.pacts ?? {},
     village: body.village ?? "",
   };

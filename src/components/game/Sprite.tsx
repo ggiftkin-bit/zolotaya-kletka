@@ -60,6 +60,7 @@ export const ITEM_ICO: Record<ItemId, number> = {
   food: ICO.food,
   fish: ICO.fish,
   axe: ICO.axe,
+  pick: ICO.axe,
   herb: 0,
   clay: 1,
   crystal: 2,
@@ -105,6 +106,7 @@ export function ItemPic({ id, className }: { id: ItemId; className?: string }) {
     return <GearPic i={GEAR_ICO[id]} className={className} alt="" />;
   }
   if (id === "shovel") return <ExtraIco i={3} className={className} alt="" />;
+  if (id === "pick") return <Ico i={ICO.axe} className={className} alt="" />;
   if (id === "rod") {
     return (
       <span

@@ -3,10 +3,10 @@ import { BAG_CELLS, CAPACITY, ITEM_LABEL, ITEMS, TICK_SEC, TICKS_PER_DAY, TRANSP
 import { BUILDING_LABEL, PROFESSION_LABEL, SKILL_LABEL, goldTxt } from "@/game/economy";
 import { PROF_BLURB } from "@/game/craft";
 import { nextGoal, personLevel, skillHow } from "@/game/goal";
-import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, SKIP_GOLD, deathFee, formatWait, nextEnergyIn } from "@/game/pace";
+import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, HIRE_GOLD, SKIP_GOLD, deathFee, formatWait, nextEnergyIn } from "@/game/pace";
 import { isHeld, isJailed, isStill, isYours } from "@/game/crime";
 import { TOOL_ITEMS } from "@/game/life";
-import { BUSY_LABEL, isRoof } from "@/game/work";
+import { BUSY_LABEL, isRoof, remainingWear, type WearId } from "@/game/work";
 import { useGame } from "@/game/store";
 import { cargoWeight } from "@/game/travel";
 import type { BuildingKind, ItemId, Profession, Skill, ToolMode, Weather } from "@/game/types";
@@ -274,6 +274,13 @@ export function Hud() {
                     {BUSY_LABEL[busy.kind]} {formatWait(busy.until - now)}
                   </span>
                   <span className="font-display">ускорить {goldTxt(SKIP_GOLD)}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => g.hireBusy()}
+                  className="h-11 shrink-0 rounded-[16px] border border-border bg-panel px-3 text-[13px] shadow-panel"
+                >
+                  руки {goldTxt(HIRE_GOLD)}
                 </button>
                 <button
                   type="button"
@@ -596,7 +603,7 @@ export function Hud() {
             {tab === "tools" && (
               <div className="mt-3 space-y-2">
                 <p className="text-[12px] text-muted-foreground">
-                  Карман снасти. Топор — дрова. Копьё — охота. Удочка — рыба. Верёвка — лошадь. Ведро — вода вдаль от реки. Лопата — яма.
+                  Карман снасти. Топор — дрова. Кирка — камень и руда. Копьё — охота. Удочка — рыба. Верёвка — лошадь. Ведро — вода вдаль от реки. Лопата — яма. Снасть ломается.
                 </p>
                 <p className="text-sm">
                   В руке:{" "}
@@ -610,6 +617,9 @@ export function Hud() {
                     <div className="min-w-0 flex-1">
                       <p className="text-[11px] text-muted-foreground">{ITEM_LABEL[k]}</p>
                       <p className="font-display text-lg leading-none tabular-nums">{inv[k]}</p>
+                      {(k === "axe" || k === "pick" || k === "spear" || k === "shovel") && inv[k] > 0 && (
+                        <p className="text-[11px] text-muted-foreground">ещё {remainingWear(g.character, k as WearId)}</p>
+                      )}
                     </div>
                     <Button
                       size="sm"

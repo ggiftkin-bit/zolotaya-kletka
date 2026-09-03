@@ -46,7 +46,7 @@ import {
   upgradeYard,
   yardWoodCost,
 } from "./fence";
-import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, SKIP_GOLD, deathFee, energyPeriod, formatWait, splitBodyWater } from "./pace";
+import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, SKIP_GOLD, deathFee, energyPeriod, formatWait, splitBodyWater } from "./pace";
 import { applyCatch, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, ownerOf, stealChance } from "./crime";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
 import { clearGame, loadGame, saveGame } from "./save";
@@ -61,15 +61,20 @@ import {
   CLAD_STONE,
   MATTER_HP,
   MATTER_LABEL,
+  TOOL_BREAK,
   applyFenceBurn,
+  buildMs,
   burnableFence,
   canBurnMatter,
   canFishOn,
+  craftMs,
   defaultMatter,
   isRoof,
   makeBusy,
   stoneFence,
+  useTool,
   workMs,
+  type WearId,
 } from "./work";
 import type {
   AnimalKind,
@@ -102,6 +107,7 @@ function emptyChest(): Inventory {
     food: 0,
     fish: 0,
     axe: 0,
+    pick: 0,
     herb: 0,
     clay: 0,
     crystal: 0,
@@ -233,6 +239,7 @@ function makeCharacter(name: string, color: string): Character {
     stillUntil: 0,
     resting: false,
     busy: null,
+    wear: {},
     pacts: {},
     village: "",
   };
@@ -292,8 +299,8 @@ function walkTo(x: number, y: number) {
     speak("Силы нет. Зайди в шалаш и нажми Спать — или кружка сверху.", c.x, c.y, "нет силы", "bad");
     return;
   }
-  if (isBusy(c)) {
-    speak(`Занят: ${BUSY_LABEL[c.busy!.kind]}.`, c.x, c.y, BUSY_LABEL[c.busy!.kind], "bad");
+  if (isBusy(c) && !c.busy?.hired) {
+    speak(`Занят: ${BUSY_LABEL[c.busy!.kind]}. Жди, брось или найми руки.`, c.x, c.y, BUSY_LABEL[c.busy!.kind], "bad");
     return;
   }
   const path = findPath(s.world, c.x, c.y, x, y, ctxOf(s));
@@ -337,13 +344,40 @@ function busyBlock(): boolean {
   if (!isBusy(s.character)) return false;
   const b = s.character.busy!;
   speak(
-    `Занят: ${BUSY_LABEL[b.kind]}. Жди или брось сверху.`,
+    `Занят: ${BUSY_LABEL[b.kind]}. Жди, брось или найми руки.`,
     s.character.x,
     s.character.y,
     BUSY_LABEL[b.kind],
     "bad",
   );
   return true;
+}
+
+function startBusy(c: Character, busy: NonNullable<Character["busy"]>, line: string, x: number, y: number, short: string) {
+  const s = useGame.getState();
+  useGame.setState({
+    character: { ...c, busy, resting: false },
+    inspect: null,
+    log: pushLog(s.log, line),
+    floaters: [...s.floaters, { id: ++floaterSeq, x, y, text: short, tone: "ok" as const }].slice(-10),
+  });
+  scheduleNotice("busy", "Дело готово", BUSY_LABEL[busy.kind], busy.until);
+  useGame.getState().persist();
+}
+
+function takeWear(c: Character, id: WearId | null): { c: Character; broke: boolean } {
+  if (!id) return { c, broke: false };
+  const r = useTool(c, id);
+  if (r.missing) return { c, broke: false };
+  if (r.broke) {
+    const s = useGame.getState();
+    useGame.setState({
+      log: pushLog(s.log, TOOL_BREAK[id]),
+      hint: { text: TOOL_BREAK[id], tone: "bad" },
+      floaters: [...s.floaters, { id: ++floaterSeq, x: c.x, y: c.y, text: TOOL_BREAK[id], tone: "bad" as const }].slice(-10),
+    });
+  }
+  return { c: r.c, broke: r.broke };
 }
 
 function bumpSkill(c: Character, skill: Skill, amount: number): Character {
@@ -437,6 +471,7 @@ type Actions = {
   fishHere: () => void;
   cancelBusy: () => void;
   skipBusy: () => void;
+  hireBusy: () => void;
   burnHere: () => void;
   excavateHere: () => void;
   fillPit: () => void;
@@ -687,16 +722,6 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       const hold = heldLine(s.character) ?? "Не ходит.";
       const short = s.character.life === "dead" ? "погиб" : "в яме";
       speak(hold, s.character.x, s.character.y, short, "bad");
-      return;
-    }
-    if (isBusy(s.character) && !(s.character.x === x && s.character.y === y)) {
-      speak(
-        `Занят: ${BUSY_LABEL[s.character.busy!.kind]}. Жди или брось сверху.`,
-        s.character.x,
-        s.character.y,
-        BUSY_LABEL[s.character.busy!.kind],
-        "bad",
-      );
       return;
     }
     const tile = tileAt(s.world, x, y);
@@ -1038,6 +1063,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   fishHere: () => fishHere(),
   cancelBusy: () => cancelBusy(),
   skipBusy: () => skipBusy(),
+  hireBusy: () => hireBusy(),
   burnHere: () => burnHere(),
   excavateHere: () => excavateHere(),
   fillPit: () => fillPitHere(),
@@ -1432,36 +1458,28 @@ function gatherHere() {
     speak("Нет сил. Жди или кружка за золото сверху.", here.x, here.y, "нет сил", "bad");
     return;
   }
-  let got = Math.min(GATHER_YIELD[item] || 1, tile.amount);
-  const match = PROFESSION_BIOME[s.character.profession]?.includes(tile.biome);
-  if (match) got = Math.min(tile.amount, got + 1);
-  if (s.character.hand === "axe" && item === "wood") got = Math.min(tile.amount, got + 1);
-  if (s.phase === "night") got = Math.max(1, Math.floor(got * 0.5));
-  tile.amount -= got;
-  if (tile.amount <= 0) markDepleted(tile);
-  else if (item === "herb") tile.regen = Math.max(tile.regen ?? 0, REGROW_WAIT.herb ?? 2);
-  const inv = { ...s.character.inventory };
-  inv[item] += got;
-  let c = {
-    ...s.character,
-    inventory: inv,
-    energy: Math.max(0, s.character.energy - 1),
-  };
-  c = bumpSkill(c, match ? PROF_SKILL[c.profession] : "survival", 0.12);
-  const phrase =
-    item === "herb"
-      ? `Сорвал траву ×${got}. Отрастёт.`
-      : `Собрал ${got} ${ITEM_LABEL[item]}. Ноша ${cargoWeight(inv).toFixed(1)} кг.`;
-  useGame.setState({
-    character: c,
-    log: pushLog(s.log, phrase),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: here.x, y: here.y, text: `+${got} ${ITEM_LABEL[item]}`, tone: "ok" as const }].slice(
-      -10,
-    ),
-    world: { ...s.world, tiles: s.world.tiles },
-  });
-  noteDeed(item === "wood" ? "chop" : "gather");
-  useGame.getState().persist();
+  let kind: "chop" | "mine" | "forage" = "forage";
+  if (item === "wood") kind = "chop";
+  else if (item === "stone" || item === "ore" || item === "crystal") kind = "mine";
+  let c = { ...s.character, energy: Math.max(0, s.character.energy - 1) };
+  let tool: WearId | null = null;
+  if (kind === "chop" && c.hand === "axe") tool = "axe";
+  if (kind === "mine" && c.hand === "pick") tool = "pick";
+  const worn = takeWear(c, tool);
+  c = worn.c;
+  const ms = workMs(kind, null, c);
+  startBusy(
+    c,
+    makeBusy(kind, here.x, here.y, Date.now() + ms, { item }),
+    kind === "chop"
+      ? `Рублю · ${Math.ceil(ms / 1000)} с. Топор быстрее.`
+      : kind === "mine"
+        ? `Долблю · ${Math.ceil(ms / 1000)} с. Кирка быстрее.`
+        : `Сбираю · ${Math.ceil(ms / 1000)} с.`,
+    here.x,
+    here.y,
+    BUSY_LABEL[kind],
+  );
 }
 
 function plotTap(x: number, y: number) {
@@ -1976,6 +1994,7 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
     speak("В пути нельзя строить.", x, y, "в пути", "bad");
     return;
   }
+  if (busyBlock()) return;
   if (Math.max(Math.abs(c.x - x), Math.abs(c.y - y)) > 1) {
     speak("Строят на соседней клетке.", x, y, "подойди", "bad");
     return;
@@ -1995,8 +2014,12 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
       speak("Колья и ров — только снаружи тына.", x, y, "не снаружи", "bad");
       return;
     }
-  } else if (!tile.owned && !tile.plot && kind !== "shack" && kind !== "field" && kind !== "pen" && kind !== "well") {
+  } else if (!tile.owned && !tile.plot && kind !== "shack" && kind !== "field" && kind !== "pen" && kind !== "well" && kind !== "net") {
     speak("Шалаш, поле, загон и колодец — без столба. Двор даёт зону под дом и станки.", x, y, "нужен двор", "bad");
+    return;
+  }
+  if (kind === "net" && !nearWater(s.world, x, y) && tile.biome !== "ford") {
+    speak("Сеть — на берегу реки или брода.", x, y, "не берег", "bad");
     return;
   }
   if ((kind === "tower" || kind === "jail" || kind === "shed" || kind === "bench" || kind === "forge" || kind === "oven") && !tile.plot && !tile.owned) {
@@ -2026,28 +2049,20 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
   }
   inv.wood -= cost.wood;
   inv.stone -= cost.stone;
-  tile.building = kind;
-  tile.matter = defaultMatter(kind);
-  tile.hp = MATTER_HP[tile.matter];
-  tile.burned = false;
-  const next = bumpSkill(
-    { ...c, inventory: inv, gold: c.gold - cost.gold, energy: Math.max(0, c.energy - 2) },
-    "build",
-    0.2,
+  if (c.energy < 2) {
+    speak("Нет сил строить.", x, y, "нет сил", "bad");
+    return;
+  }
+  const next = { ...c, inventory: inv, gold: c.gold - cost.gold, energy: Math.max(0, c.energy - 2) };
+  const ms = buildMs(kind, next);
+  startBusy(
+    next,
+    makeBusy("build", x, y, Date.now() + ms, { build: kind }),
+    `Ставлю ${BUILDING_LABEL[kind]} · ${Math.ceil(ms / 1000)} с.`,
+    x,
+    y,
+    "ставлю",
   );
-  const spent: string[] = [];
-  if (cost.wood) spent.push(`−${cost.wood} ${ITEM_LABEL.wood}`);
-  if (cost.stone) spent.push(`−${cost.stone} ${ITEM_LABEL.stone}`);
-  if (cost.gold) spent.push(`−${goldTxt(cost.gold)}`);
-  useGame.setState({
-    character: next,
-    selected: { x, y },
-    log: pushLog(s.log, `Поставил ${BUILDING_LABEL[kind]} на ${x},${y}.`),
-    floaters: [...s.floaters, { id: ++floaterSeq, x, y, text: spent[0] || BUILDING_LABEL[kind], tone: "ok" as const }].slice(-10),
-    world: { ...s.world, tiles: s.world.tiles },
-  });
-  noteDeed("build");
-  useGame.getState().persist();
 }
 
 function buildRoad(x: number, y: number, kind: "dirt" | "stone" | "bridge") {
@@ -2057,6 +2072,7 @@ function buildRoad(x: number, y: number, kind: "dirt" | "stone" | "bridge") {
     speak("В пути нельзя строить.", x, y, "в пути", "bad");
     return;
   }
+  if (busyBlock()) return;
   const dist = Math.max(Math.abs(c.x - x), Math.abs(c.y - y));
   if (dist > 1) {
     speak("Дорогу кладут на соседней клетке.", x, y, "подойди", "bad");
@@ -2081,17 +2097,20 @@ function buildRoad(x: number, y: number, kind: "dirt" | "stone" | "bridge") {
   }
   inv.wood -= cost.wood;
   inv.stone -= cost.stone;
-  tile.road = kind === "bridge" ? "bridge" : kind;
-  const label = kind === "dirt" ? "грунт" : kind === "stone" ? "камень" : "мост";
-  useGame.setState({
-    character: { ...c, inventory: inv, energy: Math.max(0, c.energy - 2) },
-    selected: { x, y },
-    log: pushLog(s.log, `Положил ${label} на ${x},${y}.`),
-    floaters: [...s.floaters, { id: ++floaterSeq, x, y, text: label, tone: "ok" as const }].slice(-10),
-    world: { ...s.world, tiles: s.world.tiles },
-  });
-  noteDeed("road");
-  useGame.getState().persist();
+  if (c.energy < 2) {
+    speak("Нет сил класть путь.", x, y, "нет сил", "bad");
+    return;
+  }
+  const next = { ...c, inventory: inv, energy: Math.max(0, c.energy - 2) };
+  const ms = workMs("road", null, next);
+  startBusy(
+    next,
+    makeBusy("road", x, y, Date.now() + ms, { road: kind }),
+    `Кладу ${kind === "dirt" ? "грунт" : kind === "stone" ? "камень" : "мост"} · ${Math.ceil(ms / 1000)} с.`,
+    x,
+    y,
+    "кладу путь",
+  );
 }
 
 function hereTile() {
@@ -2512,19 +2531,19 @@ function huntHere() {
     return;
   }
   const ms = workMs("hunt", tile.herd.kind, s.character);
-  useGame.setState({
-    character: {
-      ...s.character,
-      energy: Math.max(0, s.character.energy - 1),
-      busy: makeBusy("hunt", tile.x, tile.y, Date.now() + ms),
-      resting: false,
-    },
-    inspect: null,
-    log: pushLog(s.log, `Охота на ${ANIMAL_LABEL[tile.herd.kind]} · ${Math.ceil(ms / 1000)} с. Копьё быстрее.`),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `охота ${Math.ceil(ms / 1000)}с`, tone: "ok" as const }].slice(-10),
-  });
-  scheduleNotice("busy", "Охота кончилась", "Можно забирать добычу.", Date.now() + ms);
-  useGame.getState().persist();
+  let c = { ...s.character, energy: Math.max(0, s.character.energy - 1) };
+  if (c.hand === "spear") {
+    const worn = takeWear(c, "spear");
+    c = worn.c;
+  }
+  startBusy(
+    c,
+    makeBusy("hunt", tile.x, tile.y, Date.now() + ms),
+    `Охота на ${ANIMAL_LABEL[tile.herd.kind]} · ${Math.ceil(ms / 1000)} с. Копьё быстрее.`,
+    tile.x,
+    tile.y,
+    `охота ${Math.ceil(ms / 1000)}с`,
+  );
 }
 
 function catchHorse() {
@@ -2585,8 +2604,8 @@ function fishHere() {
     speak("Ловят на броду или у берега реки. Нужна удочка в руке.", s.character.x, s.character.y, "не берег", "bad");
     return;
   }
-  if (s.character.hand !== "rod") {
-    speak("Нужна удочка в руке. Сколотить дома: 1 дерево и 1 верёвка.", tile.x, tile.y, "нужна удочка", "bad");
+  if (s.character.hand !== "rod" && tile.building !== "net") {
+    speak("Нужна удочка в руке. Сколотить дома: 1 дерево и 1 верёвка. Или поставь сеть на берегу.", tile.x, tile.y, "нужна удочка", "bad");
     return;
   }
   if (s.character.energy < 1) {
@@ -2627,7 +2646,165 @@ function resolveBusy() {
   }
   if (b.kind === "hunt") resolveHunt(s, c0, tile);
   else if (b.kind === "catch") resolveCatch(s, c0, tile);
-  else resolveFish(s, c0, tile);
+  else if (b.kind === "fish") resolveFish(s, c0, tile);
+  else if (b.kind === "chop" || b.kind === "mine" || b.kind === "forage") resolveGather(s, c0, tile, b.item);
+  else if (b.kind === "build") resolveBuild(s, c0, tile, b.build);
+  else if (b.kind === "craft") resolveCraft(s, c0, tile, b.craft);
+  else if (b.kind === "road") resolveRoad(s, c0, tile, b.road);
+  else if (b.kind === "dig") resolveDig(s, c0, tile);
+  else if (b.kind === "fill") resolveFill(s, c0, tile);
+  else useGame.setState({ character: c0 });
+}
+
+function resolveGather(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>, item?: ItemId) {
+  const res = item ?? tile.resource;
+  if (!res || tile.resource !== res || tile.amount <= 0) {
+    useGame.setState({
+      character: c0,
+      log: pushLog(s.log, "Уже пусто."),
+      floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "пусто", tone: "bad" as const }].slice(-10),
+    });
+    return;
+  }
+  let got = Math.min(GATHER_YIELD[res] || 1, tile.amount);
+  const match = PROFESSION_BIOME[c0.profession]?.includes(tile.biome);
+  if (match) got = Math.min(tile.amount, got + 1);
+  if (c0.hand === "axe" && res === "wood") got = Math.min(tile.amount, got + 1);
+  if (c0.hand === "pick" && (res === "stone" || res === "ore" || res === "crystal")) got = Math.min(tile.amount, got + 1);
+  if (res === "wood" && c0.hand !== "axe") got = Math.max(1, Math.floor(got * 0.4));
+  if ((res === "stone" || res === "ore") && c0.hand !== "pick") got = Math.max(1, Math.floor(got * 0.4));
+  if (s.phase === "night") got = Math.max(1, Math.floor(got * 0.5));
+  tile.amount -= got;
+  if (tile.amount <= 0) markDepleted(tile);
+  else if (res === "herb") tile.regen = Math.max(tile.regen ?? 0, REGROW_WAIT.herb ?? 2);
+  const inv = { ...c0.inventory };
+  inv[res] += got;
+  const c = bumpSkill({ ...c0, inventory: inv }, match ? PROF_SKILL[c0.profession] : "survival", 0.12);
+  const phrase =
+    res === "herb" ? `Сорвал траву ×${got}. Отрастёт.` : `Собрал ${got} ${ITEM_LABEL[res]}. Ноша ${cargoWeight(inv).toFixed(1)} кг.`;
+  useGame.setState({
+    character: c,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, phrase),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${got} ${ITEM_LABEL[res]}`, tone: "ok" as const }].slice(-10),
+  });
+  noteDeed(res === "wood" ? "chop" : "gather");
+  useGame.getState().persist();
+}
+
+function resolveBuild(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>, kind?: BuildingKind) {
+  if (!kind || kind === "none") {
+    useGame.setState({ character: c0, log: pushLog(s.log, "Стройка сорвалась.") });
+    return;
+  }
+  if (tile.building !== "none" && !(kind === "house" && tile.building === "shack")) {
+    useGame.setState({ character: c0, log: pushLog(s.log, "Клетка уже занята.") });
+    return;
+  }
+  tile.building = kind;
+  tile.matter = defaultMatter(kind);
+  tile.hp = MATTER_HP[tile.matter];
+  tile.burned = false;
+  const c = bumpSkill(c0, "build", 0.2);
+  useGame.setState({
+    character: c,
+    selected: { x: tile.x, y: tile.y },
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, `Поставил ${BUILDING_LABEL[kind]}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: BUILDING_LABEL[kind], tone: "ok" as const }].slice(-10),
+  });
+  noteDeed("build");
+  useGame.getState().persist();
+}
+
+function resolveCraft(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>, craftId?: string) {
+  const def = CRAFTS.find((d) => d.id === craftId);
+  if (!def) {
+    useGame.setState({ character: c0, log: pushLog(s.log, "Ремесло сорвалось.") });
+    return;
+  }
+  const inv = { ...c0.inventory, [def.out]: c0.inventory[def.out] + def.n };
+  const hand =
+    def.out === "axe" || def.out === "pick" || def.out === "spear" || def.out === "rope" || def.out === "bucket" || def.out === "shovel" || def.out === "rod"
+      ? def.out
+      : c0.hand;
+  const c = bumpSkill({ ...c0, inventory: inv, hand }, PROF_SKILL[c0.profession], 0.15);
+  useGame.setState({
+    character: c,
+    log: pushLog(s.log, def.who === "any" ? `Сделал: ${def.label} ×${def.n}.` : `${PROFESSION_LABEL[c0.profession]}: ${def.label} ×${def.n}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${def.label}`, tone: "ok" as const }].slice(-10),
+  });
+  useGame.getState().persist();
+}
+
+function resolveRoad(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>, kind?: "dirt" | "stone" | "bridge") {
+  if (!kind) {
+    useGame.setState({ character: c0 });
+    return;
+  }
+  tile.road = kind === "bridge" ? "bridge" : kind;
+  const label = kind === "dirt" ? "грунт" : kind === "stone" ? "камень" : "мост";
+  useGame.setState({
+    character: c0,
+    selected: { x: tile.x, y: tile.y },
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, `Положил ${label}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: label, tone: "ok" as const }].slice(-10),
+  });
+  noteDeed("road");
+  useGame.getState().persist();
+}
+
+function resolveDig(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>) {
+  if (tile.pit) {
+    useGame.setState({ character: c0, log: pushLog(s.log, "Уже яма.") });
+    return;
+  }
+  const bank = !!tile.bank;
+  let clay = bank ? 2 : 1;
+  tile.pit = true;
+  tile.bank = false;
+  let ore = 0;
+  if (!bank && Math.random() < 0.08) ore = 1;
+  let inv = { ...c0.inventory };
+  const clayOut = giveOrPile(inv, c0.transport, tile, "clay", clay);
+  inv = clayOut.inv;
+  if (ore) {
+    const oreOut = giveOrPile(inv, c0.transport, tile, "ore", ore);
+    inv = oreOut.inv;
+  }
+  const c = bumpSkill({ ...c0, inventory: inv }, "mine", 0.08);
+  const bits = [`+${clay} глина`];
+  if (ore) bits.push("+руда");
+  useGame.setState({
+    character: c,
+    inspect: null,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, `Выкопал. ${bits.join(" · ")}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: bits[0]!, tone: "ok" as const }].slice(-10),
+  });
+  noteDeed("pit");
+  useGame.getState().persist();
+}
+
+function resolveFill(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>) {
+  if (!tile.pit) {
+    useGame.setState({ character: c0, log: pushLog(s.log, "Ямы уже нет.") });
+    return;
+  }
+  tile.pit = false;
+  tile.bank = false;
+  if (tile.biome !== "plains" && tile.biome !== "fertile") tile.biome = "plains";
+  if (tile.resource === "ore" && tile.amount <= 0) tile.resource = null;
+  useGame.setState({
+    character: c0,
+    inspect: null,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, "Засыпал яму. Снова равнина."),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "засыпал", tone: "ok" as const }].slice(-10),
+  });
+  noteDeed("pit");
+  useGame.getState().persist();
 }
 
 function resolveHunt(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>) {
@@ -2774,6 +2951,32 @@ function skipBusy() {
     log: pushLog(s.log, `Подорожная −${goldTxt(SKIP_GOLD)}.`),
   });
   resolveBusy();
+}
+
+function hireBusy() {
+  const s = useGame.getState();
+  if (isHeld(s.character)) {
+    speak(heldLine(s.character) ?? "Нельзя.", s.character.x, s.character.y, "нельзя", "bad");
+    return;
+  }
+  if (!s.character.busy) return;
+  if (s.character.busy.hired) {
+    speak("Руки уже работают. Можно отойти.", s.character.x, s.character.y, "наняты", "ok");
+    return;
+  }
+  if (s.character.gold < HIRE_GOLD) {
+    speak(`Нанять руки — ${goldTxt(HIRE_GOLD)}.`, s.character.x, s.character.y, "мало золота", "bad");
+    return;
+  }
+  useGame.setState({
+    character: {
+      ...s.character,
+      gold: s.character.gold - HIRE_GOLD,
+      busy: { ...s.character.busy, hired: true },
+    },
+    log: pushLog(s.log, `Нанял руки −${goldTxt(HIRE_GOLD)}. Можно отойти — доделают.`),
+    hint: { text: `Нанял руки −${goldTxt(HIRE_GOLD)}. Можно отойти.`, tone: "gold" },
+  });
 }
 
 function burnHere() {
@@ -3569,6 +3772,11 @@ function craftGear(item: "rope" | "bucket" | "spear" | "rod") {
 
 function doCraft(kind: CraftKind) {
   const s = useGame.getState();
+  if (busyBlock()) return;
+  if (s.travel) {
+    speak("Сначала дойди.", s.character.x, s.character.y, "в пути", "bad");
+    return;
+  }
   const def = CRAFTS.find((c) => c.id === kind);
   if (!def) return;
   const tile = hereTile();
@@ -3615,23 +3823,16 @@ function doCraft(kind: CraftKind) {
     }
   }
   for (const [k, n] of Object.entries(def.need) as [ItemId, number][]) inv[k] -= n;
-  inv[def.out] += def.n;
-  const hand = def.out === "axe" || def.out === "spear" || def.out === "rope" || def.out === "bucket" || def.out === "shovel" || def.out === "rod" ? def.out : s.character.hand;
-  let c = bumpSkill(
-    { ...s.character, inventory: inv, energy: Math.max(0, s.character.energy - needE), hand },
-    PROF_SKILL[s.character.profession],
-    0.15,
+  const next = { ...s.character, inventory: inv, energy: Math.max(0, s.character.energy - needE) };
+  const ms = craftMs(needE, slow, next);
+  startBusy(
+    next,
+    makeBusy("craft", tile!.x, tile!.y, Date.now() + ms, { craft: def.id, item: def.out }),
+    `Делаю: ${def.label} · ${Math.ceil(ms / 1000)} с.`,
+    tile!.x,
+    tile!.y,
+    "делаю",
   );
-  useGame.setState({
-    character: c,
-    log: pushLog(
-      s.log,
-      def.who === "any"
-        ? `Сделал: ${def.label} ×${def.n}.`
-        : `${PROFESSION_LABEL[s.character.profession]}: ${def.label} ×${def.n}. Этого другие не делают.`,
-    ),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: tile!.x, y: tile!.y, text: `+${def.label}`, tone: "ok" as const }].slice(-10),
-  });
 }
 
 function prospectHere() {
@@ -3837,39 +4038,11 @@ function excavateHere() {
     speak("Нет сил копать.", tile.x, tile.y, "нет сил", "bad");
     return;
   }
-  const bank = !!tile.bank;
-  let clay = bank ? 2 : 1;
-  tile.pit = true;
-  tile.bank = false;
-  if (bank && (tile.biome === "fertile" || tile.biome === "plains")) {
-    /* stay biome, bank spent */
-  }
-  let ore = 0;
-  if (!bank && Math.random() < 0.08) ore = 1;
-  let inv = { ...s.character.inventory };
-  const clayOut = giveOrPile(inv, s.character.transport, tile, "clay", clay);
-  inv = clayOut.inv;
-  if (ore) {
-    const oreOut = giveOrPile(inv, s.character.transport, tile, "ore", ore);
-    inv = oreOut.inv;
-    ore = oreOut.piled ? ore : ore;
-  }
-  let c = bumpSkill(
-    { ...s.character, inventory: inv, energy: Math.max(0, s.character.energy - 1) },
-    "mine",
-    0.08,
-  );
-  const bits = [`+${clay} глина`];
-  if (ore) bits.push("+руда");
-  useGame.setState({
-    character: c,
-    inspect: null,
-    world: { ...s.world, tiles: s.world.tiles },
-    log: pushLog(s.log, `Выкопал. ${bits.join(" · ")}.`),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: bits[0]!, tone: "ok" as const }].slice(-10),
-  });
-  noteDeed("pit");
-  useGame.getState().persist();
+  let c = { ...s.character, energy: Math.max(0, s.character.energy - 1) };
+  const worn = takeWear(c, "shovel");
+  c = worn.c;
+  const ms = workMs("dig", null, c);
+  startBusy(c, makeBusy("dig", tile.x, tile.y, Date.now() + ms), `Копаю · ${Math.ceil(ms / 1000)} с.`, tile.x, tile.y, "копаю");
 }
 
 function fillPitHere() {
@@ -3911,19 +4084,11 @@ function fillPitHere() {
     return;
   }
   const inv = takePaid({ ...s.character.inventory }, pay);
-  tile.pit = false;
-  tile.bank = false;
-  if (tile.biome !== "plains" && tile.biome !== "fertile") tile.biome = "plains";
-  if (tile.resource === "ore" && tile.amount <= 0) tile.resource = null;
-  useGame.setState({
-    character: { ...s.character, inventory: inv, energy: Math.max(0, s.character.energy - 1) },
-    inspect: null,
-    world: { ...s.world, tiles: s.world.tiles },
-    log: pushLog(s.log, "Засыпал яму. Снова равнина."),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "засыпал", tone: "ok" as const }].slice(-10),
-  });
-  noteDeed("pit");
-  useGame.getState().persist();
+  let c = { ...s.character, inventory: inv, energy: Math.max(0, s.character.energy - 1) };
+  const worn = takeWear(c, "shovel");
+  c = worn.c;
+  const ms = workMs("fill", null, c);
+  startBusy(c, makeBusy("fill", tile.x, tile.y, Date.now() + ms), `Засыпаю · ${Math.ceil(ms / 1000)} с.`, tile.x, tile.y, "засыпаю");
 }
 
 

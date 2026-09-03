@@ -513,6 +513,24 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
       ctx.fill();
     }
   }
+  if (tile.building === "net") {
+    ctx.strokeStyle = "#4a3a30";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x + 8, y + 10);
+    ctx.lineTo(x + 8, y + TILE - 8);
+    ctx.moveTo(x + TILE - 8, y + 10);
+    ctx.lineTo(x + TILE - 8, y + TILE - 8);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(90, 110, 120, 0.85)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.moveTo(x + 8, y + 14 + i * 6);
+      ctx.lineTo(x + TILE - 8, y + 16 + i * 6);
+      ctx.stroke();
+    }
+  }
 
   if (art && tile.caravan) {
     drawAtlas(ctx, art.props, 3, 3, 7, x - 2, y - 10, TILE + 4, TILE + 6);

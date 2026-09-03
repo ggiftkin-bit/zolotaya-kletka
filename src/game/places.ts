@@ -72,7 +72,7 @@ export function placeHint(tile: Tile) {
     case "bench":
       return "Верстак. Доска и колесо — плотник. Телега: 2 колеса, 4 дерева, слиток. В сумку не кладётся.";
     case "forge":
-      return "Горн. Руда+уголь → слиток, топор, замок. Без воды дольше.";
+      return "Горн. Руда+уголь → слиток, топор, кирка, замок. Без воды дольше.";
     case "oven":
       return "Печь. 2 еды → хлеб. Без воды дольше.";
     case "smoke":
@@ -107,6 +107,8 @@ export function placeHint(tile: Tile) {
       return "Колья снаружи тына.";
     case "moat":
       return "Ров. Как река — только мостом.";
+    case "net":
+      return "Сеть на берегу. Ловят стоя на клетке, удочка не нужна.";
     default:
       return "";
   }
@@ -121,7 +123,7 @@ export function wildActs(tile: Tile, world: World) {
     acts.push({ id: "catch", label: "Ловить лошадь", sub: "верёвка в руке" });
   }
   if (canFishOn(world, tile)) {
-    acts.push({ id: "fish", label: "Рыба", sub: "удочка · дерево + верёвка дома" });
+    acts.push({ id: "fish", label: "Рыба", sub: tile.building === "net" ? "сеть · стой здесь" : "удочка · дерево + верёвка дома" });
   }
   return acts;
 }

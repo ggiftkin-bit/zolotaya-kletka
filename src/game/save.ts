@@ -53,6 +53,7 @@ function emptyChest(): Inventory {
     food: 0,
     fish: 0,
     axe: 0,
+    pick: 0,
     herb: 0,
     clay: 0,
     crystal: 0,

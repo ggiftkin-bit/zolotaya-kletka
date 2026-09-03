@@ -54,6 +54,7 @@ export const BUILDING_LABEL = {
   jail: "яма",
   stakes: "колья",
   moat: "ров",
+  net: "сеть",
 } as const;
 
 export const BUILD_COST: Record<
@@ -83,6 +84,7 @@ export const BUILD_COST: Record<
   jail: { wood: 0, stone: 4, gold: 0 },
   stakes: { wood: 3, stone: 0, gold: 0 },
   moat: { wood: 2, stone: 0, gold: 0 },
+  net: { wood: 4, stone: 0, gold: 0 },
 };
 
 /** What the stall pays you. Buy is always ×2. */
@@ -93,6 +95,7 @@ export const SELL_GOLD: Record<ItemId, number> = {
   food: 2,
   fish: 3,
   axe: 8,
+  pick: 10,
   herb: 1,
   clay: 1,
   crystal: 8,
@@ -180,6 +183,7 @@ function zInv(): Inventory {
     food: 0,
     fish: 0,
     axe: 0,
+    pick: 0,
     herb: 0,
     clay: 0,
     crystal: 0,
