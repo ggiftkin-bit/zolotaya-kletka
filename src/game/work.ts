@@ -47,9 +47,19 @@ export const CLAD_STONE = 16;
 
 export function defaultMatter(kind: BuildingKind): Matter {
   if (kind === "none") return "wood";
-  if (kind === "shack" || kind === "stakes") return "wattle";
+  if (kind === "shack" || kind === "stakes" || kind === "camp") return "wattle";
   if (kind === "well" || kind === "forge" || kind === "oven" || kind === "jail" || kind === "moat") return "stone";
   return "wood";
+}
+
+export function nearCamp(world: World, x: number, y: number): boolean {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const t = tileAt(world, x + dx, y + dy);
+      if (t && t.building === "camp" && !t.burned) return true;
+    }
+  }
+  return false;
 }
 
 export function isRoof(tile: Tile | null | undefined): boolean {
@@ -110,7 +120,7 @@ export function workMs(kind: BusyKind, herdKind: string | null, c: Character): n
 
 export function buildMs(kind: BuildingKind, c: Character): number {
   let sec = 28;
-  if (kind === "shack" || kind === "stakes" || kind === "field" || kind === "herbs" || kind === "coalpit") sec = 18;
+  if (kind === "shack" || kind === "stakes" || kind === "field" || kind === "herbs" || kind === "coalpit" || kind === "camp" || kind === "net") sec = 18;
   if (kind === "house") sec = 42;
   if (kind === "well" || kind === "forge" || kind === "oven" || kind === "jail" || kind === "moat") sec = 48;
   if (kind === "tower") sec = 40;

@@ -31,6 +31,7 @@ export const BUILD_HINT: Record<Exclude<BuildingKind, "none">, string> = {
   stakes: "колья снаружи тына",
   moat: "ров как река. Нужен мост",
   net: "сеть на берегу. Ловят без удочки",
+  camp: "костёр в поле. Готовить и греться без дома",
 };
 
 export function nextGoal(s: GameState): string {

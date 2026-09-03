@@ -531,6 +531,23 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
       ctx.stroke();
     }
   }
+  if (tile.building === "camp" && !tile.burned) {
+    ctx.fillStyle = "#3a2a20";
+    ctx.beginPath();
+    ctx.moveTo(x + 10, y + TILE - 10);
+    ctx.lineTo(x + TILE / 2, y + 16);
+    ctx.lineTo(x + TILE - 10, y + TILE - 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#c45a28";
+    ctx.beginPath();
+    ctx.ellipse(x + TILE / 2, y + TILE * 0.58, 7, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#e8c45a";
+    ctx.beginPath();
+    ctx.ellipse(x + TILE / 2, y + TILE * 0.55, 3.5, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   if (art && tile.caravan) {
     drawAtlas(ctx, art.props, 3, 3, 7, x - 2, y - 10, TILE + 4, TILE + 6);

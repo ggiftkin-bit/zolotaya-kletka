@@ -79,7 +79,8 @@ export type BuildingKind =
   | "jail"
   | "stakes"
   | "moat"
-  | "net";
+  | "net"
+  | "camp";
 
 export type Profession =
   | "wanderer"

@@ -55,6 +55,7 @@ export const BUILDING_LABEL = {
   stakes: "колья",
   moat: "ров",
   net: "сеть",
+  camp: "костёр",
 } as const;
 
 export const BUILD_COST: Record<
@@ -85,6 +86,7 @@ export const BUILD_COST: Record<
   stakes: { wood: 3, stone: 0, gold: 0 },
   moat: { wood: 2, stone: 0, gold: 0 },
   net: { wood: 4, stone: 0, gold: 0 },
+  camp: { wood: 2, stone: 0, gold: 0 },
 };
 
 /** What the stall pays you. Buy is always ×2. */

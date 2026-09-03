@@ -71,6 +71,7 @@ import {
   defaultMatter,
   isRoof,
   makeBusy,
+  nearCamp,
   stoneFence,
   useTool,
   workMs,
@@ -1286,12 +1287,14 @@ function worldTick() {
 
   c.satiety = Math.max(0, c.satiety - (roof ? 1 : 3));
   const wet = nearWater(s.world, c.x, c.y);
+  const fire = nearCamp(s.world, c.x, c.y);
   if (wet) c.water = Math.min(100, c.water + 8);
   else c.water = Math.max(0, c.water - (roof ? 1 : 2));
   if (c.life === "alive") {
-    if (phase === "night" && !roof) c.warmth = Math.max(0, c.warmth - (s.season === "winter" ? 3 : 2));
-    else if (!roof && (s.weather === "rain" || s.weather === "snow")) c.warmth = Math.max(0, c.warmth - 1);
-    else if (roof) c.warmth = Math.min(100, c.warmth + 4);
+    if (roof) c.warmth = Math.min(100, c.warmth + 4);
+    else if (fire) c.warmth = Math.min(100, c.warmth + (phase === "night" ? 3 : 1));
+    else if (phase === "night") c.warmth = Math.max(0, c.warmth - (s.season === "winter" ? 3 : 2));
+    else if (s.weather === "rain" || s.weather === "snow") c.warmth = Math.max(0, c.warmth - 1);
     if (c.satiety === 0) c.hp = Math.max(0, c.hp - 3);
     if (c.warmth === 0) c.hp = Math.max(0, c.hp - 2);
     if (c.water === 0) c.hp = Math.max(0, c.hp - 2);
@@ -2014,7 +2017,7 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
       speak("Колья и ров — только снаружи тына.", x, y, "не снаружи", "bad");
       return;
     }
-  } else if (!tile.owned && !tile.plot && kind !== "shack" && kind !== "field" && kind !== "pen" && kind !== "well" && kind !== "net") {
+  } else if (!tile.owned && !tile.plot && kind !== "shack" && kind !== "field" && kind !== "pen" && kind !== "well" && kind !== "net" && kind !== "camp") {
     speak("Шалаш, поле, загон и колодец — без столба. Двор даёт зону под дом и станки.", x, y, "нужен двор", "bad");
     return;
   }
@@ -2412,8 +2415,12 @@ function stealHere() {
 function cookHere() {
   const s = useGame.getState();
   const tile = hereTile();
-  if (!tile || (tile.building !== "shack" && tile.building !== "house")) {
-    speak("Готовить — у очага в шалаше или доме.", s.character.x, s.character.y, "нет очага", "bad");
+  if (!tile || (tile.building !== "shack" && tile.building !== "house" && tile.building !== "camp")) {
+    speak("Готовить — у костра, в шалаше или доме.", s.character.x, s.character.y, "нет огня", "bad");
+    return;
+  }
+  if (tile.burned) {
+    speak("Очаг сгорел.", tile.x, tile.y, "сгорел", "bad");
     return;
   }
   const inv = { ...s.character.inventory };

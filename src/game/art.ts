@@ -44,6 +44,7 @@ const PROP_INDEX: Record<Exclude<BuildingKind, "none">, number> = {
   stakes: -1,
   moat: -1,
   net: -1,
+  camp: -1,
 };
 
 export const LIFE_INDEX = {

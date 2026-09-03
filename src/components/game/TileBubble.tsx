@@ -17,12 +17,14 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { BiomePic, GearPic, ICO, Ico, ItemPic, LifePic } from "./Sprite";
 
-const BUILDINGS: Exclude<BuildingKind, "none" | "workshop" | "shop" | "board" | "mine" | "stable">[] = [
+const BUILDINGS: Exclude<BuildingKind, "none" | "workshop" | "shop" | "board" | "mine">[] = [
   "shack",
   "house",
+  "camp",
   "field",
   "well",
   "pen",
+  "stable",
   "shed",
   "tower",
   "jail",
@@ -544,6 +546,9 @@ function PlacePane({ tile, here }: { tile: Tile; here: boolean; near: boolean })
   if (tile.building === "net") {
     return <p className="mt-4 text-sm text-muted-foreground">Сеть. Стой на клетке и лови. Удочка не нужна.</p>;
   }
+  if (tile.building === "camp") {
+    return <CampBody tile={tile} />;
+  }
   if (tile.building === "jail") {
     return <p className="mt-4 text-sm text-muted-foreground">Яма. Сажают только по закону. Залог 12 золота.</p>;
   }
@@ -967,6 +972,23 @@ function ChestGrid({ tile }: { tile: Tile }) {
   );
 }
 
+function CampBody({ tile }: { tile: Tile }) {
+  const g = useGame();
+  const here = g.character.x === tile.x && g.character.y === tile.y;
+  return (
+    <div className="mt-4 flex flex-col gap-2">
+      <p className="text-[13px] text-muted-foreground">
+        {tile.burned ? "Костёр погас." : "Костёр. Греет рядом. Готовь стоя на клетке. Крыши нет — спать нельзя."}
+      </p>
+      {here && !tile.burned && (
+        <Button className="h-12 w-full text-base" variant="outline" onClick={() => g.cookHere()}>
+          Готовить · еда + полено · сытость
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function BuildPane({ tile }: { tile: Tile }) {
   const g = useGame();
   if (isForeignYard(tile)) {
@@ -993,25 +1015,46 @@ function BuildPane({ tile }: { tile: Tile }) {
       </div>
       {(tile.owned || tile.plot || tile.building === "none") && (
         <>
-          <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">Постройка</p>
-          <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-            {BUILDINGS.filter((b) => (tile.plot || tile.owned ? b !== "stakes" && b !== "moat" : b === "stakes" || b === "moat" || b === "shack" || b === "field" || b === "pen" || b === "well")).map((b) => (
-              <Button
-                key={b}
-                size="sm"
-                variant="outline"
-                className="h-11"
-                onClick={() => {
-                  g.setBuildKind(b);
-                  g.doBuild(tile.x, tile.y);
-                  g.closeInspect();
-                }}
-              >
-                {BUILDING_LABEL[b]}
-                <span className="ml-1 text-[10px] text-muted-foreground">{BUILD_COST[b].wood ? `${BUILD_COST[b].wood} дер.` : BUILD_COST[b].stone ? `${BUILD_COST[b].stone} кам.` : ""}</span>
-              </Button>
-            ))}
-          </div>
+          {(tile.plot || tile.owned
+            ? ([
+                ["Жильё", ["shack", "house", "shed", "camp"]],
+                ["Станки и столы", ["bench", "forge", "oven", "smoke", "herbs", "coalpit", "stall", "adit"]],
+                ["Двор", ["field", "well", "pen", "stable", "tower", "jail"]],
+              ] as const)
+            : ([
+                ["В поле", ["shack", "camp", "field", "pen", "well"]],
+                ["Берег и край", ["net", "stakes", "moat"]],
+              ] as const)
+          ).map(([title, ids]) => (
+            <div key={title}>
+              <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">{title}</p>
+              {!tile.plot && !tile.owned && title === "В поле" && (
+                <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
+                  Станки и стол трав — во дворе. Сначала два угла тына.
+                </p>
+              )}
+              <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                {ids.map((b) => (
+                  <Button
+                    key={b}
+                    size="sm"
+                    variant="outline"
+                    className="h-11"
+                    onClick={() => {
+                      g.setBuildKind(b);
+                      g.doBuild(tile.x, tile.y);
+                      g.closeInspect();
+                    }}
+                  >
+                    {BUILDING_LABEL[b]}
+                    <span className="ml-1 text-[10px] text-muted-foreground">
+                      {BUILD_COST[b].wood ? `${BUILD_COST[b].wood} дер.` : BUILD_COST[b].stone ? `${BUILD_COST[b].stone} кам.` : ""}
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ))}
         </>
       )}
     </div>

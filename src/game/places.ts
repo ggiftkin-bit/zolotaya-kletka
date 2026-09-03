@@ -109,6 +109,8 @@ export function placeHint(tile: Tile) {
       return "Ров. Как река — только мостом.";
     case "net":
       return "Сеть на берегу. Ловят стоя на клетке, удочка не нужна.";
+    case "camp":
+      return "Костёр. Греет рядом. Готовить — еда и полено. Спать нельзя.";
     default:
       return "";
   }

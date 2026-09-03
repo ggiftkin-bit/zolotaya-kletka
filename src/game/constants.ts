@@ -240,6 +240,7 @@ export const BUILD_OK: Record<Exclude<BuildingKind, "none">, Biome[]> = {
   stakes: ["plains", "fertile", "forest", "mountain", "swamp"],
   moat: ["plains", "fertile", "forest", "swamp"],
   net: ["plains", "fertile", "forest", "swamp", "ford"],
+  camp: ["plains", "fertile", "forest", "swamp", "mountain"],
 };
 
 /** Ноша: только то, что есть, три квадрата в ряд. */
