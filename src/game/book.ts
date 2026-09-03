@@ -7,7 +7,7 @@ import type { Busy, Character, Inventory, OtherPawn, Season, Skills, Tile, Trans
 export type { OtherPawn };
 
 export const WORLD_ID = "kletka";
-export const WORLD_SEED = "kletka-seed-01";
+export const WORLD_SEED = "kletka-land-02";
 export const FOG_R = 2;
 /** С горы или башни пятно дальше. */
 export const FOG_R_HIGH = 5;
@@ -333,7 +333,7 @@ export function unpackPawn(row: PawnRow): Character {
 
 export function applyLive(world: World, packets: TilePacket[]): World {
   const tiles = world.tiles.slice();
-  const fog = (world.fog ?? allLiveFog(tiles.length)).slice();
+  const fog = (world.fog ?? allDarkFog(tiles.length)).slice();
   const ver = (world.ver ?? allOnesVer(tiles.length)).slice();
   for (const p of packets) {
     if (p.x < 0 || p.y < 0 || p.x >= world.width || p.y >= world.height) continue;

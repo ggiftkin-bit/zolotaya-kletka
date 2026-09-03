@@ -5,6 +5,7 @@ import { BUILD_COST, BUILDING_LABEL, CART_GOLD, CART_WOOD, LOCK_GOLD, WAGON_GOLD
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, waterHint } from "@/game/life";
 import { LIFE_INDEX } from "@/game/art";
 import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/places";
+import { FOG_DARK, fogAt } from "@/game/book";
 import { canFoundVillage, clusterHint, hamletTitle, hasOwnYard } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
 import { canDigReason, fillPay } from "@/game/pit";
@@ -74,6 +75,9 @@ export function TileBubble() {
 
 function Sheet({ tile }: { tile: Tile }) {
   const g = useGame();
+  if (fogAt(g.world, tile.x, tile.y) === FOG_DARK) {
+    return <UnknownSheet tile={tile} />;
+  }
   const here = g.character.x === tile.x && g.character.y === tile.y;
   const near = Math.max(Math.abs(g.character.x - tile.x), Math.abs(g.character.y - tile.y)) <= 1;
   const loot = lootOn(tile);
@@ -177,6 +181,46 @@ function Sheet({ tile }: { tile: Tile }) {
       {pane === "gather" && <GatherPane tile={tile} loot={loot} />}
       {pane === "build" && <BuildPane tile={tile} />}
       {pane === "yard" && <YardPane tile={tile} />}
+    </div>
+  );
+}
+
+function UnknownSheet({ tile }: { tile: Tile }) {
+  const g = useGame();
+  const here = g.character.x === tile.x && g.character.y === tile.y;
+  return (
+    <div
+      className="absolute inset-x-0 bottom-0 mx-auto max-h-full max-w-lg overflow-y-auto rounded-t-[24px] border border-border bg-panel px-4 pb-4 pt-3 shadow-panel"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" />
+      <div className="flex items-start gap-3">
+        <div className="flex size-16 shrink-0 items-center justify-center rounded-[16px] bg-raised text-2xl text-muted-foreground shadow-sm">
+          ?
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-display text-2xl leading-none tracking-tight">неизвестная клетка</p>
+          <p className="mt-1 text-[12px] text-muted-foreground">тьма. Пока не подойдёшь — не видно, что там</p>
+        </div>
+        <button
+          type="button"
+          aria-label="Закрыть"
+          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-raised text-xl leading-none text-muted-foreground"
+          onClick={() => g.closeInspect()}
+        >
+          ×
+        </button>
+      </div>
+      <div className="mt-4 flex flex-col gap-2">
+        {!here && (
+          <Sticker
+            title="Пойти"
+            sub="увидишь, когда дойдёшь"
+            ico={<Ico i={ICO.boots} className="size-11 overflow-hidden rounded-[12px]" />}
+            onClick={() => g.goTo(tile.x, tile.y)}
+          />
+        )}
+      </div>
     </div>
   );
 }

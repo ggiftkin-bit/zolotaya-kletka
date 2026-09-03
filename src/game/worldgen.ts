@@ -1,5 +1,6 @@
 import { createNoise2D } from "simplex-noise";
 import { MAP_H, MAP_W } from "./constants";
+import { allDarkFog, allOnesVer, maskLiveFog } from "./book";
 import { makeHerd } from "./life";
 import { HAMLETS, PLAYER_FIELD } from "./pact";
 import { rngFromSeed } from "./rng";
@@ -33,12 +34,46 @@ function inBounds(x: number, y: number) {
 }
 
 function pickBiome(elev: number, moist: number, ridge: number): Biome {
-  if (elev > 0.72 && ridge > 0.35) return "ore";
-  if (elev > 0.62) return "mountain";
-  if (elev < 0.28 && moist > 0.55) return "swamp";
-  if (moist > 0.58 && elev < 0.55) return "forest";
-  if (moist > 0.42 && elev > 0.34 && elev < 0.52) return "fertile";
+  if (elev > 0.76 && ridge > 0.42) return "ore";
+  if (elev > 0.64 && ridge > 0.22) return "mountain";
+  if (elev > 0.72) return "mountain";
+  if (elev < 0.26 && moist > 0.58) return "swamp";
+  if (moist > 0.57 && elev < 0.6) return "forest";
+  if (moist > 0.4 && elev > 0.32 && elev < 0.52) return "fertile";
   return "plains";
+}
+
+function smoothBiomes(tiles: Tile[]) {
+  const next: Biome[] = tiles.map((t) => t.biome);
+  for (let y = 1; y < MAP_H - 1; y++) {
+    for (let x = 1; x < MAP_W - 1; x++) {
+      const t = tiles[idx(x, y)]!;
+      if (t.biome === "river" || t.biome === "ford" || t.commons) continue;
+      const tally: Partial<Record<Biome, number>> = {};
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const b = tiles[idx(x + dx, y + dy)]?.biome;
+          if (!b || b === "river" || b === "ford") continue;
+          tally[b] = (tally[b] ?? 0) + 1;
+        }
+      }
+      let best: Biome = t.biome;
+      let n = 0;
+      for (const [b, c] of Object.entries(tally) as Array<[Biome, number]>) {
+        if (c > n) {
+          n = c;
+          best = b;
+        }
+      }
+      if (n >= 5) next[idx(x, y)] = best;
+    }
+  }
+  for (let i = 0; i < tiles.length; i++) {
+    const t = tiles[i]!;
+    if (t.biome === "river" || t.biome === "ford" || t.commons) continue;
+    t.biome = next[i]!;
+  }
 }
 
 function carveRiver(
@@ -122,7 +157,7 @@ function widenRiver(tiles: Tile[], rng: () => number) {
   const extra: number[] = [];
   for (let i = 0; i < tiles.length; i++) {
     if (tiles[i]?.biome !== "river") continue;
-    if (rng() > 0.22) continue;
+    if (rng() > 0.38) continue;
     const x = i % MAP_W;
     const y = (i / MAP_W) | 0;
     const n = [
@@ -151,7 +186,7 @@ function carveLake(tiles: Tile[], cx: number, cy: number, rInner: number, rOuter
     for (let x = cx - rOuter - 1; x <= cx + rOuter + 1; x++) {
       if (!inBounds(x, y)) continue;
       const d = Math.hypot(x - cx, y - cy);
-      if (d > rInner && d <= rOuter) {
+      if (d <= rOuter) {
         const t = tiles[idx(x, y)]!;
         t.biome = "river";
         t.resource = null;
@@ -160,6 +195,7 @@ function carveLake(tiles: Tile[], cx: number, cy: number, rInner: number, rOuter
       }
     }
   }
+  void rInner;
 }
 
 function sprinkleResources(tiles: Tile[], rng: () => number) {
@@ -171,14 +207,8 @@ function sprinkleResources(tiles: Tile[], rng: () => number) {
       continue;
     }
     if (t.biome === "forest") {
-      if (rng() < 0.55) {
-        t.resource = "wood";
-        t.amount = 6 + Math.floor(rng() * 7);
-      } else {
-        t.biome = "plains";
-        t.resource = "herb";
-        t.amount = 3 + Math.floor(rng() * 3);
-      }
+      t.resource = "wood";
+      t.amount = 6 + Math.floor(rng() * 7);
     } else if (t.biome === "mountain") {
       if (rng() < 0.38) {
         t.resource = "stone";
@@ -193,10 +223,11 @@ function sprinkleResources(tiles: Tile[], rng: () => number) {
         t.amount = 4 + Math.floor(rng() * 4);
       }
     } else if (t.biome === "plains") {
-      if (rng() < 0.08) {
+      if (t.commons) continue;
+      if (rng() < 0.1) {
         t.resource = "food";
         t.amount = 2 + Math.floor(rng() * 2);
-      } else if (rng() < 0.22) {
+      } else if (rng() < 0.28) {
         t.resource = "herb";
         t.amount = 2 + Math.floor(rng() * 3);
       }
@@ -496,7 +527,7 @@ export function stampMeadowHerb(tiles: Tile[]) {
 
 export function stampClayBanks(world: World) {
   if (world.tiles.some((t) => t.bank)) return;
-  const rng = rngFromSeed(world.seed || "kletka-seed-01", 17);
+  const rng = rngFromSeed(world.seed || "kletka-land-02", 17);
   placeBanks(world.tiles, rng);
 }
 
@@ -550,6 +581,8 @@ function cloneWorld(world: World): World {
     seed: world.seed,
     width: world.width,
     height: world.height,
+    fog: world.fog ? world.fog.slice() : allDarkFog(world.tiles.length),
+    ver: world.ver ? world.ver.slice() : allOnesVer(world.tiles.length),
     tiles: world.tiles.map((t) => ({
       ...t,
       pile: t.pile ? { ...t.pile } : null,
@@ -579,7 +612,7 @@ function cloneWorld(world: World): World {
   };
 }
 
-const CACHE_VER = "v15-";
+const CACHE_VER = "v16-";
 
 export function warmupWorld(seed: string) {
   if (worldCache.has(CACHE_VER + seed)) return;
@@ -608,9 +641,9 @@ function buildWorld(seed: string): World {
 
   for (let y = 0; y < MAP_H; y++) {
     for (let x = 0; x < MAP_W; x++) {
-      const e = (fbm(elevN, x / 42, y / 42) + 1) / 2;
-      const m = (fbm(moistN, x / 36 + 20, y / 36) + 1) / 2;
-      const r = (fbm(ridgeN, x / 18, y / 18, 3) + 1) / 2;
+      const e = (fbm(elevN, x / 68, y / 68) + 1) / 2;
+      const m = (fbm(moistN, x / 52 + 20, y / 52) + 1) / 2;
+      const r = (fbm(ridgeN, x / 24, y / 24, 3) + 1) / 2;
       const biome = pickBiome(e, m, r);
       tiles[idx(x, y)] = {
         x,
@@ -680,8 +713,12 @@ function buildWorld(seed: string): World {
   carveRiver(tiles, riverRng, 30 + Math.floor(riverRng() * 20), MAP_H - 3, 0, -1);
   carveRiver(tiles, riverRng, 4, MAP_H - 12, 1, -1);
   widenRiver(tiles, extraRng);
-  carveLake(tiles, 22 + Math.floor(extraRng() * 12), 28 + Math.floor(extraRng() * 10), 2, 5);
-  carveLake(tiles, 70 + Math.floor(extraRng() * 8), 64 + Math.floor(extraRng() * 8), 1.5, 4);
+  carveLake(tiles, 18, 22, 2, 6);
+  carveLake(tiles, 72, 18, 1.5, 5);
+  carveLake(tiles, 70, 68, 2, 6);
+  carveLake(tiles, 22, 74, 1.6, 5);
+  carveLake(tiles, 48, 30, 1.2, 3.5);
+  smoothBiomes(tiles);
   placeFords(tiles, extraRng);
   sprinkleResources(tiles, extraRng);
   placeClay(tiles, extraRng);
@@ -697,8 +734,9 @@ function buildWorld(seed: string): World {
       t.biome = "plains";
       t.commons = true;
       t.road = "none";
-      t.resource = Math.abs(dx) + Math.abs(dy) <= 1 ? "food" : null;
-      t.amount = t.resource ? 3 : 0;
+      t.resource = null;
+      t.amount = 0;
+      t.herd = null;
     }
   }
 
@@ -787,7 +825,12 @@ function buildWorld(seed: string): World {
 
   stampMeadowHerb(tiles);
 
-  return { seed, width: MAP_W, height: MAP_H, tiles };
+  const spawnAt = spawnPoint();
+  return maskLiveFog(
+    { seed, width: MAP_W, height: MAP_H, tiles, fog: allDarkFog(tiles.length), ver: allOnesVer(tiles.length) },
+    spawnAt.x,
+    spawnAt.y,
+  );
 }
 
 export function tileAt(world: World, x: number, y: number): Tile | null {

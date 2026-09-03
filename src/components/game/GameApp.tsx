@@ -94,7 +94,7 @@ export function GameApp() {
   useEffect(() => {
     window.__gameTest = {
       clickTile: (x: number, y: number) => useGame.getState().clickTile(x, y),
-      startNew: () => useGame.getState().startNew("Испытатель", "#6b3a2a", "kletka-seed-01"),
+      startNew: () => useGame.getState().startNew("Испытатель", "#6b3a2a", "kletka-land-02"),
       inspect: (x: number, y: number) => useGame.getState().inspectTile(x, y),
       closeInspect: () => useGame.getState().closeInspect(),
       goTo: (x: number, y: number) => useGame.getState().goTo(x, y),

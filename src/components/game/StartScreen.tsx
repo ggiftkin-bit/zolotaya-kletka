@@ -14,7 +14,7 @@ type Props = {
 export function StartScreen({ error, onStart }: Props) {
   const [name, setName] = useState("Испытатель");
   const [color, setColor] = useState<string>(MEEPLE_COLORS[0]);
-  const [seed, setSeed] = useState("kletka-seed-01");
+  const [seed, setSeed] = useState("kletka-land-02");
   const [more, setMore] = useState(false);
   const [help, setHelp] = useState(false);
   const bookStatus = useGame((s) => s.bookStatus);

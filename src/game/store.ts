@@ -95,7 +95,7 @@ import type {
 } from "./types";
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
-import { FOG_DARK, allLiveFog, fogAt } from "./book";
+import { FOG_DARK, allDarkFog, fogAt, maskLiveFog } from "./book";
 import { bindBookStore, flushBook, noteDeed, openBookFromServer, pullSpot, resetBookPawn } from "./book-sync";
 
 let worldAcc = 0;
@@ -580,7 +580,11 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         pit: !!t.pit,
         bank: !!t.bank,
       }));
-      const world = { ...saved.world, tiles, fog: allLiveFog(tiles.length), ver: tiles.map(() => 1) };
+      const world = maskLiveFog(
+        { ...saved.world, tiles, fog: allDarkFog(tiles.length), ver: tiles.map(() => 1) },
+        character.x,
+        character.y,
+      );
       migrateStations(world);
       ensureHamlets(world);
       set({
@@ -611,7 +615,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   warmup: () => {
     try {
-      warmupWorld("kletka-seed-01");
+      warmupWorld("kletka-land-02");
     } catch {
       /* ok */
     }
@@ -626,7 +630,13 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       viewPos.x = character.x;
       viewPos.y = character.y;
       worldAcc = 0;
+      const world = maskLiveFog(
+        { ...prev.world, fog: allDarkFog(prev.world.tiles.length), ver: prev.world.ver ?? prev.world.tiles.map(() => 1) },
+        character.x,
+        character.y,
+      );
       set({
+        world,
         character,
         tool: "move",
         buildKind: "shack",
@@ -644,7 +654,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         hint: null,
         log: [
           `Весна I, неделя 1. ${character.name} выходит на поляну.`,
-          "Клетка пишется в книгу мира. Пятно едет за фишкой. Даль — отпечаток или тьма.",
+          "Клетка пишется в книгу мира. Пятно едет за фишкой. Даль — тьма, не жила.",
           "Сила капает сама. Дома быстрее. Кружка за золото — сразу. Тап — наклейки, Пойти — ход.",
         ],
       });
@@ -655,7 +665,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       }, 250);
       return;
     }
-    const world = generateWorld(seed || "kletka-seed-01");
+    const world = generateWorld(seed || "kletka-land-02");
     const character = makeCharacter(name.trim() || "Испытатель", color);
     viewPos.x = character.x;
     viewPos.y = character.y;

@@ -3,7 +3,7 @@ import type { Biome, BuildingKind, ItemId, Profession, Season, Transport, Weathe
 export const MAP_W = 96;
 export const MAP_H = 96;
 export const TILE = 44;
-export const DEFAULT_SEED = "kletka-seed-01";
+export const DEFAULT_SEED = "kletka-land-02";
 
 export const ITEMS: ItemId[] = [
   "wood",

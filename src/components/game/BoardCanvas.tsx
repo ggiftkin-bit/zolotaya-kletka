@@ -398,9 +398,17 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
   ctx.fillStyle = BIOME_FILL[ground];
   ctx.fillRect(x, y, TILE, TILE);
   const art = getArt();
-  if (art) {
+  if (tile.commons) {
+    ctx.fillStyle = "#c2ad7e";
+    ctx.fillRect(x, y, TILE, TILE);
+    ctx.fillStyle = "rgba(90, 70, 40, 0.16)";
+    ctx.fillRect(x + 4, y + 10, TILE - 8, 6);
+    ctx.fillRect(x + 8, y + 22, TILE - 16, 5);
+    ctx.fillStyle = "rgba(70, 56, 36, 0.18)";
+    ctx.fillRect(x + 12, y + 30, 10, 4);
+  } else if (art) {
     const lush = tile.biome === "forest" ? lushForest : tile.biome === "fertile" ? crops : true;
-    drawAtlas(ctx, art.tiles, 3, 3, biomeIndex(tile.biome, tile.commons, lush), x, y, TILE, TILE, 0.14);
+    drawAtlas(ctx, art.tiles, 3, 3, biomeIndex(tile.biome, false, lush), x, y, TILE, TILE, 0.14);
   }
 
   paintCut(ctx, tile, x, y);
@@ -785,7 +793,7 @@ function paintPit(ctx: CanvasRenderingContext2D, tile: Tile, world: World, x: nu
 }
 
 function paintHerb(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number) {
-  if (tile.building !== "none" || tile.caravan) return;
+  if (tile.building !== "none" || tile.caravan || tile.commons) return;
   const has = tile.resource === "herb" && tile.amount > 0;
   const meadow = tile.biome === "plains" && !tile.commons;
   if (meadow && has) {

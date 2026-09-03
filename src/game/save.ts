@@ -217,7 +217,7 @@ export function loadGame(): GameState | null {
       return {
         ...(parsed as GameState),
         world: {
-          seed: parsed.world.seed ?? "kletka-seed-01",
+          seed: parsed.world.seed ?? "kletka-land-02",
           width,
           height,
           tiles: [],
@@ -228,7 +228,7 @@ export function loadGame(): GameState | null {
     return {
       ...(parsed as GameState),
       world: {
-        seed: parsed.world.seed ?? "kletka-seed-01",
+        seed: parsed.world.seed ?? "kletka-land-02",
         width,
         height,
         tiles,

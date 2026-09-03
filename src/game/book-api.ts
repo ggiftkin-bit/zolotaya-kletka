@@ -128,12 +128,18 @@ async function tileCount(sql: Sql): Promise<number> {
 
 async function birthIfEmpty(sql: Sql): Promise<boolean> {
   const n = await tileCount(sql);
-  if (n >= MAP_W * MAP_H * 0.9) return false;
+  const row = await readWorld(sql);
+  const stale = (row.seed ?? "") !== WORLD_SEED;
+  if (n >= MAP_W * MAP_H * 0.9 && !stale) return false;
   if (birthLock) {
     await birthLock;
     return false;
   }
   birthLock = (async () => {
+    if (stale || n > 0) {
+      await sql.query(`delete from tile where world_id = $1`, [WORLD_ID]);
+      await sql.query(`delete from pawn_memory where world_id = $1`, [WORLD_ID]);
+    }
     const world = generateWorld(WORLD_SEED);
     const BATCH = 400;
     for (let i = 0; i < world.tiles.length; i += BATCH) {
@@ -150,6 +156,9 @@ async function birthIfEmpty(sql: Sql): Promise<boolean> {
         [WORLD_ID, JSON.stringify(chunk)],
       );
     }
+    const spawnX = (MAP_W / 2) | 0;
+    const spawnY = (MAP_H / 2) | 0;
+    await sql.query(`update pawn set x = $2, y = $3, updated_at = now() where world_id = $1`, [WORLD_ID, spawnX, spawnY]);
     await sql.query(
       `update world set seed = $2, width = $3, height = $4, updated_at = now() where id = $1`,
       [WORLD_ID, WORLD_SEED, MAP_W, MAP_H],
