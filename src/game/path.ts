@@ -103,7 +103,7 @@ export function findPath(
   if (sx === tx && sy === ty) return [];
   const startT = tileAt(world, sx, sy);
   const goalT = tileAt(world, tx, ty);
-  if (!isWalkable(startT) || !isWalkable(goalT)) return null;
+  if (!isWalkable(startT, world) || !isWalkable(goalT, world)) return null;
 
   const open = new MinHeap();
   const gScore = new Float64Array(w * h);
@@ -147,13 +147,13 @@ export function findPath(
       if (dx !== 0 && dy !== 0) {
         const a = tileAt(world, cx + dx, cy);
         const b = tileAt(world, cx, cy + dy);
-        if (!isWalkable(a) || !isWalkable(b)) continue;
+        if (!isWalkable(a, world) || !isWalkable(b, world)) continue;
         if (!canCrossDiag(world, cx, cy, nx, ny)) continue;
       } else if (!canCross(world, cx, cy, nx, ny)) {
         continue;
       }
       const to = tileAt(world, nx, ny)!;
-      if (!isWalkable(to)) continue;
+      if (!isWalkable(to, world)) continue;
       const ni = ny * w + nx;
       if (closed[ni]) continue;
       const step = stepCost(world, cx, cy, nx, ny, ctx);

@@ -66,6 +66,8 @@ export const ITEM_ICO: Record<ItemId, number> = {
   rope: 0,
   bucket: 1,
   spear: 2,
+  shovel: 3,
+  rod: ICO.fish,
   bread: ICO.food,
   plank: ICO.wood,
   bar: ICO.ore,
@@ -101,6 +103,17 @@ export function ItemPic({ id, className }: { id: ItemId; className?: string }) {
   }
   if (id === "rope" || id === "bucket" || id === "spear") {
     return <GearPic i={GEAR_ICO[id]} className={className} alt="" />;
+  }
+  if (id === "shovel") return <ExtraIco i={3} className={className} alt="" />;
+  if (id === "rod") {
+    return (
+      <span
+        role="img"
+        aria-label=""
+        className={cn("inline-block shrink-0 bg-cover bg-center", className)}
+        style={{ backgroundImage: "url(/game/rod.png)" }}
+      />
+    );
   }
   if (id === "coal") return <Ico i={ICO.stone} className={className} alt="" />;
   if (id === "plank") return <Ico i={ICO.wood} className={className} alt="" />;

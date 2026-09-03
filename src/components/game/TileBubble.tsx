@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BIOME_LABEL, ITEM_LABEL, ITEMS } from "@/game/constants";
 import { CRAFTS, canDoCraft } from "@/game/craft";
 import { BUILD_COST, BUILDING_LABEL, CART_GOLD, CART_WOOD, LOCK_GOLD, WAGON_GOLD, caravanBuy, caravanSell, goldTxt } from "@/game/economy";
@@ -6,6 +6,8 @@ import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, waterHint } from "@/game/life";
 import { LIFE_INDEX } from "@/game/art";
 import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/places";
 import { canFoundVillage, clusterHint, hamletTitle, hasOwnYard } from "@/game/pact";
+import { isForeignYard, isYours } from "@/game/crime";
+import { canDigReason, fillPay } from "@/game/pit";
 import { useGame } from "@/game/store";
 import type { BuildingKind, ItemId, Tile } from "@/game/types";
 import { burnableFence, CLAD_STONE, isRoof, MATTER_LABEL, stoneFence } from "@/game/work";
@@ -41,6 +43,10 @@ type Pane = "pick" | "place" | "gather" | "build" | "yard";
 export function TileBubble() {
   const g = useGame();
   const inspect = g.inspect;
+  const opened = useRef(0);
+  useEffect(() => {
+    opened.current = Date.now();
+  }, [inspect?.x, inspect?.y]);
   if (!inspect) return null;
   const tile = tileAt(g.world, inspect.x, inspect.y);
   if (!tile) return null;
@@ -48,7 +54,11 @@ export function TileBubble() {
     <div
       className="absolute inset-x-0 z-30 bg-table/40"
       style={{ top: "var(--hud-top)", bottom: "var(--hud-dock)" }}
-      onClick={() => g.closeInspect()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={() => {
+        if (Date.now() - opened.current < 420) return;
+        g.closeInspect();
+      }}
       onKeyDown={(e) => {
         if (e.key === "Escape") g.closeInspect();
       }}
@@ -64,9 +74,14 @@ function Sheet({ tile }: { tile: Tile }) {
   const here = g.character.x === tile.x && g.character.y === tile.y;
   const near = Math.max(Math.abs(g.character.x - tile.x), Math.abs(g.character.y - tile.y)) <= 1;
   const loot = lootOn(tile);
-  const open = canOpenPlace(tile);
-  const [pane, setPane] = useState<Pane>(() => (here && open ? "place" : "pick"));
-  useEffect(() => setPane(here && open ? "place" : "pick"), [tile.x, tile.y, here, open]);
+  const [pane, setPane] = useState<Pane>("pick");
+  const [live, setLive] = useState(false);
+  useEffect(() => setPane("pick"), [tile.x, tile.y]);
+  useEffect(() => {
+    setLive(false);
+    const id = window.setTimeout(() => setLive(true), 280);
+    return () => window.clearTimeout(id);
+  }, [tile.x, tile.y]);
   const title =
     pane === "place"
       ? placeTitle(tile)
@@ -76,15 +91,22 @@ function Sheet({ tile }: { tile: Tile }) {
           ? "Строить"
           : pane === "yard"
             ? "Двор"
-            : tile.caravan
-              ? "Лавка"
-              : tile.building !== "none"
-                ? BUILDING_LABEL[tile.building]
-                : BIOME_LABEL[tile.biome];
+            : tile.bank && tile.building === "none"
+              ? "берег"
+              : tile.pit
+                ? "яма"
+                : tile.caravan
+                  ? "Лавка"
+                  : tile.building !== "none"
+                    ? BUILDING_LABEL[tile.building]
+                    : tile.commons
+                      ? "поляна"
+                      : BIOME_LABEL[tile.biome];
 
   return (
     <div
       className="absolute inset-x-0 bottom-0 mx-auto max-h-full max-w-lg overflow-y-auto rounded-t-[24px] border border-border bg-panel px-4 pb-4 pt-3 shadow-panel"
+      style={{ pointerEvents: live ? "auto" : "none" }}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" />
@@ -115,7 +137,11 @@ function Sheet({ tile }: { tile: Tile }) {
             {tile.gateLock ? " · калитка на засове" : ""}
             {tile.burned ? " · обгорел" : ""}
             {tile.biome === "forest" && tile.amount <= 0 ? " · пни" : ""}
+            {tile.resource === "herb" && tile.amount > 0 ? ` · трава ×${tile.amount}` : ""}
+            {tile.resource === "herb" && tile.amount <= 0 ? " · трава сорвана" : ""}
             {tile.building === "field" && tile.amount <= 0 ? " · пустое поле" : ""}
+            {tile.bank && !tile.pit ? " · глина · лопатой две" : ""}
+            {tile.pit ? " · яма" : ""}
             {tile.regen > 0 && tile.amount <= 0 ? ` · ${tile.regen} нед.` : ""}
             {tile.herd ? ` · ${ANIMAL_LABEL[tile.herd.kind]} ×${tile.herd.count}` : ""}
           </p>
@@ -229,7 +255,7 @@ function PickPane({
       {!here && riverBlock && (
         <p className="text-[13px] text-danger">{tile.building === "moat" ? "Ров. Обходи или строй мост." : "Река. Обходи или строй мост."}</p>
       )}
-      {!here && !riverBlock && isWalkable(tile) && !locked && (
+      {!here && !riverBlock && isWalkable(tile, g.world) && !locked && (
         <Sticker
           title={down ? "Ползти" : open ? "Пойти внутрь" : "Пойти"}
           sub={down ? "к крыше — там поднимешься" : "путь и время"}
@@ -310,7 +336,15 @@ function PickPane({
       )}
       {loot.length === 1 && (
         <Sticker
-          title={loot[0]!.id === "gold" ? "Поднять золото" : loot[0]!.kind === "pile" ? "Поднять" : `Собрать ${ITEM_LABEL[loot[0]!.item]}`}
+          title={
+            loot[0]!.id === "gold"
+              ? "Поднять золото"
+              : loot[0]!.kind === "pile"
+                ? "Поднять"
+                : loot[0]!.item === "herb"
+                  ? "Сорвать траву"
+                  : `Собрать ${ITEM_LABEL[loot[0]!.item]}`
+          }
           sub={loot[0]!.label}
           ico={<Ico i={ICO.gather} className="size-11 overflow-hidden rounded-[12px]" />}
           onClick={() => takeLoot(loot[0]!.id)}
@@ -324,7 +358,9 @@ function PickPane({
           onClick={() => onPane("gather")}
         />
       )}
-      {wild.map((a) => (
+      {wild
+        .filter((a) => !(a.id === "fish" && g.character.hand === "spear"))
+        .map((a) => (
         <Sticker
           key={a.id}
           title={a.label}
@@ -344,6 +380,24 @@ function PickPane({
           }}
         />
       ))}
+      {here && !tile.pit && canDigReason(g.world, tile, g.character.hand) == null && (
+        <Sticker
+          title="Копать"
+          sub={tile.bank ? "2 глины · яма" : "1 глина · яма"}
+          ico={<Ico i={ICO.gather} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => g.excavateHere()}
+        />
+      )}
+      {here && !tile.pit && g.character.hand === "shovel" && canDigReason(g.world, tile, g.character.hand) && (
+        <p className="text-[13px] text-muted-foreground">{canDigReason(g.world, tile, g.character.hand)}</p>
+      )}
+      {near && tile.pit && (
+        <Sticker
+          title="Засыпать"
+          sub={fillPay(g.character.inventory) ? "глина" : "2 глины, или глина + дерево, или глина + камень"}
+          onClick={() => g.fillPit()}
+        />
+      )}
       {here && (tile.biome === "river" || tile.biome === "ford" || tile.building === "well") && (
         <Sticker
           title="Набрать воду"
@@ -352,8 +406,8 @@ function PickPane({
           onClick={() => g.fillBucket()}
         />
       )}
-      {here && g.character.water > 0 && tile.biome !== "river" && (
-        <Sticker title="Вылить воду" sub={`${g.character.water}`} onClick={() => g.pourWater()} />
+      {here && (g.character.pail ?? 0) > 0 && tile.biome !== "river" && (
+        <Sticker title="Вылить воду" sub={`${g.character.pail}`} onClick={() => g.pourWater()} />
       )}
       {tile.owner && tile.owner !== "you" && near && (
         <>
@@ -401,7 +455,7 @@ function PickPane({
       {near && atOwn && !shod && !g.character.village && ownYard && (
         <p className="text-[12px] text-muted-foreground">{clusterHint(g.world, g.character.pacts)}</p>
       )}
-      {near && tile.plot && tile.owner !== "сосед" && (
+      {near && atOwn && (
         <Sticker
           title="Двор"
           sub="тын, калитка, закон"
@@ -409,7 +463,7 @@ function PickPane({
           onClick={() => onPane("yard")}
         />
       )}
-      {near && !tile.caravan && (
+      {near && !tile.caravan && !isForeignYard(tile) && (
         <Sticker
           title="Строить"
           sub="дорога и постройки"
@@ -461,11 +515,11 @@ function PlacePane({ tile, here }: { tile: Tile; here: boolean; near: boolean })
   if (!here) {
     return <p className="mt-4 text-sm text-muted-foreground">Зайди внутрь — встань на клетку.</p>;
   }
-  const mine = tile.owner === "you" || tile.owned || !tile.owner;
+  const mine = isYours(tile);
   if (tile.caravan) return <LavkaBody tile={tile} />;
   if (tile.building === "shop" || tile.building === "stall") return <ShopBody tile={tile} />;
+  if (!mine && isForeignYard(tile)) return <ForeignStation tile={tile} />;
   if (tile.building === "shack" || tile.building === "house" || tile.building === "shed") {
-    if (!mine) return <ForeignStation tile={tile} />;
     return <HomeBody tile={tile} />;
   }
   if (
@@ -495,7 +549,7 @@ function PlacePane({ tile, here }: { tile: Tile; here: boolean; near: boolean })
 function ForeignStation({ tile }: { tile: Tile }) {
   return (
     <p className="mt-4 text-sm text-muted-foreground">
-      Чужой {BUILDING_LABEL[tile.building]}. Меню хозяина закрыто.
+      чужой двор. {BUILDING_LABEL[tile.building]}. Меню хозяина закрыто.
     </p>
   );
 }
@@ -679,7 +733,7 @@ function LavkaBody({ tile }: { tile: Tile }) {
 
 function ShopBody({ tile }: { tile: Tile }) {
   const g = useGame();
-  const mine = tile.owner === "you" || tile.owned;
+  const mine = isYours(tile);
   const chest = tile.chest;
   if (mine) {
     return (
@@ -736,7 +790,7 @@ function PenBody({ tile }: { tile: Tile }) {
           Положить корм · {ANIMAL_LABEL[tile.herd.kind]} ×{tile.herd.count}
         </Button>
       )}
-      {g.character.water > 0 && (
+      {(g.character.pail ?? 0) > 0 && (
         <Button variant="secondary" className="h-12" onClick={() => g.pourWater()}>
           Вылить воду
         </Button>
@@ -877,7 +931,7 @@ function ChestGrid({ tile }: { tile: Tile }) {
   const g = useGame();
   const chest = tile.chest;
   const inv = g.character.inventory;
-  const mine = tile.owner === "you" || tile.owned || !tile.owner;
+  const mine = isYours(tile);
   if (!mine) return null;
   const stock = ITEMS.filter((k) => (chest[k] ?? 0) > 0 || (inv[k] ?? 0) > 0).slice(0, 16);
   return (
@@ -911,6 +965,9 @@ function ChestGrid({ tile }: { tile: Tile }) {
 
 function BuildPane({ tile }: { tile: Tile }) {
   const g = useGame();
+  if (isForeignYard(tile)) {
+    return <p className="mt-4 text-sm text-muted-foreground">чужой двор</p>;
+  }
   return (
     <div className="mt-3">
       <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Дорога</p>

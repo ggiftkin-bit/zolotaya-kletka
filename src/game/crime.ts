@@ -86,6 +86,21 @@ export function ownerOf(tile: Tile | null): string {
   return tile?.owner || "";
 }
 
+/** Свой двор / своя клетка. Лавка тракта и хутор — нет. */
+export function isYours(tile: Tile | null | undefined): boolean {
+  if (!tile) return false;
+  if (tile.caravan) return false;
+  if (tile.owner === "you") return true;
+  if (tile.owner) return false;
+  return !!tile.owned;
+}
+
+/** Хутор или двор соседа. */
+export function isForeignYard(tile: Tile | null | undefined): boolean {
+  if (!tile) return false;
+  return !!tile.owner && tile.owner !== "you";
+}
+
 export function hasLaw(world: World, tile: Tile): boolean {
   if (tile.law) return true;
   const b = tile.plot ? plotBounds(world, tile.x, tile.y) : null;

@@ -31,7 +31,7 @@ export function isWooded(tile: Tile) {
 export function looksEmpty(tile: Tile) {
   if (tile.building === "field") return tile.amount <= 0;
   if (tile.amount > 0) return false;
-  return tile.scarred || tile.biome === "forest" || tile.biome === "fertile" || tile.biome === "mountain" || tile.biome === "ore";
+  return tile.scarred || tile.commons || tile.biome === "forest" || tile.biome === "fertile" || tile.biome === "mountain" || tile.biome === "ore";
 }
 
 export function markDepleted(tile: Tile) {
@@ -42,7 +42,10 @@ export function markDepleted(tile: Tile) {
 }
 
 export function tickGrow(world: World, season: Season) {
-  for (const t of world.tiles) growTile(world, t, season);
+  for (const t of world.tiles) {
+    if (world.fog && (world.fog[t.y * world.width + t.x] ?? 0) !== 2) continue;
+    growTile(world, t, season);
+  }
 }
 
 function growTile(world: World, t: Tile, season: Season) {
@@ -59,7 +62,14 @@ function growTile(world: World, t: Tile, season: Season) {
     t.regen = (t.regen ?? REGROW_WAIT[t.resource] ?? 3) - 1;
     if (t.regen > 0) return;
     t.amount = 1;
-    t.regen = t.resource === "wood" ? (season === "spring" ? 2 : 3) : (REGROW_WAIT[t.resource] ?? 3);
+    t.regen =
+      t.resource === "wood"
+        ? season === "spring"
+          ? 2
+          : 3
+        : t.resource === "herb"
+          ? 2
+          : (REGROW_WAIT[t.resource] ?? 3);
     return;
   }
 
@@ -67,9 +77,17 @@ function growTile(world: World, t: Tile, season: Season) {
     if (t.resource === "wood") {
       t.regen = (t.regen ?? 2) - 1;
       if (t.regen > 0) return;
-      t.amount += season === "spring" ? 1 : 1;
+      t.amount += 1;
       t.regen = season === "spring" ? 1 : 2;
       if (t.amount >= 5) t.scarred = false;
+      return;
+    }
+    if (t.resource === "herb") {
+      t.regen = (t.regen ?? 2) - 1;
+      if (t.regen > 0) return;
+      t.amount += 1;
+      t.regen = 2;
+      if (t.amount >= 3) t.scarred = false;
       return;
     }
     if (!t.scarred && t.amount < 3) t.amount += 1;

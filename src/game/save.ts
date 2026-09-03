@@ -11,7 +11,7 @@ const OLD_KEYS = [
   "zolotaya-kletka-v5",
 ];
 
-type SlimTile = {
+export type SlimTile = {
   b: Tile["biome"];
   rd?: RoadKind;
   rs?: ItemId;
@@ -41,6 +41,8 @@ type SlimTile = {
   wg?: string;
   cl?: 1;
   gl?: 1;
+  pi?: 1;
+  bk?: 1;
 };
 
 function emptyChest(): Inventory {
@@ -57,6 +59,8 @@ function emptyChest(): Inventory {
     rope: 0,
     bucket: 0,
     spear: 0,
+    shovel: 0,
+    rod: 0,
     bread: 0,
     plank: 0,
     bar: 0,
@@ -82,7 +86,7 @@ function slimChest(c?: Inventory | null): Partial<Inventory> | undefined {
   return n ? o : undefined;
 }
 
-function slimTile(t: Tile): SlimTile {
+export function slimTile(t: Tile): SlimTile {
   const o: SlimTile = { b: t.biome };
   if (t.road !== "none") o.rd = t.road;
   if (t.resource) {
@@ -117,10 +121,12 @@ function slimTile(t: Tile): SlimTile {
   if (t.wagon) o.wg = t.wagon;
   if (t.chestLock) o.cl = 1;
   if (t.gateLock) o.gl = 1;
+  if (t.pit) o.pi = 1;
+  if (t.bank) o.bk = 1;
   return o;
 }
 
-function fatTile(raw: Partial<Tile> & { b?: Tile["biome"] }, x: number, y: number): Tile {
+export function fatTile(raw: Partial<Tile> & { b?: Tile["biome"] }, x: number, y: number): Tile {
   const building = (raw.building ?? (raw as SlimTile).bd ?? "none") as BuildingKind;
   const matter = (raw.matter ?? (raw as SlimTile).mt ?? defaultMatter(building)) as Matter;
   const slim = raw as SlimTile;
@@ -157,6 +163,8 @@ function fatTile(raw: Partial<Tile> & { b?: Tile["biome"] }, x: number, y: numbe
     wagon: raw.wagon ?? slim.wg ?? "",
     chestLock: !!(raw.chestLock ?? slim.cl),
     gateLock: !!(raw.gateLock ?? slim.gl),
+    pit: !!(raw.pit ?? slim.pi),
+    bank: !!(raw.bank ?? slim.bk),
   };
 }
 
@@ -203,7 +211,19 @@ export function loadGame(): GameState | null {
     const width = parsed.world.width ?? MAP_W;
     const height = parsed.world.height ?? MAP_H;
     const tiles = inflateTiles(parsed.world.tiles, width, height);
-    if (!tiles || !parsed.character) return null;
+    if (!parsed.character) return null;
+    if (!tiles) {
+      return {
+        ...(parsed as GameState),
+        world: {
+          seed: parsed.world.seed ?? "kletka-seed-01",
+          width,
+          height,
+          tiles: [],
+        },
+        started: !!parsed.started,
+      };
+    }
     return {
       ...(parsed as GameState),
       world: {
@@ -229,7 +249,7 @@ export function saveGame(state: GameState): boolean {
       seed: state.world.seed,
       width: state.world.width,
       height: state.world.height,
-      tiles: state.world.tiles.map(slimTile),
+      tiles: state.bookOn ? [] : state.world.tiles.map(slimTile),
     },
     character: state.character,
     weather: state.weather,

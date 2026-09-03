@@ -58,8 +58,7 @@ export function workMs(kind: BusyKind, herdKind: string | null, c: Character): n
   if (kind === "fish") sec = 35;
   if (kind === "hunt" && c.hand === "spear") sec *= 0.7;
   if (kind === "catch" && c.hand === "rope") sec *= 0.85;
-  if (kind === "fish" && c.hand === "rope") sec *= 0.8;
-  if (kind === "fish" && c.hand === "spear") sec *= 0.92;
+  if (kind === "fish" && c.hand === "rod") sec *= 0.8;
   const skill =
     kind === "catch" ? c.skills.agro : kind === "hunt" ? c.skills.fight + c.skills.survival : c.skills.survival;
   sec *= Math.max(0.6, 1 - skill * 0.03);

@@ -19,6 +19,12 @@ declare global {
       pos: () => { x: number; y: number; t: string };
       debug: () => unknown;
       pace: () => unknown;
+      focusMe: () => void;
+      excavateHere: () => void;
+      fillPit: () => void;
+      burnHere: () => void;
+      fishHere: () => void;
+      setHand: (item: string | null) => void;
       grant: (k: "wood" | "stone" | "cart" | "horse" | "gold" | "wagon" | "lock") => void;
       hangLock: (kind: "chest" | "gate") => void;
       takeLock: (kind: "chest" | "gate") => void;

@@ -174,14 +174,10 @@ function sprinkleResources(tiles: Tile[], rng: () => number) {
       if (rng() < 0.55) {
         t.resource = "wood";
         t.amount = 6 + Math.floor(rng() * 7);
-      } else if (rng() < 0.18) {
-        t.resource = "herb";
-        t.amount = 3 + Math.floor(rng() * 3);
-        t.biome = "plains";
       } else {
         t.biome = "plains";
-        t.resource = null;
-        t.amount = 0;
+        t.resource = "herb";
+        t.amount = 3 + Math.floor(rng() * 3);
       }
     } else if (t.biome === "mountain") {
       if (rng() < 0.38) {
@@ -200,6 +196,9 @@ function sprinkleResources(tiles: Tile[], rng: () => number) {
       if (rng() < 0.08) {
         t.resource = "food";
         t.amount = 2 + Math.floor(rng() * 2);
+      } else if (rng() < 0.22) {
+        t.resource = "herb";
+        t.amount = 2 + Math.floor(rng() * 3);
       }
     } else if (t.biome === "swamp") {
       if (rng() < 0.4) {
@@ -468,6 +467,75 @@ export function migrateStations(world: World) {
     if (t.wagon == null) t.wagon = "";
     if (t.chestLock == null) t.chestLock = false;
     if (t.gateLock == null) t.gateLock = false;
+    if (t.pit == null) t.pit = false;
+    if (t.bank == null) t.bank = false;
+  }
+  stampClayBanks(world);
+  stampMeadowHerb(world.tiles);
+}
+
+export function stampMeadowHerb(tiles: Tile[]) {
+  for (const t of tiles) {
+    if (t.commons) {
+      if (t.resource === "herb" && t.building === "none" && !t.caravan && !t.plot) {
+        t.resource = null;
+        t.amount = 0;
+        t.scarred = false;
+        t.regen = 0;
+      }
+      continue;
+    }
+    if (t.biome !== "plains") continue;
+    if (t.caravan || t.building !== "none" || t.pit || t.bank || t.plot) continue;
+    if (t.resource === "herb" && t.amount <= 0 && !t.scarred) {
+      t.amount = 2;
+      t.regen = 0;
+    }
+  }
+}
+
+export function stampClayBanks(world: World) {
+  if (world.tiles.some((t) => t.bank)) return;
+  const rng = rngFromSeed(world.seed || "kletka-seed-01", 17);
+  placeBanks(world.tiles, rng);
+}
+
+function placeBanks(tiles: Tile[], rng: () => number) {
+  const riverish = (x: number, y: number) => {
+    const t = tiles[idx(x, y)];
+    return t && (t.biome === "river" || t.biome === "ford");
+  };
+  const eligible = (t: Tile) => {
+    if (!t) return false;
+    if (t.pit || t.bank || t.commons || t.plot || t.caravan) return false;
+    if (t.building !== "none" || t.road !== "none") return false;
+    if (t.biome === "river" || t.biome === "ford" || t.biome === "swamp" || t.biome === "mountain" || t.biome === "ore") return false;
+    if (t.biome !== "plains" && t.biome !== "fertile") return false;
+    const near =
+      riverish(t.x + 1, t.y) || riverish(t.x - 1, t.y) || riverish(t.x, t.y + 1) || riverish(t.x, t.y - 1);
+    return near;
+  };
+  for (let y = 1; y < MAP_H - 1; y++) {
+    let run = 0;
+    for (let x = 1; x < MAP_W - 1; x++) {
+      const t = tiles[idx(x, y)]!;
+      if (eligible(t) && rng() < 0.42) {
+        run += 1;
+        if (run >= 2 && run <= 5) {
+          t.bank = true;
+          if (t.resource === "clay") {
+            t.resource = null;
+            t.amount = 0;
+          }
+        }
+        if (run >= 5) {
+          run = 0;
+          x += 1 + Math.floor(rng() * 4);
+        }
+      } else {
+        run = 0;
+      }
+    }
   }
 }
 
@@ -504,12 +572,14 @@ function cloneWorld(world: World): World {
       wagon: t.wagon ?? "",
       chestLock: !!t.chestLock,
       gateLock: !!t.gateLock,
+      pit: !!t.pit,
+      bank: !!t.bank,
       regen: t.regen ?? 0,
     })),
   };
 }
 
-const CACHE_VER = "v13-";
+const CACHE_VER = "v15-";
 
 export function warmupWorld(seed: string) {
   if (worldCache.has(CACHE_VER + seed)) return;
@@ -568,6 +638,8 @@ function buildWorld(seed: string): World {
           rope: 0,
           bucket: 0,
           spear: 0,
+          shovel: 0,
+          rod: 0,
           bread: 0,
           plank: 0,
           bar: 0,
@@ -595,6 +667,8 @@ function buildWorld(seed: string): World {
         wagon: "",
         chestLock: false,
         gateLock: false,
+        pit: false,
+        bank: false,
       };
     }
   }
@@ -610,6 +684,7 @@ function buildWorld(seed: string): World {
   placeFords(tiles, extraRng);
   sprinkleResources(tiles, extraRng);
   placeClay(tiles, extraRng);
+  placeBanks(tiles, extraRng);
 
   const spawn = spawnPoint();
   for (let dy = -3; dy <= 3; dy++) {
@@ -709,6 +784,8 @@ function buildWorld(seed: string): World {
     }
   }
 
+  stampMeadowHerb(tiles);
+
   return { seed, width: MAP_W, height: MAP_H, tiles };
 }
 
@@ -717,8 +794,12 @@ export function tileAt(world: World, x: number, y: number): Tile | null {
   return world.tiles[y * world.width + x] ?? null;
 }
 
-export function isWalkable(tile: Tile | null): boolean {
+export function isWalkable(tile: Tile | null, world?: World): boolean {
   if (!tile) return false;
+  if (world?.fog) {
+    const f = world.fog[tile.y * world.width + tile.x] ?? 0;
+    if (f === 0) return false;
+  }
   if (tile.building === "moat") return tile.road === "bridge";
   if (tile.biome === "river") return tile.road === "bridge";
   return true;

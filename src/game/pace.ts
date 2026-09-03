@@ -12,8 +12,8 @@ export const JAIL_MS = 80_000;
 export const BAIL_GOLD = 12;
 export const DOWN_MS = 90_000;
 export const DEAD_MS = 120_000;
-/** One game day: 8 ticks × 10 s. Walk lock after death. */
-export const DAY_MS = 80_000;
+/** One game day: 8 ticks × 30 s. Walk lock after death. */
+export const DAY_MS = 240_000;
 
 /** First death 0, then 10, 20, 30… */
 export function deathFee(deaths: number): number {
@@ -61,4 +61,18 @@ export function nextEnergyIn(c: Character, now: number, roof: boolean): number {
   const ms = energyPeriod({ roof, sleeping: !!c.resting, hungry: c.satiety < 25 });
   const passed = (now - last) % ms;
   return ms - passed;
+}
+
+/** Старые сейвы держали в `water` ведро 0–3. Теперь вода тела 0–100, ведро — `pail`. */
+export function splitBodyWater(raw: { water?: number; pail?: number }): { water: number; pail: number } {
+  if (typeof raw.pail === "number") {
+    return {
+      water: Math.min(100, Math.max(0, raw.water ?? 90)),
+      pail: Math.max(0, raw.pail),
+    };
+  }
+  const w = raw.water;
+  if (typeof w !== "number") return { water: 90, pail: 0 };
+  if (w <= 12) return { water: 90, pail: w };
+  return { water: Math.min(100, w), pail: 0 };
 }

@@ -104,6 +104,8 @@ export type ItemId =
   | "rope"
   | "bucket"
   | "spear"
+  | "shovel"
+  | "rod"
   | "bread"
   | "plank"
   | "bar"
@@ -157,6 +159,10 @@ export type Tile = {
   chestLock: boolean;
   /** Yard-wide latch: locked gates block non-owners. */
   gateLock: boolean;
+  /** Dug pit. Neighbors merge visually. */
+  pit: boolean;
+  /** Yellow clay bank along the river. Dig → 2 clay, then pit. */
+  bank: boolean;
 };
 
 export type Inventory = Record<ItemId, number>;
@@ -192,7 +198,12 @@ export type World = {
   width: number;
   height: number;
   tiles: Tile[];
+  /** 0 тьма · 1 отпечаток · 2 живое пятно. Нет массива — всё живое (карман v8). */
+  fog?: number[];
+  /** Версия клетки в книге. */
+  ver?: number[];
 };
+
 
 export type Character = {
   name: string;
@@ -217,7 +228,10 @@ export type Character = {
   carts: number;
   /** True while a wagon is hitched to the horse. Not an inventory item. */
   wagon: boolean;
+  /** 0–100 · жажда тела. Ведро — `pail`. */
   water: number;
+  /** Глотков в ведре (0–3). Не путать с водой тела. */
+  pail: number;
   energyAt: number;
   wanted: number;
   jailedUntil: number;
@@ -248,6 +262,14 @@ export type Trader = {
   last: string;
 };
 
+export type OtherPawn = {
+  id: string;
+  name: string;
+  color: string;
+  x: number;
+  y: number;
+};
+
 export type GameState = {
   world: World;
   character: Character;
@@ -268,6 +290,8 @@ export type GameState = {
   preview: TravelLeg[] | null;
   travel: Travel | null;
   clockAt: number;
+  /** Когда прошёл последний мировой тик — полоса суток без скачка. */
+  tickAt: number;
   jobs: JobPost[];
   trader: Trader;
   plotMark: { x: number; y: number } | null;
@@ -275,4 +299,9 @@ export type GameState = {
   started: boolean;
   floaters: Floater[];
   hint: { text: string; tone: "ok" | "bad" | "gold" } | null;
+  /** Книга мира открыта. Карман v8 — только сетка. */
+  bookOn: boolean;
+  bookAt: string;
+  bookStatus: "idle" | "loading" | "ready" | "offline";
+  others: OtherPawn[];
 };

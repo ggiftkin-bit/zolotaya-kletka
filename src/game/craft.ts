@@ -1,6 +1,6 @@
 import type { ItemId, Profession, Tile } from "./types";
 
-export type CraftKind = "coal" | "plank" | "bar" | "axe" | "bread" | "smoked" | "tonic" | "rope" | "bucket" | "spear" | "wheel" | "lock";
+export type CraftKind = "coal" | "plank" | "bar" | "axe" | "bread" | "smoked" | "tonic" | "rope" | "bucket" | "spear" | "shovel" | "rod" | "wheel" | "lock";
 
 export type BenchId = "home" | "bench" | "forge" | "oven" | "smoke" | "herbs" | "coalpit" | "workshop";
 
@@ -29,13 +29,15 @@ export const CRAFTS: CraftDef[] = [
   { id: "rope", out: "rope", n: 1, need: { herb: 2 }, who: "any", bench: "home", energy: 1, label: "верёвка", hint: "2 травы · любой дома" },
   { id: "bucket", out: "bucket", n: 1, need: { wood: 2 }, who: "any", bench: "home", energy: 1, label: "ведро", hint: "2 дерева · любой дома" },
   { id: "spear", out: "spear", n: 1, need: { wood: 2 }, who: "any", bench: "home", energy: 1, label: "копьё", hint: "2 дерева · любой дома" },
+  { id: "shovel", out: "shovel", n: 1, need: { wood: 2 }, who: "any", bench: "home", energy: 1, label: "лопата", hint: "2 дерева · любой дома. Копать землю" },
+  { id: "rod", out: "rod", n: 1, need: { wood: 1, rope: 1 }, who: "any", bench: "home", energy: 1, label: "удочка", hint: "1 дерево + 1 верёвка · любой дома. Рыба только ею" },
 ];
 
 export const PROF_BLURB: Record<Profession, string> = {
-  wanderer: "Своего станка нет. Дома — верёвка, копьё, ведро.",
+  wanderer: "Своего станка нет. Дома — верёвка, копьё, ведро, лопата, удочка.",
   lumberjack: "Дровница: 3 дерева → 2 угля. Без угля кузнец не льёт.",
   miner: "Сруб у горы. Больше руды. Кристалл ищет только он.",
-  fisher: "Коптильня: рыба → копчёное. Сдать 6 золота.",
+  fisher: "Коптильня: рыба → копчёное. Ловят удочкой: дерево + верёвка дома.",
   farmer: "Поле и загон. Верёвку дома сколотит любой.",
   baker: "Печь: 2 еды → хлеб. Сдать 6 золота.",
   carpenter: "Верстак: доска, колесо. Телега — 2 колеса, 4 дерева и слиток. В сумку не кладётся.",

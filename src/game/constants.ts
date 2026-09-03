@@ -18,6 +18,8 @@ export const ITEMS: ItemId[] = [
   "rope",
   "bucket",
   "spear",
+  "shovel",
+  "rod",
   "bread",
   "plank",
   "bar",
@@ -41,6 +43,8 @@ export const ITEM_WEIGHT: Record<ItemId, number> = {
   rope: 0.4,
   bucket: 1.2,
   spear: 1.5,
+  shovel: 1.4,
+  rod: 0.8,
   bread: 0.4,
   plank: 1.6,
   bar: 2.2,
@@ -102,6 +106,8 @@ export const ITEM_LABEL: Record<ItemId, string> = {
   rope: "верёвка",
   bucket: "ведро",
   spear: "копьё",
+  shovel: "лопата",
+  rod: "удочка",
   bread: "хлеб",
   plank: "доска",
   bar: "слиток",
@@ -163,6 +169,8 @@ export const GATHER_YIELD: Record<ItemId, number> = {
   rope: 0,
   bucket: 0,
   spear: 0,
+  shovel: 0,
+  rod: 0,
   bread: 0,
   plank: 0,
   bar: 0,
@@ -190,8 +198,8 @@ export const SEASON_WEATHER: Record<Season, Weather[]> = {
   winter: ["snow", "snow", "clear", "snow"],
 };
 
-/** Real seconds per world tick at ×1. Prod brief = 30 min; соло-стол сжат. */
-export const TICK_SEC = 10;
+/** Real seconds per world tick at ×1. День и ночь по 2 мин (4 тика × 30 с). */
+export const TICK_SEC = 30;
 export const TICKS_PER_DAY = 8;
 export const DAYS_PER_WEEK = 6;
 export const WEEKS_PER_SEASON = 3;
@@ -229,7 +237,7 @@ export const BUILD_OK: Record<Exclude<BuildingKind, "none">, Biome[]> = {
   moat: ["plains", "fertile", "forest", "swamp"],
 };
 
-/** 4×4 ноша. Редкое (глина, кристалл) всплывает, если есть. */
+/** Ноша: только то, что есть, три квадрата в ряд. */
 export const BAG_CELLS: ItemId[] = [
   "wood",
   "stone",
@@ -237,8 +245,11 @@ export const BAG_CELLS: ItemId[] = [
   "food",
   "fish",
   "herb",
+  "clay",
   "rope",
+  "rod",
   "spear",
+  "shovel",
   "bucket",
   "coal",
   "plank",

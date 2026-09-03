@@ -37,7 +37,7 @@ export function lootOn(tile: Tile): Loot[] {
       kind: "resource",
       item: tile.resource,
       n: tile.amount,
-      label: `${ITEM_LABEL[tile.resource]} ×${tile.amount}`,
+      label: tile.resource === "herb" ? `Трава ×${tile.amount} · сорвать` : `${ITEM_LABEL[tile.resource]} ×${tile.amount}`,
     });
   }
   return out;
@@ -49,6 +49,7 @@ export function canOpenPlace(tile: Tile) {
 
 export function placeTitle(tile: Tile) {
   if (tile.caravan) return "Лавка на тракте";
+  if (tile.bank && tile.building === "none") return "берег";
   if (tile.wagon) {
     if (tile.building !== "none") return `${BUILDING_LABEL[tile.building]} · телега`;
     return tile.wagon === "you" ? "Телега" : `Телега · ${tile.wagon}`;
@@ -120,7 +121,7 @@ export function wildActs(tile: Tile, world: World) {
     acts.push({ id: "catch", label: "Ловить лошадь", sub: "верёвка в руке" });
   }
   if (canFishOn(world, tile)) {
-    acts.push({ id: "fish", label: "Рыба", sub: "снасть в руке · ждёт" });
+    acts.push({ id: "fish", label: "Рыба", sub: "удочка · дерево + верёвка дома" });
   }
   return acts;
 }

@@ -4,11 +4,12 @@ import { isWatered } from "@/game/life";
 import { isWooded } from "@/game/grow";
 import { FENCE_STR, normRect } from "@/game/fence";
 import { TILE } from "@/game/constants";
-import { cam as viewCam } from "@/game/cam";
+import { cam as viewCam, look } from "@/game/cam";
 import { useGame } from "@/game/store";
 import type { Biome, Tile, World } from "@/game/types";
 import { viewPos } from "@/game/view-pos";
 import { tileAt } from "@/game/worldgen";
+import { FOG_DARK, FOG_MEM, fogAt } from "@/game/book";
 
 const BIOME_FILL: Record<Biome, string> = {
   plains: "#c5b48a",
@@ -105,6 +106,9 @@ export function BoardCanvas() {
       if (ax || ay) {
         c.x += ax * panSpeed * dt;
         c.y += ay * panSpeed * dt;
+      } else if (look.until > now) {
+        c.x += (look.x - c.x) * (1 - Math.exp(-dt * 6));
+        c.y += (look.y - c.y) * (1 - Math.exp(-dt * 6));
       } else if (g.travel && !drag.current) {
         const tx = viewPos.x * TILE + TILE / 2;
         const ty = viewPos.y * TILE + TILE / 2;
@@ -196,7 +200,7 @@ export function BoardCanvas() {
         if (!d) return;
         const dx = e.clientX - d.x;
         const dy = e.clientY - d.y;
-        if (Math.hypot(dx, dy) > 12) d.moved = true;
+        if (Math.hypot(dx, dy) > 22) d.moved = true;
         if (d.moved) {
           if (hold.current) {
             window.clearTimeout(hold.current);
@@ -204,7 +208,6 @@ export function BoardCanvas() {
           }
           cam.current.x = d.cx - dx / cam.current.z;
           cam.current.y = d.cy - dy / cam.current.z;
-          if (useGame.getState().inspect) useGame.getState().closeInspect();
         }
       }}
       onPointerUp={(e) => {
@@ -219,6 +222,7 @@ export function BoardCanvas() {
         const skip = held.current || d?.moved || pointers.current.size > 0 || pinched.current;
         if (pointers.current.size === 0) pinched.current = false;
         if (held.current) held.current = false;
+        if (d?.moved) useGame.getState().closeInspect();
         if (skip) return;
         const t = toTile(e.clientX, e.clientY);
         if (t) useGame.getState().clickTile(t.x, t.y);
@@ -271,9 +275,19 @@ function draw(
   const night = g.phase === "night" ? 0.22 : g.weather === "snow" ? 0.08 : 0;
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
+      const fog = fogAt(g.world, x, y);
+      if (fog === FOG_DARK) {
+        ctx.fillStyle = "#1c1612";
+        ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+        continue;
+      }
       const tile = tileAt(g.world, x, y);
       if (!tile) continue;
       paintTile(ctx, tile, night, g.world);
+      if (fog === FOG_MEM) {
+        ctx.fillStyle = "rgba(28, 22, 18, 0.5)";
+        ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+      }
     }
   }
 
@@ -342,6 +356,24 @@ function draw(
     ctx.stroke();
   }
 
+  for (const o of g.others ?? []) {
+    if (o.x === g.character.x && o.y === g.character.y) continue;
+    if (fogAt(g.world, o.x, o.y) !== 2) continue;
+    const ox = o.x * TILE + TILE / 2;
+    const oy = o.y * TILE + TILE / 2;
+    ctx.fillStyle = "rgba(28,22,18,0.22)";
+    ctx.beginPath();
+    ctx.ellipse(ox, oy + 11, 9, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = o.color || "#6b3a2a";
+    ctx.beginPath();
+    ctx.arc(ox, oy - 2, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#efe6d6";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
   ctx.restore();
 
   if (g.weather === "rain" || g.weather === "snow") {
@@ -372,6 +404,9 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
   }
 
   paintCut(ctx, tile, x, y);
+
+  if (tile.bank && !tile.pit) paintBank(ctx, x, y);
+  if (tile.pit) paintPit(ctx, tile, world, x, y);
 
   if (tile.village) {
     ctx.fillStyle = "rgba(70, 90, 110, 0.2)";
@@ -420,7 +455,9 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
 
   paintFence(ctx, tile, x, y, world);
 
-  if (tile.amount > 0 && tile.resource && tile.building === "none" && !tile.caravan) {
+  paintHerb(ctx, tile, x, y);
+
+  if (tile.amount > 0 && tile.resource && tile.resource !== "herb" && tile.building === "none" && !tile.caravan) {
     const n = Math.min(3, Math.max(1, Math.ceil(tile.amount / 3)));
     const col =
       tile.resource === "wood"
@@ -431,13 +468,11 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
             ? "#6b4a2f"
             : tile.resource === "fish"
               ? "#3a5560"
-              : tile.resource === "herb"
-                ? "#4a6b3a"
-                : tile.resource === "clay"
-                  ? "#8a623c"
-                  : tile.resource === "crystal"
-                    ? "#5a4a7a"
-                    : "#8a6230";
+              : tile.resource === "clay"
+                ? "#8a623c"
+                : tile.resource === "crystal"
+                  ? "#5a4a7a"
+                  : "#8a6230";
     ctx.fillStyle = col;
     for (let i = 0; i < n; i++) {
       ctx.beginPath();
@@ -673,6 +708,88 @@ function paintFence(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: num
   }
 }
 
+function paintBank(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  ctx.fillStyle = "rgba(201, 168, 82, 0.42)";
+  ctx.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
+  ctx.fillStyle = "rgba(166, 124, 58, 0.55)";
+  ctx.beginPath();
+  ctx.ellipse(x + 14, y + TILE - 12, 6, 4, 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(x + TILE - 13, y + TILE - 16, 5, 3.5, -0.3, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function paintPit(ctx: CanvasRenderingContext2D, tile: Tile, world: World, x: number, y: number) {
+  const n = tileAt(world, tile.x, tile.y - 1)?.pit;
+  const s = tileAt(world, tile.x, tile.y + 1)?.pit;
+  const w = tileAt(world, tile.x - 1, tile.y)?.pit;
+  const e = tileAt(world, tile.x + 1, tile.y)?.pit;
+  const padN = n ? 0 : 7;
+  const padS = s ? 0 : 7;
+  const padW = w ? 0 : 7;
+  const padE = e ? 0 : 7;
+  const rx = x + padW;
+  const ry = y + padN;
+  const rw = TILE - padW - padE;
+  const rh = TILE - padN - padS;
+  ctx.fillStyle = "rgba(28, 22, 18, 0.82)";
+  ctx.beginPath();
+  ctx.roundRect(rx, ry, rw, rh, n || s || w || e ? 4 : 12);
+  ctx.fill();
+  ctx.fillStyle = "rgba(58, 48, 36, 0.9)";
+  ctx.beginPath();
+  ctx.ellipse(x + TILE / 2, y + TILE / 2 + 2, rw * 0.28, rh * 0.22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  if (tile.resource === "ore" && tile.amount > 0) {
+    ctx.fillStyle = "#6b4a2f";
+    ctx.beginPath();
+    ctx.arc(x + TILE * 0.62, y + TILE * 0.58, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function paintHerb(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number) {
+  if (tile.building !== "none" || tile.caravan) return;
+  const has = tile.resource === "herb" && tile.amount > 0;
+  const meadow = tile.biome === "plains" && !tile.commons;
+  if (meadow && has) {
+    ctx.fillStyle = "rgba(86, 118, 58, 0.28)";
+    ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
+  }
+  if (!has) {
+    if (meadow && tile.resource === "herb" && tile.scarred) {
+      ctx.fillStyle = "rgba(120, 108, 72, 0.28)";
+      ctx.fillRect(x + 6, y + 16, TILE - 12, 14);
+    }
+    return;
+  }
+  const n = Math.min(5, Math.max(1, tile.amount));
+  const tufts: Array<[number, number]> = [
+    [8, 30],
+    [20, 34],
+    [32, 28],
+    [14, 20],
+    [28, 18],
+  ];
+  for (let i = 0; i < n; i++) {
+    const [ox, oy] = tufts[i]!;
+    const dark = i % 2 === 0 ? "#3d5c32" : "#4a6b3a";
+    const light = i % 2 === 0 ? "#5a7a42" : "#6a8a4a";
+    for (let b = 0; b < 3; b++) {
+      const bx = x + ox + b * 3.2;
+      const tip = y + oy - (10 + (b === 1 ? 4 : 0) + (i === 0 ? 2 : 0));
+      ctx.fillStyle = b === 1 ? light : dark;
+      ctx.beginPath();
+      ctx.moveTo(bx, y + oy);
+      ctx.lineTo(bx + 2.2, tip);
+      ctx.lineTo(bx + 4.4, y + oy);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+}
+
 function paintCut(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number) {
   if (tile.biome === "forest" && tile.amount < 4) {
     const stumps = tile.amount <= 0 ? 4 : 2;
@@ -747,12 +864,17 @@ function drawMinimap(
   const step = 2;
   for (let y = 0; y < g.world.height; y += step) {
     for (let x = 0; x < g.world.width; x += step) {
+      const fog = fogAt(g.world, x, y);
+      if (fog === FOG_DARK) continue;
       const t = tileAt(g.world, x, y);
       if (!t) continue;
       ctx.fillStyle = BIOME_FILL[t.biome === "forest" && t.amount < 4 ? "plains" : t.biome];
+      if (fog === FOG_MEM) ctx.fillStyle = "#3a3228";
+      if (t.bank && !t.pit) ctx.fillStyle = "#c9b06a";
+      if (t.pit) ctx.fillStyle = "#3a3228";
       ctx.fillRect(ox + x * s, oy + y * s, s * step, s * step);
       if (t.road !== "none") {
-        ctx.fillStyle = "#5c4a32";
+        ctx.fillStyle = fog === FOG_MEM ? "#4a3c2c" : "#5c4a32";
         ctx.fillRect(ox + x * s, oy + y * s, s * step, s * step);
       }
     }

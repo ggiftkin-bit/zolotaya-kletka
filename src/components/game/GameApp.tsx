@@ -6,9 +6,12 @@ import { nextGoal } from "@/game/goal";
 import { enterCost } from "@/game/travel";
 import { useGame } from "@/game/store";
 import { tileAt } from "@/game/worldgen";
+import { fogAt } from "@/game/book";
+import { pullSpot } from "@/game/book-sync";
 import { BoardCanvas } from "./BoardCanvas";
 import { Hud } from "./Hud";
 import { StartScreen } from "./StartScreen";
+import { TableSplash } from "./TableSplash";
 
 class Boundary extends Component<{ children: ReactNode }, { err: string | null }> {
   state = { err: null as string | null };
@@ -43,18 +46,50 @@ class Boundary extends Component<{ children: ReactNode }, { err: string | null }
 export function GameApp() {
   const started = useGame((s) => s.started);
   const boot = useGame((s) => s.boot);
+  const openBook = useGame((s) => s.openBook);
   const persist = useGame((s) => s.persist);
+  const bookStatus = useGame((s) => s.bookStatus);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void ensureArt();
-    try {
-      boot();
-    } catch {
-      /* ignore broken save */
-    }
-    useGame.getState().warmup();
-  }, [boot]);
+    let live = true;
+    void (async () => {
+      const ok = await openBook();
+      if (!live) return;
+      if (!ok) {
+        try {
+          boot();
+        } catch {
+          /* ignore broken save */
+        }
+      }
+      useGame.getState().warmup();
+    })();
+    return () => {
+      live = false;
+    };
+  }, [boot, openBook]);
+
+  useEffect(() => {
+    if (!started) return;
+    const beat = () => {
+      void pullSpot();
+    };
+    const id = window.setInterval(beat, 4000);
+    const onVis = () => {
+      if (document.visibilityState === "hidden") return;
+      useGame.getState().catchUp();
+      void pullSpot(true);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onVis);
+    };
+  }, [started]);
 
   useEffect(() => {
     window.__gameTest = {
@@ -122,8 +157,50 @@ export function GameApp() {
             ? { x: s.world.tiles.find((t) => t.caravan)!.x, y: s.world.tiles.find((t) => t.caravan)!.y }
             : null,
           hamlets,
+          hand: s.character.hand,
+          invClay: s.character.inventory.clay ?? 0,
+          invShovel: s.character.inventory.shovel ?? 0,
+          invRod: s.character.inventory.rod ?? 0,
+          bookOn: s.bookOn,
+          bookStatus: s.bookStatus,
+          fogHere: fogAt(s.world, s.character.x, s.character.y),
+          tileVer: s.world.ver?.[s.character.y * s.world.width + s.character.x] ?? 0,
+          fogLive: s.world.fog ? s.world.fog.filter((f) => f === 2).length : s.world.tiles.length,
+          meadowHerb: (() => {
+            const t = s.world.tiles.find((q) => q.commons && q.resource === "herb" && q.amount > 0 && q.building === "none" && !q.caravan);
+            return t ? { x: t.x, y: t.y, n: t.amount } : null;
+          })(),
+          meadowGrass: (() => {
+            const open = s.world.tiles.filter(
+              (q) => q.commons && q.building === "none" && !q.caravan && q.biome !== "river" && q.biome !== "ford" && !q.pit,
+            );
+            const herb = open.filter((q) => q.resource === "herb" && q.amount > 0);
+            return { open: open.length, herb: herb.length };
+          })(),
+          pitHere: (() => {
+            const t = s.world.tiles[s.character.y * s.world.width + s.character.x];
+            return t ? { pit: !!t.pit, bank: !!t.bank } : null;
+          })(),
+          hamletShop: (() => {
+            const t = s.world.tiles.find((q) => q.owner && q.owner !== "you" && (q.building === "shop" || q.building === "stall"));
+            return t ? { x: t.x, y: t.y, owner: t.owner, building: t.building } : null;
+          })(),
+          ford: (() => {
+            const t = s.world.tiles.find((q) => q.biome === "ford");
+            return t ? { x: t.x, y: t.y } : null;
+          })(),
+          bank: (() => {
+            const t = s.world.tiles.find((q) => q.bank && !q.pit);
+            return t ? { x: t.x, y: t.y } : null;
+          })(),
         };
       },
+      focusMe: () => useGame.getState().focusMe(),
+      excavateHere: () => useGame.getState().excavateHere(),
+      fillPit: () => useGame.getState().fillPit(),
+      burnHere: () => useGame.getState().burnHere(),
+      fishHere: () => useGame.getState().fishHere(),
+      setHand: (item: string | null) => useGame.getState().equipHand(item as never),
       pace: () => {
         const s = useGame.getState();
         const from = tileAt(s.world, s.character.x, s.character.y);
@@ -355,6 +432,10 @@ export function GameApp() {
       setError(e instanceof Error ? e.message : "Стол не сложился. Попробуй ещё раз.");
     }
   };
+
+  if (bookStatus === "loading" && !started) {
+    return <TableSplash text="Открываю книгу мира…" />;
+  }
 
   if (!started) {
     return <StartScreen error={error} onStart={onStart} />;

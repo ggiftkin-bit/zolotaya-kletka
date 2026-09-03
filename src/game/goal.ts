@@ -7,7 +7,7 @@ export function personLevel(skills: Skills): number {
 }
 
 export const BUILD_HINT: Record<Exclude<BuildingKind, "none">, string> = {
-  shack: "сон и копьё/верёвка",
+  shack: "сон, верёвка, копьё, удочка",
   house: "крепкий сон, сундук",
   field: "растёт еда",
   pen: "коровы, молоко",

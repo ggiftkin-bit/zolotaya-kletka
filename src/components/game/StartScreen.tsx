@@ -17,6 +17,8 @@ export function StartScreen({ error, onStart }: Props) {
   const [seed, setSeed] = useState("kletka-seed-01");
   const [more, setMore] = useState(false);
   const [help, setHelp] = useState(false);
+  const bookStatus = useGame((s) => s.bookStatus);
+  const bookOn = useGame((s) => s.bookOn);
 
   useEffect(() => {
     useGame.getState().warmup();
@@ -36,13 +38,13 @@ export function StartScreen({ error, onStart }: Props) {
 
       <div className="relative z-10 mx-auto flex min-h-dvh w-full max-w-md flex-col justify-end px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-10">
         <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-panel">
-          стол на одного
+          одна поляна
         </p>
         <h1 className="mt-2 font-display text-4xl leading-none tracking-tight text-panel md:text-5xl">
           Золотая Клетка
         </h1>
         <p className="mt-3 max-w-sm text-sm leading-relaxed text-panel/80">
-          Мультяшная настолка жизни: карта, ход со временем, профессии и свой хутор.
+          Клетка пишется в книгу мира. Пока ты один — та же поляна, на которую потом выйдут другие.
         </p>
         <div className="mt-4 flex gap-2">
           {[ICO.gold, ICO.wood, ICO.food, ICO.stake, ICO.house, ICO.bag].map((i) => (
@@ -84,6 +86,8 @@ export function StartScreen({ error, onStart }: Props) {
             ))}
           </div>
 
+          {!bookOn && (
+            <>
           <button
             type="button"
             className="mt-4 text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
@@ -98,6 +102,8 @@ export function StartScreen({ error, onStart }: Props) {
               onChange={(e) => setSeed(e.target.value)}
               className="mt-2 h-12 w-full rounded-[12px] border border-border bg-raised px-3 font-mono text-sm text-foreground outline-none ring-ring focus:ring-2"
             />
+          )}
+            </>
           )}
 
           {error && <p className="mt-3 text-sm text-danger">{error}</p>}
@@ -115,8 +121,8 @@ export function StartScreen({ error, onStart }: Props) {
             </div>
           )}
 
-          <Button type="submit" className="mt-5 h-12 w-full text-base" size="lg">
-            Выйти на поляну
+          <Button type="submit" className="mt-5 h-12 w-full text-base" size="lg" disabled={bookStatus === "loading"}>
+            {bookStatus === "loading" ? "Книга открывается…" : "Выйти на поляну"}
           </Button>
         </form>
       </div>
