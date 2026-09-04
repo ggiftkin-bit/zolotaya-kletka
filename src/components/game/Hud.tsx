@@ -6,10 +6,11 @@ import { nextGoal, personLevel, skillHow } from "@/game/goal";
 import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, HIRE_GOLD, SKIP_GOLD, deathFee, formatWait, nextEnergyIn } from "@/game/pace";
 import { isHeld, isJailed, isStill, isYours } from "@/game/crime";
 import { TOOL_ITEMS } from "@/game/life";
-import { BUSY_LABEL, isRoof, remainingWear, type WearId } from "@/game/work";
+import { BUSY_LABEL, isRoof, isWearId, remainingWear, type WearId } from "@/game/work";
 import { useGame } from "@/game/store";
-import { cargoWeight } from "@/game/travel";
+import { pawnKg } from "@/game/travel";
 import { asPile, pileEmpty, pileLabel } from "@/game/pile";
+import { gearSlot } from "@/game/fight";
 import type { BuildingKind, ItemId, Profession, Skill, ToolMode, Weather } from "@/game/types";
 import { tileAt } from "@/game/worldgen";
 import { Button } from "@/components/ui/button";
@@ -83,7 +84,7 @@ export function Hud() {
   const [now, setNow] = useState(() => Date.now());
   const inv = g.character.inventory;
   const here = tileAt(g.world, g.character.x, g.character.y);
-  const weight = cargoWeight(inv);
+  const weight = pawnKg(g.character);
   const cap = CAPACITY[g.character.transport];
   const hungry = g.character.satiety < 25;
   const thirsty = g.character.water < 25;
@@ -507,6 +508,9 @@ export function Hud() {
                         ? `лошадей ${g.character.horses}`
                         : null,
                       g.character.hand ? `в руке ${ITEM_LABEL[g.character.hand]}` : null,
+                      g.character.body ? ITEM_LABEL[g.character.body] : null,
+                      g.character.shield ? ITEM_LABEL[g.character.shield] : null,
+                      g.character.helm ? ITEM_LABEL[g.character.helm] : null,
                     ]
                       .filter(Boolean)
                       .join(" · ") || "пешком"}
@@ -552,7 +556,7 @@ export function Hud() {
             {tab === "pack" && (
               <div className="mt-3 space-y-2">
                 <p className="text-[12px] text-muted-foreground">
-                  Квадраты по три в ряд. Только то, что есть. Тап: на землю, в сундук, в руку.
+                  Тап: на землю, в сундук, в руку, надеть щит / стёганку / шлем.
                 </p>
                 <BagGrid
                   amounts={inv}
@@ -567,9 +571,20 @@ export function Hud() {
                     canChest={!!ownChest}
                     canHand={(TOOL_ITEMS as readonly string[]).includes(cell)}
                     hand={g.character.hand === cell}
+                    wearSlot={gearSlot(cell)}
+                    worn={
+                      gearSlot(cell) === "body"
+                        ? g.character.body === cell
+                        : gearSlot(cell) === "shield"
+                          ? g.character.shield === cell
+                          : gearSlot(cell) === "helm"
+                            ? g.character.helm === cell
+                            : false
+                    }
                     onDrop={(q) => g.dropItem(cell, q)}
                     onChest={(q) => g.storeItem(cell, q)}
                     onHand={() => g.equipHand(g.character.hand === cell ? null : cell)}
+                    onWear={() => g.equipWear(gearSlot(cell) && g.character[gearSlot(cell)!] === cell ? null : cell, gearSlot(cell) ?? undefined)}
                   />
                 )}
                 {inv.tonic > 0 && (
@@ -613,13 +628,27 @@ export function Hud() {
                     {g.character.hand ? ITEM_LABEL[g.character.hand] : "пусто"}
                   </span>
                 </p>
+                <p className="text-[12px] text-muted-foreground">
+                  тело {g.character.body ? ITEM_LABEL[g.character.body] : "нет"} · щит{" "}
+                  {g.character.shield ? ITEM_LABEL[g.character.shield] : "нет"} · голова{" "}
+                  {g.character.helm ? ITEM_LABEL[g.character.helm] : "нет"}
+                </p>
+                {(["body", "shield", "helm"] as const).map((slot) => {
+                  const id = g.character[slot];
+                  if (!id) return null;
+                  return (
+                    <Button key={slot} className="h-11 w-full" variant="secondary" onClick={() => g.equipWear(null, slot)}>
+                      снять {ITEM_LABEL[id]}
+                    </Button>
+                  );
+                })}
                 {TOOL_ITEMS.map((k) => (
                   <div key={k} className="flex items-center gap-2 rounded-[14px] bg-raised px-2 py-2">
                     <ItemPic id={k} className="size-10 overflow-hidden rounded-[10px]" />
                     <div className="min-w-0 flex-1">
                       <p className="text-[11px] text-muted-foreground">{ITEM_LABEL[k]}</p>
                       <p className="font-display text-lg leading-none tabular-nums">{inv[k]}</p>
-                      {(k === "axe" || k === "pick" || k === "spear" || k === "shovel") && inv[k] > 0 && (
+                      {(k === "axe" || k === "pick" || k === "spear" || k === "shovel" || k === "club" || k === "knife") && inv[k] > 0 && (
                         <p className="text-[11px] text-muted-foreground">
                           {g.character.hand === k
                             ? `в руке ещё ${remainingWear(g.character, k as WearId)}`
@@ -835,7 +864,12 @@ function MeetSheet() {
         <p className="mt-1 text-[12px] text-muted-foreground">
           {mine ? "Твой шаг." : "Ждёт ответа."} Сила {Math.floor(you.energy)} · в руке{" "}
           {you.hand ? ITEM_LABEL[you.hand] : "пусто"}
+          {you.body ? ` · ${ITEM_LABEL[you.body]}` : ""}
+          {you.shield ? ` · ${ITEM_LABEL[you.shield]}` : ""}
+          {you.helm ? ` · ${ITEM_LABEL[you.helm]}` : ""}
           {foe.hand ? ` · у него ${ITEM_LABEL[foe.hand]}` : " · у него пусто"}
+          {foe.shield ? `+${ITEM_LABEL[foe.shield]}` : ""}
+          {foe.body ? `+${ITEM_LABEL[foe.body]}` : ""}
         </p>
         <div className="mt-3 space-y-2">
           <Button className="h-12 w-full" disabled={!mine} onClick={() => g.meetHit()}>
@@ -914,18 +948,24 @@ function BagActs({
   canChest,
   canHand,
   hand,
+  wearSlot,
+  worn,
   onDrop,
   onChest,
   onHand,
+  onWear,
 }: {
   k: ItemId;
   n: number;
   canChest: boolean;
   canHand: boolean;
   hand: boolean;
+  wearSlot: "body" | "shield" | "helm" | null;
+  worn: boolean;
   onDrop: (q: number) => void;
   onChest: (q: number) => void;
   onHand: () => void;
+  onWear: () => void;
 }) {
   const q4 = Math.max(1, Math.floor(n / 4));
   return (
@@ -962,6 +1002,11 @@ function BagActs({
       {canHand && (
         <Button className="mt-2 h-11 w-full" variant={hand ? "default" : "outline"} disabled={n <= 0 && !hand} onClick={onHand}>
           {hand ? "из руки" : "в руку"}
+        </Button>
+      )}
+      {wearSlot && (
+        <Button className="mt-2 h-11 w-full" variant={worn ? "default" : "outline"} disabled={n <= 0 && !worn} onClick={onWear}>
+          {worn ? "снять" : wearSlot === "shield" ? "в щит" : wearSlot === "helm" ? "на голову" : "на тело"}
         </Button>
       )}
       {!canChest && (

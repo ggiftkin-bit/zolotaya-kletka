@@ -15,6 +15,9 @@ export type Fighter = {
   warmth: number;
   water: number;
   hand: ItemId | null;
+  body: ItemId | null;
+  shield: ItemId | null;
+  helm: ItemId | null;
   profession: Profession;
   skills: Skills;
   life: "alive" | "down";
@@ -34,11 +37,24 @@ export type StrikeCtx = {
   foeStealth: number;
 };
 
-const DUMMY_JOB: Record<string, { name: string; profession: Profession; hand: ItemId | null; fight: number; stealth: number; speech: number }> = {
-  сосед: { name: "Сосед", profession: "hireling", hand: "spear", fight: 3, stealth: 1, speech: 1 },
-  Игнат: { name: "Игнат", profession: "lumberjack", hand: "axe", fight: 1, stealth: 0, speech: 0 },
-  Маша: { name: "Маша", profession: "farmer", hand: null, fight: 0, stealth: 0, speech: 2 },
-  Степан: { name: "Степан", profession: "miner", hand: "pick", fight: 1, stealth: 0, speech: 0 },
+const DUMMY_JOB: Record<
+  string,
+  {
+    name: string;
+    profession: Profession;
+    hand: ItemId | null;
+    body: ItemId | null;
+    shield: ItemId | null;
+    helm: ItemId | null;
+    fight: number;
+    stealth: number;
+    speech: number;
+  }
+> = {
+  сосед: { name: "Сосед", profession: "hireling", hand: "spear", body: null, shield: "board_shield", helm: null, fight: 3, stealth: 1, speech: 1 },
+  Игнат: { name: "Игнат", profession: "lumberjack", hand: "axe", body: null, shield: null, helm: null, fight: 1, stealth: 0, speech: 0 },
+  Маша: { name: "Маша", profession: "farmer", hand: null, body: "wadded", shield: null, helm: null, fight: 0, stealth: 0, speech: 2 },
+  Степан: { name: "Степан", profession: "miner", hand: "pick", body: null, shield: null, helm: null, fight: 1, stealth: 0, speech: 0 },
 };
 
 export function chebyshev(ax: number, ay: number, bx: number, by: number) {
@@ -58,6 +74,9 @@ export function youFighter(c: Character): Fighter {
     warmth: c.warmth,
     water: c.water,
     hand: c.hand,
+    body: c.body ?? null,
+    shield: c.shield ?? null,
+    helm: c.helm ?? null,
     profession: c.profession,
     skills: c.skills,
     life: c.life === "down" ? "down" : "alive",
@@ -99,7 +118,17 @@ export function makeHamletDummies(world: World, prev?: Fighter[]): Dummy[] {
     const home = dummyHome(world, h.owner);
     if (!home) return;
     const old = prev?.find((d) => d.id === h.owner);
-    const spec = DUMMY_JOB[h.owner] ?? { name: h.owner, profession: "wanderer" as const, hand: null, fight: 0, stealth: 0, speech: 0 };
+    const spec = DUMMY_JOB[h.owner] ?? {
+      name: h.owner,
+      profession: "wanderer" as const,
+      hand: null,
+      body: null,
+      shield: null,
+      helm: null,
+      fight: 0,
+      stealth: 0,
+      speech: 0,
+    };
     out.push({
       id: h.owner,
       name: spec.name,
@@ -112,6 +141,9 @@ export function makeHamletDummies(world: World, prev?: Fighter[]): Dummy[] {
       warmth: 80,
       water: 80,
       hand: spec.hand,
+      body: spec.body,
+      shield: spec.shield,
+      helm: spec.helm,
       profession: spec.profession,
       skills: zSkills(spec.fight, spec.stealth, spec.speech),
       life: old?.life === "down" && (old.hp ?? 0) <= 0 ? "down" : "alive",
@@ -127,13 +159,32 @@ export function dummyAt(dummies: Dummy[], x: number, y: number): Dummy | null {
   return dummies.find((d) => d.x === x && d.y === y) ?? null;
 }
 
-export function handMult(hand: ItemId | null, first: boolean, atYard: boolean): number {
+export function gearSlot(id: ItemId): "body" | "shield" | "helm" | null {
+  if (id === "wadded") return "body";
+  if (id === "board_shield" || id === "bar_shield") return "shield";
+  if (id === "helm") return "helm";
+  return null;
+}
+
+export function handMult(hand: ItemId | null, first: boolean, atYard: boolean, night = false): number {
   if (hand === "spear") return 1.25 * (first ? 1.1 : 1);
+  if (hand === "club") return 1.1;
+  if (hand === "knife") return 1.15 * (night ? 1.05 : 1);
   if (hand === "axe") return 1.05 * (atYard ? 1.1 : 1);
   if (hand === "pick") return 0.9;
   if (hand === "shovel") return 0.75;
   if (hand === "rope" || hand === "rod" || hand === "bucket") return 0.65;
   return 0.55;
+}
+
+export function armorMult(def: { shield?: ItemId | null; body?: ItemId | null; helm?: ItemId | null } | null | undefined): number {
+  if (!def) return 1;
+  let m = 1;
+  if (def.shield === "board_shield") m *= 0.8;
+  if (def.shield === "bar_shield") m *= 0.65;
+  if (def.body === "wadded") m *= 0.88;
+  if (def.helm === "helm") m *= 0.85;
+  return Math.max(0.45, m);
 }
 
 export function profHit(p: Profession): number {
@@ -158,12 +209,12 @@ export function bodyMult(f: Fighter, winter: boolean, roof: boolean): number {
   return m;
 }
 
-export function strikeDmg(atk: Fighter, ctx: StrikeCtx): { dmg: number; sneak: boolean } {
+export function strikeDmg(atk: Fighter, ctx: StrikeCtx, def?: Fighter | Dummy | null): { dmg: number; sneak: boolean } {
   const en = Math.max(0, atk.energy);
   let base = 4 * (en / ENERGY_MAX);
   if (en < 1) base *= 0.4;
   let m = 1;
-  m *= handMult(atk.hand, ctx.first, ctx.atYard);
+  m *= handMult(atk.hand, ctx.first, ctx.atYard, ctx.night);
   m *= profHit(atk.profession);
   m *= bodyMult(atk, ctx.winter, ctx.roof);
   const sneak = ctx.night && ctx.first && (atk.skills.stealth ?? 0) > ctx.foeStealth;
@@ -171,7 +222,7 @@ export function strikeDmg(atk: Fighter, ctx: StrikeCtx): { dmg: number; sneak: b
   if (ctx.ownYard) m *= 1.1;
   else if (ctx.foreignYard) m *= 0.9;
   m *= 1 + (atk.skills.fight ?? 0) * 0.02;
-  const raw = base * m;
+  const raw = base * m * armorMult(def);
   const dmg = Math.max(1, Math.min(12, Math.round(raw)));
   return { dmg, sneak };
 }

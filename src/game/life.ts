@@ -8,7 +8,7 @@ export const ANIMAL_LABEL: Record<AnimalKind, string> = {
   cow: "корова",
 };
 
-export const TOOL_ITEMS = ["axe", "pick", "rope", "bucket", "spear", "shovel", "rod"] as const;
+export const TOOL_ITEMS = ["axe", "pick", "rope", "bucket", "spear", "shovel", "rod", "club", "knife"] as const;
 
 export const COW_PRICE = 32;
 export const HORSE_PRICE = 40;

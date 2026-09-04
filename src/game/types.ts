@@ -132,7 +132,15 @@ export type ItemId =
   | "smoked"
   | "coal"
   | "wheel"
-  | "lock";
+  | "lock"
+  | "club"
+  | "knife"
+  | "board_shield"
+  | "bar_shield"
+  | "wadded"
+  | "helm";
+
+export type WearKind = "axe" | "pick" | "spear" | "shovel" | "club" | "knife";
 
 export type AnimalKind = "hare" | "deer" | "horse" | "cow";
 
@@ -245,6 +253,12 @@ export type Character = {
   seasonSkillGain: number;
   profWeek: number;
   hand: ItemId | null;
+  /** Стёганка. Пусто — нет. */
+  body: ItemId | null;
+  /** Тесовый или кованый щит. Двух щитов нет. */
+  shield: ItemId | null;
+  /** Шлем на голове. */
+  helm: ItemId | null;
   horses: number;
   carts: number;
   /** True while a wagon is hitched to the horse. Not an inventory item. */
@@ -265,9 +279,9 @@ export type Character = {
   resting: boolean;
   busy: Busy | null;
   /** Остаток ударов снасти в руке. Старый сейв = полный запас. */
-  wear: Partial<Record<"axe" | "pick" | "spear" | "shovel", number>>;
+  wear: Partial<Record<WearKind, number>>;
   /** Износ снятой снасти в сумке (один экземпляр на тип). Второй без записи — новый. */
-  bagWear?: Partial<Record<"axe" | "pick" | "spear" | "shovel", number>>;
+  bagWear?: Partial<Record<WearKind, number>>;
   pacts: Record<string, "friend" | "feud">;
   village: string;
 };
@@ -315,6 +329,9 @@ export type Dummy = {
   warmth: number;
   water: number;
   hand: ItemId | null;
+  body: ItemId | null;
+  shield: ItemId | null;
+  helm: ItemId | null;
   profession: Profession;
   skills: Skills;
   life: "alive" | "down";

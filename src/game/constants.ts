@@ -1,4 +1,4 @@
-import type { Biome, BuildingKind, ItemId, Profession, Season, Transport, Weather } from "./types";
+import type { Biome, BuildingKind, Inventory, ItemId, Profession, Season, Transport, Weather } from "./types";
 
 export const MAP_W = 96;
 export const MAP_H = 96;
@@ -29,6 +29,12 @@ export const ITEMS: ItemId[] = [
   "coal",
   "wheel",
   "lock",
+  "club",
+  "knife",
+  "board_shield",
+  "bar_shield",
+  "wadded",
+  "helm",
 ];
 
 export const ITEM_WEIGHT: Record<ItemId, number> = {
@@ -55,6 +61,12 @@ export const ITEM_WEIGHT: Record<ItemId, number> = {
   coal: 0.8,
   wheel: 1.4,
   lock: 0.6,
+  club: 1.6,
+  knife: 0.5,
+  board_shield: 2.0,
+  bar_shield: 3.2,
+  wadded: 1.8,
+  helm: 2.0,
 };
 
 export const CAPACITY: Record<Transport, number> = {
@@ -119,6 +131,12 @@ export const ITEM_LABEL: Record<ItemId, string> = {
   coal: "уголь",
   wheel: "колесо",
   lock: "замок",
+  club: "дубина",
+  knife: "нож",
+  board_shield: "щит тесовый",
+  bar_shield: "щит кованый",
+  wadded: "стёганка",
+  helm: "шлем",
 };
 
 export const TRANSPORT_LABEL: Record<Transport, string> = {
@@ -183,6 +201,12 @@ export const GATHER_YIELD: Record<ItemId, number> = {
   coal: 0,
   wheel: 0,
   lock: 0,
+  club: 0,
+  knife: 0,
+  board_shield: 0,
+  bar_shield: 0,
+  wadded: 0,
+  helm: 0,
 };
 
 export const GATHER_TABLE: Partial<Record<Biome, { item: ItemId; yield: number }>> = {
@@ -245,5 +269,11 @@ export const BUILD_OK: Record<Exclude<BuildingKind, "none">, Biome[]> = {
 
 /** Ноша: все ненулевые, три квадрата в ряд. */
 export const BAG_CELLS: ItemId[] = [...ITEMS];
+
+export function zeroInv(): Inventory {
+  const o = {} as Inventory;
+  for (const k of ITEMS) o[k] = 0;
+  return o;
+}
 
 

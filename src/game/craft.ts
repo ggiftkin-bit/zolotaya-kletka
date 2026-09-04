@@ -1,6 +1,6 @@
 import type { ItemId, Profession, Tile } from "./types";
 
-export type CraftKind = "coal" | "plank" | "bar" | "axe" | "pick" | "bread" | "smoked" | "tonic" | "rope" | "bucket" | "spear" | "shovel" | "rod" | "wheel" | "lock";
+export type CraftKind = "coal" | "plank" | "bar" | "axe" | "pick" | "bread" | "smoked" | "tonic" | "rope" | "bucket" | "spear" | "shovel" | "rod" | "wheel" | "lock" | "club" | "knife" | "board_shield" | "bar_shield" | "wadded" | "helm";
 
 export type BenchId = "home" | "bench" | "forge" | "oven" | "smoke" | "herbs" | "coalpit" | "workshop";
 
@@ -32,17 +32,23 @@ export const CRAFTS: CraftDef[] = [
   { id: "spear", out: "spear", n: 1, need: { wood: 2 }, who: "any", bench: "home", energy: 1, label: "копьё", hint: "2 дерева · любой дома" },
   { id: "shovel", out: "shovel", n: 1, need: { wood: 2 }, who: "any", bench: "home", energy: 1, label: "лопата", hint: "2 дерева · любой дома. Копать землю" },
   { id: "rod", out: "rod", n: 1, need: { wood: 1, rope: 1 }, who: "any", bench: "home", energy: 1, label: "удочка", hint: "1 дерево + 1 верёвка · любой дома. Рыба только ею" },
+  { id: "club", out: "club", n: 1, need: { wood: 2 }, who: "any", bench: "home", energy: 1, label: "дубина", hint: "2 дерева · любой дома" },
+  { id: "wadded", out: "wadded", n: 1, need: { herb: 4, food: 1 }, who: "any", bench: "home", energy: 1, label: "стёганка", hint: "4 травы + еда · любой дома" },
+  { id: "knife", out: "knife", n: 1, need: { bar: 1 }, who: "smith", bench: "forge", energy: 2, label: "нож", hint: "слиток · кузнец · горн" },
+  { id: "helm", out: "helm", n: 1, need: { bar: 1 }, who: "smith", bench: "forge", energy: 2, label: "шлем", hint: "слиток · кузнец · горн" },
+  { id: "bar_shield", out: "bar_shield", n: 1, need: { bar: 1, wood: 1 }, who: "smith", bench: "forge", energy: 2, label: "щит кованый", hint: "слиток + дерево · кузнец · горн" },
+  { id: "board_shield", out: "board_shield", n: 1, need: { plank: 2 }, who: "carpenter", bench: "bench", energy: 2, label: "щит тесовый", hint: "2 доски · плотник · верстак" },
 ];
 
 export const PROF_BLURB: Record<Profession, string> = {
-  wanderer: "Своего станка нет. Дома — верёвка, копьё, ведро, лопата, удочка.",
+  wanderer: "Своего станка нет. Дома — верёвка, копьё, ведро, лопата, удочка, дубина, стёганка.",
   lumberjack: "Дровница: 3 дерева → 2 угля. Без угля кузнец не льёт.",
   miner: "Сруб у горы. Больше руды. Кристалл ищет только он.",
   fisher: "Коптильня: рыба → копчёное. Ловят удочкой: дерево + верёвка дома.",
   farmer: "Поле и загон. Верёвку дома сколотит любой.",
   baker: "Печь: 2 еды → хлеб. Сдать 6 золота.",
-  carpenter: "Верстак: доска, колесо. Телега — 2 колеса, 4 дерева и слиток. В сумку не кладётся.",
-  smith: "Горн: руда+уголь → слиток, топор, кирка, замок. Замок — на калитку или сундук. Свой открывается сам.",
+  carpenter: "Верстак: доска, колесо, щит тесовый. Телега — 2 колеса, 4 дерева и слиток. В сумку не кладётся.",
+  smith: "Горн: руда+уголь → слиток, топор, кирка, замок, нож, шлем, щит кованый. Замок — на калитку или сундук. Свой открывается сам.",
   trader: "Прилавок у калитки. Курс как у тракта, сдача на 1 хуже.",
   healer: "Стол трав: 3 травы → настой. Сдать 8 золота.",
   hireling: "Башня. Вахта. Копьё дома сколотит любой.",

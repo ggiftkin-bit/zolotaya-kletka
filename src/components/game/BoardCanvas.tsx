@@ -334,7 +334,8 @@ function draw(
     ctx.strokeRect(g.hover.x * TILE + 5, g.hover.y * TILE + 5, TILE - 10, TILE - 10);
   }
 
-  const mx = viewPos.x * TILE + TILE / 2;
+  const share = (g.dummies ?? []).some((d) => d.x === g.character.x && d.y === g.character.y);
+  const mx = viewPos.x * TILE + TILE / 2 + (share ? -TILE * 0.22 : 0);
   const my = viewPos.y * TILE + TILE / 2;
   if (g.character.wagon || g.character.transport === "wagon") {
     paintWagon(ctx, mx - TILE * 0.62, my - TILE * 0.08, 0.82);
@@ -378,8 +379,8 @@ function draw(
   for (const d of g.dummies ?? []) {
     if (fogAt(g.world, d.x, d.y) !== 2 && fogAt(g.world, d.x, d.y) !== 1) continue;
     const same = d.x === g.character.x && d.y === g.character.y;
-    const ox = d.x * TILE + TILE / 2 + (same ? 8 : 0);
-    const oy = d.y * TILE + TILE / 2 + (same ? -6 : 0);
+    const ox = d.x * TILE + TILE / 2 + (same ? TILE * 0.42 : 0);
+    const oy = d.y * TILE + TILE / 2 + (same ? -TILE * 0.18 : 0);
     ctx.globalAlpha = d.life === "down" ? 0.4 : 1;
     ctx.fillStyle = "rgba(28,22,18,0.22)";
     ctx.beginPath();

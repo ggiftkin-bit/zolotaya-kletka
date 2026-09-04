@@ -5,7 +5,7 @@ import {
   ITEM_WEIGHT,
   TERRAIN_COST,
 } from "./constants";
-import type { Inventory, Tile, Transport, Weather } from "./types";
+import type { Inventory, ItemId, Tile, Transport, Weather } from "./types";
 
 export function cargoWeight(inv: Inventory): number {
   let w = 0;
@@ -15,9 +15,22 @@ export function cargoWeight(inv: Inventory): number {
   return w;
 }
 
-export function loadRatio(inv: Inventory, transport: Transport): number {
+/** Надетое (тело, щит, шлем) не в сумке — весит отдельно. Рука уже в сумке. */
+export function wornKg(c: { body?: ItemId | null; shield?: ItemId | null; helm?: ItemId | null }): number {
+  let w = 0;
+  if (c.body) w += ITEM_WEIGHT[c.body] ?? 0;
+  if (c.shield) w += ITEM_WEIGHT[c.shield] ?? 0;
+  if (c.helm) w += ITEM_WEIGHT[c.helm] ?? 0;
+  return w;
+}
+
+export function pawnKg(c: { inventory: Inventory; body?: ItemId | null; shield?: ItemId | null; helm?: ItemId | null }): number {
+  return cargoWeight(c.inventory) + wornKg(c);
+}
+
+export function loadRatio(inv: Inventory, transport: Transport, extraKg = 0): number {
   const cap = CAPACITY[transport];
-  return cargoWeight(inv) / cap;
+  return (cargoWeight(inv) + extraKg) / cap;
 }
 
 export function enterCost(
@@ -28,6 +41,7 @@ export function enterCost(
     inventory: Inventory;
     weather: Weather;
     diagonal: boolean;
+    extraKg?: number;
   },
 ): number {
   if (to.biome === "river" && to.road !== "bridge") return Number.POSITIVE_INFINITY;
@@ -62,7 +76,7 @@ export function enterCost(
     if (hill) speed *= 0.45;
   }
 
-  const ratio = loadRatio(opts.inventory, transport);
+  const ratio = loadRatio(opts.inventory, transport, opts.extraKg ?? 0);
   const penalty =
     transport === "wagon" ? 0.22 : transport === "cart" ? 0.28 : transport === "horse" ? 0.85 : 1.15;
   const loadMult = 1 + Math.max(0, ratio - 0.25) * penalty;

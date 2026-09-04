@@ -1,4 +1,5 @@
 import type { Inventory, ItemId, JobPost, Profession, Season, Skill, Trader } from "./types";
+import { zeroInv } from "./constants";
 
 export const PROFESSION_LABEL: Record<Profession, string> = {
   wanderer: "бродяга",
@@ -114,6 +115,12 @@ export const SELL_GOLD: Record<ItemId, number> = {
   coal: 3,
   wheel: 6,
   lock: 6,
+  club: 3,
+  knife: 8,
+  board_shield: 6,
+  bar_shield: 12,
+  wadded: 4,
+  helm: 12,
 };
 
 export function goldTxt(n: number): string {
@@ -178,31 +185,7 @@ export function makeJobs(week: number): JobPost[] {
 }
 
 function zInv(): Inventory {
-  return {
-    wood: 0,
-    stone: 0,
-    ore: 0,
-    food: 0,
-    fish: 0,
-    axe: 0,
-    pick: 0,
-    herb: 0,
-    clay: 0,
-    crystal: 0,
-    rope: 0,
-    bucket: 0,
-    spear: 0,
-    shovel: 0,
-    rod: 0,
-    bread: 0,
-    plank: 0,
-    bar: 0,
-    tonic: 0,
-    smoked: 0,
-    coal: 0,
-    wheel: 0,
-    lock: 0,
-  };
+  return zeroInv();
 }
 
 export function makeTrader(week: number): Trader {
@@ -234,6 +217,8 @@ export function makeTrader(week: number): Trader {
   wares.bucket = 1;
   wares.bread = 2;
   wares.lock = 1;
+  if (week % 3 === 0) wares.knife = 1;
+  if (week % 4 === 0) wares.helm = 1;
   if (week % 2 === 0) wares.crystal = 1;
   return {
     name: "Лавка",

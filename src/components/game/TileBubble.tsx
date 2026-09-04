@@ -435,13 +435,15 @@ function PickPane({
           sub={
             dummy.life !== "alive"
               ? "не добивать"
-              : near
+              : here
                 ? "ударить, отойти, сдаться"
-                : "подойди в соседнюю клетку"
+                : near
+                  ? "встань на его клетку"
+                  : "иди на его клетку"
           }
           ico={<Ico i={ICO.stake} className="size-11 overflow-hidden rounded-[12px]" />}
           onClick={() => g.startMeet(dummy.id)}
-          dim={!near || dummy.life !== "alive" || down || locked}
+          dim={!here || dummy.life !== "alive" || down || locked}
         />
       )}
       {here && !tile.pit && canDigReason(g.world, tile, g.character.hand) == null && (

@@ -1,5 +1,5 @@
 import { createNoise2D } from "simplex-noise";
-import { MAP_H, MAP_W } from "./constants";
+import { MAP_H, MAP_W, zeroInv } from "./constants";
 import { allDarkFog, allOnesVer, maskLiveFog } from "./book";
 import { makeHerd } from "./life";
 import { HAMLETS, PLAYER_FIELD } from "./pact";
@@ -655,31 +655,7 @@ function buildWorld(seed: string): World {
         caravan: false,
         pile: null,
         goldDrop: 0,
-        chest: {
-          wood: 0,
-          stone: 0,
-          ore: 0,
-          food: 0,
-          fish: 0,
-          axe: 0,
-          pick: 0,
-          herb: 0,
-          clay: 0,
-          crystal: 0,
-          rope: 0,
-          bucket: 0,
-          spear: 0,
-          shovel: 0,
-          rod: 0,
-          bread: 0,
-          plank: 0,
-          bar: 0,
-          tonic: 0,
-          smoked: 0,
-          coal: 0,
-          wheel: 0,
-          lock: 0,
-        },
+        chest: zeroInv(),
         scarred: false,
         takings: 0,
         regen: 0,

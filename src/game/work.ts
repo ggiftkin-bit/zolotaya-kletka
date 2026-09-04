@@ -32,6 +32,8 @@ export const TOOL_LIFE = {
   pick: 120,
   spear: 60,
   shovel: 80,
+  club: 80,
+  knife: 50,
 } as const;
 
 export type WearId = keyof typeof TOOL_LIFE;
@@ -41,6 +43,8 @@ export const TOOL_BREAK: Record<WearId, string> = {
   pick: "кирка кончилась",
   spear: "копьё кончилось",
   shovel: "лопата кончилась",
+  club: "дубина кончилась",
+  knife: "нож кончился",
 };
 
 export const CLAD_STONE = 16;
@@ -157,7 +161,7 @@ export function remainingWear(c: Character, id: WearId): number {
 }
 
 export function isWearId(id: string | null | undefined): id is WearId {
-  return id === "axe" || id === "pick" || id === "spear" || id === "shovel";
+  return id === "axe" || id === "pick" || id === "spear" || id === "shovel" || id === "club" || id === "knife";
 }
 
 /** Минус одно использование в начале дела. На нуле вещь пропадает. Удар с руки. */

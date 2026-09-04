@@ -84,13 +84,14 @@ export function giveOrPile(
   tile: Tile,
   item: ItemId,
   n: number,
+  extraKg = 0,
 ): { inv: Inventory; piled: number } {
   if (n <= 0) return { inv, piled: 0 };
   const next = { ...inv };
   const cap = CAPACITY[transport];
   let keep = n;
   const unit = ITEM_WEIGHT[item] ?? 1;
-  const room = Math.max(0, cap - cargoWeight(next));
+  const room = Math.max(0, cap - cargoWeight(next) - extraKg);
   const fit = unit <= 0 ? keep : Math.min(keep, Math.floor(room / unit + 1e-9));
   if (fit > 0) {
     next[item] = (next[item] ?? 0) + fit;

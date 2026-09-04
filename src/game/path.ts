@@ -80,7 +80,7 @@ function stepCost(
   fromY: number,
   toX: number,
   toY: number,
-  ctx: { transport: Transport; inventory: Inventory; weather: Weather },
+  ctx: { transport: Transport; inventory: Inventory; weather: Weather; extraKg?: number },
 ): number {
   const from = tileAt(world, fromX, fromY)!;
   const to = tileAt(world, toX, toY)!;
@@ -96,7 +96,7 @@ export function findPath(
   sy: number,
   tx: number,
   ty: number,
-  ctx: { transport: Transport; inventory: Inventory; weather: Weather },
+  ctx: { transport: Transport; inventory: Inventory; weather: Weather; extraKg?: number },
 ): TravelLeg[] | null {
   const w = world.width;
   const h = world.height;

@@ -1,4 +1,4 @@
-import { MAP_H, MAP_W } from "./constants";
+import { MAP_H, MAP_W, zeroInv } from "./constants";
 import { asPile, pileEmpty } from "./pile";
 import type { BuildingKind, FenceKind, Inventory, ItemId, Matter, RoadKind, Tile, GameState } from "./types";
 import { defaultMatter, MATTER_HP } from "./work";
@@ -47,31 +47,7 @@ export type SlimTile = {
 };
 
 function emptyChest(): Inventory {
-  return {
-    wood: 0,
-    stone: 0,
-    ore: 0,
-    food: 0,
-    fish: 0,
-    axe: 0,
-    pick: 0,
-    herb: 0,
-    clay: 0,
-    crystal: 0,
-    rope: 0,
-    bucket: 0,
-    spear: 0,
-    shovel: 0,
-    rod: 0,
-    bread: 0,
-    plank: 0,
-    bar: 0,
-    tonic: 0,
-    smoked: 0,
-    coal: 0,
-    wheel: 0,
-    lock: 0,
-  };
+  return zeroInv();
 }
 
 function slimChest(c?: Inventory | null): Partial<Inventory> | undefined {

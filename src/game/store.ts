@@ -14,6 +14,7 @@ import {
   TICK_SEC,
   TICKS_PER_DAY,
   WEEKS_PER_SEASON,
+  zeroInv,
 } from "./constants";
 import {
   BUILD_COST,
@@ -42,7 +43,7 @@ import { applyCatch, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, 
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
 import { clearGame, loadGame, saveGame } from "./save";
 import { stampVillage, clearVillage, friendNames, hamletTitle, hasOwnYard, canFoundVillage, isOutsideYard, setVillageLaw } from "./pact";
-import { cargoWeight, loadRatio } from "./travel";
+import { cargoWeight, loadRatio, wornKg } from "./travel";
 import { atBench, CRAFTS, EAT_ORDER, EAT_SAT, PROF_BLURB, type CraftKind } from "./craft";
 import { markDepleted, tickGrow, REGROW_WAIT } from "./grow";
 import { lootOn, canOpenPlace } from "./places";
@@ -89,7 +90,7 @@ import type {
   Trader,
   Weather,
 } from "./types";
-import { chebyshev, dummyHome, leaveChance, makeHamletDummies, strikeDmg, talkChance, youFighter } from "./fight";
+import { chebyshev, dummyAt, dummyHome, gearSlot, leaveChance, makeHamletDummies, strikeDmg, talkChance, youFighter } from "./fight";
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, allDarkFog, fogAt, maskLiveFog } from "./book";
@@ -98,31 +99,7 @@ import { bindBookStore, flushBook, noteDeed, openBookFromServer, pullSpot, reset
 let worldAcc = 0;
 
 function emptyChest(): Inventory {
-  return {
-    wood: 0,
-    stone: 0,
-    ore: 0,
-    food: 0,
-    fish: 0,
-    axe: 0,
-    pick: 0,
-    herb: 0,
-    clay: 0,
-    crystal: 0,
-    rope: 0,
-    bucket: 0,
-    spear: 0,
-    shovel: 0,
-    rod: 0,
-    bread: 0,
-    plank: 0,
-    bar: 0,
-    tonic: 0,
-    smoked: 0,
-    coal: 0,
-    wheel: 0,
-    lock: 0,
-  };
+  return zeroInv();
 }
 
 function emptyInv(): Inventory {
@@ -154,7 +131,7 @@ function actHeld(c: Character, now = Date.now()): string | null {
   return heldLine(c, now);
 }
 
-function dumpCargo(world: GameState["world"], x: number, y: number, inv: Inventory, gold = 0) {
+function dumpCargo(world: GameState["world"], x: number, y: number, inv: Inventory, gold = 0, extra: Array<ItemId | null> = []) {
   let origin = tileAt(world, x, y);
   if (!origin || origin.biome === "river" || origin.building === "moat") {
     origin = null;
@@ -173,6 +150,9 @@ function dumpCargo(world: GameState["world"], x: number, y: number, inv: Invento
   }
   if (!origin) return;
   dumpAllOn(origin, inv, gold);
+  for (const id of extra) {
+    if (id) pileAdd(origin, id, 1);
+  }
 }
 
 function emptyTheInv(inv: Inventory): Inventory {
@@ -202,6 +182,9 @@ function makeCharacter(name: string, color: string): Character {
     seasonSkillGain: 0,
     profWeek: 0,
     hand: "axe",
+    body: null,
+    shield: null,
+    helm: null,
     horses: 0,
     carts: 0,
     wagon: false,
@@ -321,6 +304,20 @@ function hasRoofAt(s: GameState, x: number, y: number) {
 
 function isBusy(c: Character, now = Date.now()): boolean {
   return !!c.busy && c.busy.until > now;
+}
+
+function meetBlock(): boolean {
+  const s = useGame.getState();
+  if (!s.meet) return false;
+  speak("Встреча. Сначала шаг листа.", s.character.x, s.character.y, "встреча", "ok");
+  return true;
+}
+
+function maybeMeetHere(x: number, y: number) {
+  const s = useGame.getState();
+  if (s.meet) return;
+  const d = dummyAt(s.dummies ?? [], x, y);
+  if (d && d.life === "alive") startMeet(d.id);
 }
 
 function busyBlock(): boolean {
@@ -450,6 +447,7 @@ type Actions = {
   workDay: () => void;
   collectShop: () => void;
   equipHand: (item: ItemId | null) => void;
+  equipWear: (item: ItemId | null, slot?: "body" | "shield" | "helm") => void;
   huntHere: () => void;
   catchHorse: () => void;
   fillBucket: () => void;
@@ -511,6 +509,7 @@ function ctxOf(s: GameState) {
     transport: s.character.transport,
     inventory: s.character.inventory,
     weather: s.weather,
+    extraKg: wornKg(s.character),
   };
 }
 
@@ -587,6 +586,9 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         pacts: saved.character.pacts ?? {},
         village: saved.character.village ?? "",
         profession: saved.character.profession ?? "wanderer",
+        body: saved.character.body ?? null,
+        shield: saved.character.shield ?? null,
+        helm: saved.character.helm ?? null,
       };
       const tiles = saved.world.tiles.map((t) => ({
         ...t,
@@ -1076,6 +1078,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   workDay: () => workDay(),
   collectShop: () => collectShop(),
   equipHand: (item) => equipHand(item),
+  equipWear: (item, slot) => equipWear(item, slot),
   huntHere: () => huntHere(),
   catchHorse: () => catchHorse(),
   fillBucket: () => fillBucket(),
@@ -1327,6 +1330,7 @@ function advanceTravel(now: number) {
       ].slice(-10),
     });
     void pullSpot();
+    queueMicrotask(() => maybeMeetHere(x, y));
     return;
   }
   const cur = travel.path[index]!;
@@ -1380,8 +1384,12 @@ function worldTick() {
   if (c.hand && c.inventory[c.hand] <= 0) c.hand = null;
 
   if (c.hp <= 0 && c.life === "alive") {
-    dumpCargo(s.world, c.x, c.y, c.inventory, 0);
+    dumpCargo(s.world, c.x, c.y, c.inventory, 0, [c.body, c.shield, c.helm]);
     c.inventory = emptyTheInv(c.inventory);
+    c.body = null;
+    c.shield = null;
+    c.helm = null;
+    c.hand = null;
     if (c.wagon || c.transport === "wagon") {
       parkWagonNear(s.world, c.x, c.y, "you");
       c.wagon = false;
@@ -1495,6 +1503,7 @@ function gatherHere() {
     speak(hold, here.x, here.y, "нельзя", "bad");
     return;
   }
+  if (meetBlock()) return;
   if (s.travel) {
     speak("Сначала дойди.", here.x, here.y, "сначала дойди", "bad");
     return;
@@ -2091,6 +2100,7 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
     speak("В пути нельзя строить.", x, y, "в пути", "bad");
     return;
   }
+  if (meetBlock()) return;
   if (busyBlock()) return;
   if (Math.max(Math.abs(c.x - x), Math.abs(c.y - y)) > 1) {
     speak("Строят на соседней клетке.", x, y, "подойди", "bad");
@@ -2169,6 +2179,7 @@ function buildRoad(x: number, y: number, kind: "dirt" | "stone" | "bridge") {
     speak("В пути нельзя строить.", x, y, "в пути", "bad");
     return;
   }
+  if (meetBlock()) return;
   if (busyBlock()) return;
   const dist = Math.max(Math.abs(c.x - x), Math.abs(c.y - y));
   if (dist > 1) {
@@ -2351,6 +2362,7 @@ function skipTravel() {
     log: pushLog(s.log, `Подорожная −${goldTxt(SKIP_GOLD)}. Пришёл сразу.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: last.x, y: last.y, text: "сразу", tone: "gold" as const }].slice(-10),
   });
+  queueMicrotask(() => maybeMeetHere(last.x, last.y));
 }
 
 function bailOut() {
@@ -2607,7 +2619,7 @@ function equipHand(item: ItemId | null) {
   const tile = hereTile();
   const prev = s.character.hand;
   let c = gripHand(s.character, item);
-  if (!item && prev && isWearId(prev) && loadRatio(c.inventory, c.transport) > 1 && tile) {
+  if (!item && prev && isWearId(prev) && loadRatio(c.inventory, c.transport, wornKg(c)) > 1 && tile) {
     pileAdd(tile, prev, 1);
     const inv = { ...c.inventory, [prev]: Math.max(0, (c.inventory[prev] ?? 0) - 1) };
     const bagWear = { ...(c.bagWear ?? {}) };
@@ -2624,6 +2636,62 @@ function equipHand(item: ItemId | null) {
   useGame.setState({
     character: c,
     log: pushLog(s.log, item ? `В руке: ${ITEM_LABEL[item]}.` : "Рука пуста."),
+  });
+}
+
+function takeOffSlot(c: Character, slot: "body" | "shield" | "helm", tile: ReturnType<typeof hereTile>): Character {
+  const id = c[slot];
+  if (!id) return { ...c, [slot]: null };
+  const stripped = { ...c, [slot]: null as ItemId | null };
+  const inv = { ...c.inventory, [id]: (c.inventory[id] ?? 0) + 1 };
+  const next = { ...stripped, inventory: inv };
+  if (tile && loadRatio(inv, c.transport, wornKg(next)) > 1) {
+    pileAdd(tile, id, 1);
+    return stripped;
+  }
+  return next;
+}
+
+function equipWear(item: ItemId | null, slot?: "body" | "shield" | "helm") {
+  const s = useGame.getState();
+  const tile = hereTile();
+  let c = s.character;
+  const resolved = slot ?? (item ? gearSlot(item) : null);
+  if (!resolved) {
+    speak("Это не броня и не щит.", c.x, c.y, "не броня", "bad");
+    return;
+  }
+  if (!item) {
+    const was = c[resolved];
+    if (!was) return;
+    c = takeOffSlot(c, resolved, tile);
+    const piled = was && c[resolved] === null && (c.inventory[was] ?? 0) === (s.character.inventory[was] ?? 0);
+    useGame.setState({
+      character: c,
+      world: { ...s.world, tiles: s.world.tiles },
+      log: pushLog(s.log, piled ? `Ноша не тянет. ${ITEM_LABEL[was]} на клетке.` : `Снял: ${ITEM_LABEL[was]}.`),
+    });
+    return;
+  }
+  if (gearSlot(item) !== resolved) {
+    speak("Не на то место.", c.x, c.y, "не сюда", "bad");
+    return;
+  }
+  if (c[resolved] === item) {
+    equipWear(null, resolved);
+    return;
+  }
+  if ((c.inventory[item] ?? 0) <= 0) {
+    speak(`Нет: ${ITEM_LABEL[item]}.`, c.x, c.y, "нет", "bad");
+    return;
+  }
+  if (c[resolved]) c = takeOffSlot(c, resolved, tile);
+  const inv = { ...c.inventory, [item]: Math.max(0, (c.inventory[item] ?? 0) - 1) };
+  c = { ...c, inventory: inv, [resolved]: item };
+  useGame.setState({
+    character: c,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, `Надел: ${ITEM_LABEL[item]}.`),
   });
 }
 
@@ -2854,7 +2922,7 @@ function resolveCraft(s: GameState, c0: Character, tile: NonNullable<ReturnType<
   const given = giveOrPile(inv0, c0.transport, tile, def.out, def.n);
   let hand = c0.hand;
   let wear = { ...(c0.wear ?? {}) };
-  const toolOut = def.out === "axe" || def.out === "pick" || def.out === "spear" || def.out === "rope" || def.out === "bucket" || def.out === "shovel" || def.out === "rod";
+  const toolOut = def.out === "axe" || def.out === "pick" || def.out === "spear" || def.out === "rope" || def.out === "bucket" || def.out === "shovel" || def.out === "rod" || def.out === "club" || def.out === "knife";
   if (toolOut && !c0.hand && (given.inv[def.out] ?? 0) > 0) {
     hand = def.out;
     if (isWearId(def.out)) wear[def.out] = TOOL_LIFE[def.out];
@@ -3908,6 +3976,7 @@ function craftGear(item: "rope" | "bucket" | "spear" | "rod") {
 
 function doCraft(kind: CraftKind) {
   const s = useGame.getState();
+  if (meetBlock()) return;
   if (busyBlock()) return;
   if (s.travel) {
     speak("Сначала дойди.", s.character.x, s.character.y, "в пути", "bad");
@@ -4244,9 +4313,9 @@ function meetWhy(s: GameState, foe: Dummy): string | null {
   if (hold) return hold;
   if (isBusy(c) && !c.busy?.hired) return `Занят: ${BUSY_LABEL[c.busy!.kind]}.`;
   if (foe.life !== "alive") return "Лежит. Не добивать.";
-  const dist = chebyshev(c.x, c.y, foe.x, foe.y);
-  if (dist > 1) return "Подойди в соседнюю клетку.";
-  if (!canCrossDiag(s.world, c.x, c.y, foe.x, foe.y, "you")) return "Калитка или тын. Засов — взлом, река — мост.";
+  if (c.x !== foe.x || c.y !== foe.y) return "Встань на его клетку.";
+  const tile = tileAt(s.world, c.x, c.y);
+  if (tile && (tile.biome === "river" || tile.building === "moat") && tile.road !== "bridge") return "Река или ров. Нужен мост.";
   return null;
 }
 
@@ -4334,7 +4403,7 @@ function meetHit() {
     foreignYard: flags.foreignYard,
     atYard: flags.atYard,
     foeStealth: foe.skills.stealth ?? 0,
-  });
+  }, foe);
   let nextFoe: Dummy = { ...foe, hp: Math.max(0, foe.hp - hit.dmg), energy: Math.max(0, foe.energy) };
   c = bumpSkill(c, "fight", 0.12);
   if (hit.sneak) c = bumpSkill(c, "stealth", 0.08);
@@ -4450,16 +4519,19 @@ function dummyAnswer() {
     foreignYard: flags.foreignYard,
     atYard: flags.atYard,
     foeStealth: c0.skills.stealth ?? 0,
-  });
+  }, youFighter(c0));
   const hp = Math.max(0, c0.hp - hit.dmg);
   let c: Character = { ...c0, hp, energy: Math.max(0, c0.energy) };
   const nextFoe: Dummy = { ...foe, energy: Math.max(0, foe.energy - 2) };
   if (hp <= 0) {
-    dumpCargo(s.world, c.x, c.y, c.inventory, 0);
+    dumpCargo(s.world, c.x, c.y, c.inventory, 0, [c.body, c.shield, c.helm]);
     c = {
       ...c,
       inventory: emptyTheInv(c.inventory),
       hand: null,
+      body: null,
+      shield: null,
+      helm: null,
       hp: 0,
       life: "down",
       downAt: Date.now(),
@@ -4537,16 +4609,14 @@ function meetLeave() {
   const c = { ...c0, x: step.x, y: step.y, px: step.x, py: step.y };
   viewPos.x = step.x;
   viewPos.y = step.y;
-  const far = chebyshev(step.x, step.y, foe.x, foe.y) >= 2;
   useGame.setState({
     character: c,
-    meet: far ? null : { ...s.meet, turn: "foe", steps: s.meet.steps + 1, firstDone: true },
-    inspect: far ? null : { x: foe.x, y: foe.y },
-    log: pushLog(s.log, far ? "Отошёл. Встреча закрылась." : "Шаг назад. Ещё рядом."),
-    hint: { text: far ? "Встреча закрылась." : "Ещё рядом.", tone: "ok" },
+    meet: null,
+    inspect: null,
+    log: pushLog(s.log, "Отошёл. Встреча закрылась."),
+    hint: { text: "Встреча закрылась.", tone: "ok" },
   });
   useGame.getState().persist();
-  if (!far) window.setTimeout(() => dummyAnswer(), 420);
 }
 
 function meetDrop() {

@@ -1,6 +1,6 @@
 import { ENERGY_MAX, splitBodyWater } from "./pace";
 import { emptySkills } from "./economy";
-import { MAP_H, MAP_W } from "./constants";
+import { MAP_H, MAP_W, zeroInv } from "./constants";
 import { fatTile, slimTile, type SlimTile } from "./save";
 import type { Busy, Character, Inventory, OtherPawn, Season, Skills, Tile, Transport, Weather, World } from "./types";
 
@@ -55,6 +55,9 @@ export type PawnBody = {
   seasonSkillGain: number;
   profWeek: number;
   hand: Character["hand"];
+  body: Character["body"];
+  shield: Character["shield"];
+  helm: Character["helm"];
   horses: number;
   carts: number;
   wagon: boolean;
@@ -209,31 +212,7 @@ export function allOnesVer(n = MAP_W * MAP_H): number[] {
 }
 
 function emptyInv(): Inventory {
-  return {
-    wood: 0,
-    stone: 0,
-    ore: 0,
-    food: 0,
-    fish: 0,
-    axe: 0,
-    pick: 0,
-    herb: 0,
-    clay: 0,
-    crystal: 0,
-    rope: 0,
-    bucket: 0,
-    spear: 0,
-    shovel: 0,
-    rod: 0,
-    bread: 0,
-    plank: 0,
-    bar: 0,
-    tonic: 0,
-    smoked: 0,
-    coal: 0,
-    wheel: 0,
-    lock: 0,
-  };
+  return zeroInv();
 }
 
 export function darkWorld(seed = WORLD_SEED): World {
@@ -267,6 +246,9 @@ export function packPawn(c: Character): PawnBody {
     seasonSkillGain: c.seasonSkillGain,
     profWeek: c.profWeek,
     hand: c.hand,
+    body: c.body ?? null,
+    shield: c.shield ?? null,
+    helm: c.helm ?? null,
     horses: c.horses,
     carts: c.carts,
     wagon: c.wagon,
@@ -291,8 +273,8 @@ export function packPawn(c: Character): PawnBody {
 }
 
 export function unpackPawn(row: PawnRow): Character {
-  const body = (row.body && typeof row.body === "object" ? row.body : {}) as Partial<Character>;
-  const inv = { ...emptyInv(), ...(body.inventory ?? {}) };
+  const packed = (row.body && typeof row.body === "object" ? row.body : {}) as Partial<Character>;
+  const inv = { ...emptyInv(), ...(packed.inventory ?? {}) };
   return {
     name: row.name || "Испытатель",
     color: row.color || "#6b3a2a",
@@ -300,37 +282,40 @@ export function unpackPawn(row: PawnRow): Character {
     y: row.y,
     px: row.x,
     py: row.y,
-    gold: typeof body.gold === "number" ? body.gold : 20,
+    gold: typeof packed.gold === "number" ? packed.gold : 20,
     inventory: inv,
-    transport: body.transport ?? "walk",
-    energy: typeof body.energy === "number" ? Math.min(ENERGY_MAX, body.energy) : ENERGY_MAX,
-    satiety: body.satiety ?? 90,
-    warmth: body.warmth ?? 90,
-    hp: body.hp ?? 100,
-    profession: body.profession ?? "wanderer",
-    skills: { ...emptySkills(), ...(body.skills ?? {}) },
-    seasonSkillGain: body.seasonSkillGain ?? 0,
-    profWeek: body.profWeek ?? 0,
-    hand: body.hand ?? "axe",
-    horses: body.horses ?? 0,
-    carts: body.carts ?? 0,
-    wagon: !!body.wagon,
-    ...splitBodyWater(body),
-    energyAt: body.energyAt ?? Date.now(),
-    wanted: body.wanted ?? 0,
-    jailedUntil: body.jailedUntil ?? 0,
-    jailWhy: body.jailWhy ?? "",
-    life: body.life ?? "alive",
-    downAt: body.downAt ?? 0,
-    deadUntil: body.deadUntil ?? 0,
-    deaths: body.deaths ?? 0,
-    stillUntil: body.stillUntil ?? 0,
-    resting: !!body.resting,
-    busy: body.busy ?? null,
-    wear: body.wear ?? {},
-    bagWear: body.bagWear ?? {},
-    pacts: body.pacts ?? {},
-    village: body.village ?? "",
+    transport: packed.transport ?? "walk",
+    energy: typeof packed.energy === "number" ? Math.min(ENERGY_MAX, packed.energy) : ENERGY_MAX,
+    satiety: packed.satiety ?? 90,
+    warmth: packed.warmth ?? 90,
+    hp: packed.hp ?? 100,
+    profession: packed.profession ?? "wanderer",
+    skills: { ...emptySkills(), ...(packed.skills ?? {}) },
+    seasonSkillGain: packed.seasonSkillGain ?? 0,
+    profWeek: packed.profWeek ?? 0,
+    hand: packed.hand ?? "axe",
+    body: packed.body ?? null,
+    shield: packed.shield ?? null,
+    helm: packed.helm ?? null,
+    horses: packed.horses ?? 0,
+    carts: packed.carts ?? 0,
+    wagon: !!packed.wagon,
+    ...splitBodyWater(packed),
+    energyAt: packed.energyAt ?? Date.now(),
+    wanted: packed.wanted ?? 0,
+    jailedUntil: packed.jailedUntil ?? 0,
+    jailWhy: packed.jailWhy ?? "",
+    life: packed.life ?? "alive",
+    downAt: packed.downAt ?? 0,
+    deadUntil: packed.deadUntil ?? 0,
+    deaths: packed.deaths ?? 0,
+    stillUntil: packed.stillUntil ?? 0,
+    resting: !!packed.resting,
+    busy: packed.busy ?? null,
+    wear: packed.wear ?? {},
+    bagWear: packed.bagWear ?? {},
+    pacts: packed.pacts ?? {},
+    village: packed.village ?? "",
   };
 }
 
