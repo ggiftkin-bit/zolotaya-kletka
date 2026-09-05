@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BIOME_LABEL, ITEM_LABEL, ITEMS } from "@/game/constants";
 import { CRAFTS, canDoCraft } from "@/game/craft";
-import { BUILD_COST, BUILDING_LABEL, CART_GOLD, CART_WOOD, LOCK_GOLD, WAGON_GOLD, caravanBuy, caravanSell, goldTxt } from "@/game/economy";
+import { BUILD_COST, BUILDING_LABEL, CART_GOLD, CART_WOOD, LOCK_GOLD, WAGON_GOLD, caravanBuy, caravanSell, goldTxt, sellLot } from "@/game/economy";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, waterHint } from "@/game/life";
 import { LIFE_INDEX } from "@/game/art";
 import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/places";
@@ -340,7 +340,7 @@ function PickPane({
       {emptyYard && near && (
         <Sticker
           title="Шалаш"
-          sub="4 дерева · первая крыша"
+          sub="6 дерева · первая крыша"
           ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
           onClick={() => {
             g.setBuildKind("shack");
@@ -352,7 +352,7 @@ function PickPane({
       {shackUp && near && (
         <Sticker
           title="Дом"
-          sub="10 дерева · 4 камня"
+          sub="14 дерева · 6 камня"
           ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
           onClick={() => {
             g.setBuildKind("house");
@@ -501,7 +501,7 @@ function PickPane({
           )}
           <Sticker
             title={`Украсть у ${hamletTitle(tile.owner)}`}
-            sub="С соседней клетки. Поймают — яма, залог 12."
+            sub="С соседней клетки. Поймают — яма, залог 20."
             onClick={() => g.stealHere()}
           />
           {g.character.pacts[tile.owner] !== "friend" && (
@@ -619,7 +619,7 @@ function PlacePane({ tile, here }: { tile: Tile; here: boolean; near: boolean })
     return <CampBody tile={tile} />;
   }
   if (tile.building === "jail") {
-    return <p className="mt-4 text-sm text-muted-foreground">Яма. Сажают только по закону. Залог 12 золота.</p>;
+    return <p className="mt-4 text-sm text-muted-foreground">Яма. Сажают только по закону. Залог 20 золота.</p>;
   }
   return <p className="mt-4 text-sm text-muted-foreground">Пусто.</p>;
 }
@@ -974,16 +974,26 @@ function TradeLists({
     <>
       <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">У тебя / сдать</p>
       <ul className="mt-1 space-y-1">
-        {ITEMS.filter((k) => (demand[k] ?? 0) > 0).map((k) => (
+        {ITEMS.filter((k) => (demand[k] ?? 0) > 0).map((k) => {
+            const lot = sellLot(k);
+            const pay = caravanBuy(k, season, traderBonus);
+            return (
           <li key={k} className="flex items-center justify-between gap-2">
             <span className="text-sm">
-              {ITEM_LABEL[k]} · у тебя {inv[k] ?? 0} · сдать за {goldTxt(caravanBuy(k, season, traderBonus))}
+              {ITEM_LABEL[k]} · у тебя {inv[k] ?? 0} ·{" "}
+              {lot > 1 ? `пачка ${lot} · ${goldTxt(pay)}` : `сдать за ${goldTxt(pay)}`}
             </span>
-            <Button size="sm" className="h-10" disabled={(inv[k] ?? 0) <= 0} onClick={() => onSell(k, Math.min(4, inv[k] || 1))}>
+            <Button
+              size="sm"
+              className="h-10"
+              disabled={(inv[k] ?? 0) < lot}
+              onClick={() => onSell(k, lot)}
+            >
               сдать
             </Button>
           </li>
-        ))}
+            );
+        })}
         {ITEMS.every((k) => (demand[k] ?? 0) <= 0) && (
           <li className="text-sm text-muted-foreground">Сейчас ничего не берут.</li>
         )}

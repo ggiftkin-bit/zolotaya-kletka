@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { BAG_CELLS, CAPACITY, ITEM_LABEL, ITEM_WEIGHT, ITEMS, TICK_SEC, TICKS_PER_DAY, TRANSPORT_LABEL, WEATHER_LABEL } from "@/game/constants";
-import { BUILDING_LABEL, goldTxt } from "@/game/economy";
+import { BUILDING_LABEL, CART_GOLD, CART_WOOD, goldTxt } from "@/game/economy";
 import { EAT_ORDER, EAT_SAT } from "@/game/craft";
 import { nextGoal } from "@/game/goal";
 import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, HIRE_GOLD, SKIP_GOLD, deathFee, formatWait, nextEnergyIn, regenPaused } from "@/game/pace";
@@ -789,7 +789,7 @@ export function Hud() {
             </div>
             <p className="mt-2 text-[12px] leading-snug text-muted-foreground">
               Пешком {CAPACITY.walk} кг. Тачка {CAPACITY.cart} кг, шаг как пешком
-              {g.character.carts < 1 ? " — 8 золота в лавке или 8 дерева дома" : ""}. Лошадь в 2½ раза быстрее, ноша{" "}
+              {g.character.carts < 1 ? ` — ${CART_GOLD} золота в лавке или ${CART_WOOD} дерева дома` : ""}. Лошадь в 2½ раза быстрее, ноша{" "}
               {CAPACITY.horse} кг. Телега — к лошади, {CAPACITY.wagon} кг, быстрее тачки; 24 золота или плотник. В карман не
               кладётся.
             </p>

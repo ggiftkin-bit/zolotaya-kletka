@@ -5,18 +5,18 @@ export const ENERGY_MAX = 18;
 export const ENERGY_MS = 90_000;
 export const ENERGY_HOME_MS = 45_000;
 export const ENERGY_SLEEP_MS = 20_000;
-export const BOOST_GOLD = 6;
+export const BOOST_GOLD = 8;
 export const BOOST_ENERGY = 4;
-export const SKIP_GOLD = 8;
-export const HIRE_GOLD = 12;
+export const SKIP_GOLD = 12;
+export const HIRE_GOLD = 16;
 export const JAIL_MS = 80_000;
-export const BAIL_GOLD = 12;
+export const BAIL_GOLD = 20;
 export const DOWN_MS = 90_000;
 export const DEAD_MS = 120_000;
 /** One game day: 8 ticks × 30 s. Walk lock after death. */
 export const DAY_MS = 240_000;
 
-export const NO_STRENGTH = "Нет силы. Ляг дома или кружка 6 золота.";
+export const NO_STRENGTH = "Нет силы. Ляг дома или кружка 8 золота.";
 
 /** First death 0, then 10, 20, 30… */
 export function deathFee(deaths: number): number {

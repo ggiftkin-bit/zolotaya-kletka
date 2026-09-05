@@ -25,13 +25,13 @@ import {
   LOCK_GOLD,
   PROF_SKILL,
   PROFESSION_LABEL,
-  caravanBuy,
   caravanSell,
   emptySkills,
   goldTxt,
   makeJobs,
   makeTrader,
   seasonPrice,
+  sellQuote,
 } from "./economy";
 import { requestLook } from "./cam";
 import { findPath, pathTotal } from "./path";
@@ -994,20 +994,24 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       return;
     }
     const take = Math.min(n, quota);
-    inv[item] -= take;
-    const unit = caravanBuy(item, s.season, s.character.profession === "trader");
-    const gold = s.character.gold + unit * take;
+    const quote = sellQuote(item, take, s.season, s.character.profession === "trader");
+    if (quote.take <= 0 || quote.gold <= 0) {
+      speak("Мало для лавки.", here.x, here.y, "мало для лавки", "bad");
+      return;
+    }
+    inv[item] -= quote.take;
+    const gold = s.character.gold + quote.gold;
     let c = { ...s.character, inventory: inv, gold };
     c = bumpSkill(c, "trade", 0.15);
-    const demand = { ...s.trader.demand, [item]: quota - take };
-    const last = `Купил ${take} ${ITEM_LABEL[item]} за ${goldTxt(unit * take)}. Ещё берёт ${demand[item]}.`;
+    const demand = { ...s.trader.demand, [item]: quota - quote.take };
+    const last = `Купил ${quote.take} ${ITEM_LABEL[item]} за ${goldTxt(quote.gold)}. Ещё берёт ${demand[item]}.`;
     set({
       character: c,
       trader: { ...s.trader, demand, last },
       log: pushLog(s.log, `Лавка: ${last}`),
       floaters: [
         ...s.floaters,
-        { id: ++floaterSeq, x: here.x, y: here.y, text: `+${goldTxt(unit * take)}`, tone: "gold" as const },
+        { id: ++floaterSeq, x: here.x, y: here.y, text: `+${goldTxt(quote.gold)}`, tone: "gold" as const },
       ].slice(-10),
     });
   },
@@ -4304,16 +4308,19 @@ function sellToShop(item: ItemId, qty: number) {
     speak("Нечего сдавать.", tile.x, tile.y, "пусто", "bad");
     return;
   }
-  const unit = caravanBuy(item, s.season, s.character.profession === "trader");
-  const gold = unit * n;
-  const inv = { ...s.character.inventory, [item]: have - n };
-  tile.chest = { ...tile.chest, [item]: (tile.chest[item] ?? 0) + n };
-  let c = bumpSkill({ ...s.character, inventory: inv, gold: s.character.gold + gold }, "trade", 0.12);
+  const quote = sellQuote(item, n, s.season, s.character.profession === "trader");
+  if (quote.take <= 0 || quote.gold <= 0) {
+    speak("Мало для лавки.", tile.x, tile.y, "мало для лавки", "bad");
+    return;
+  }
+  const inv = { ...s.character.inventory, [item]: have - quote.take };
+  tile.chest = { ...tile.chest, [item]: (tile.chest[item] ?? 0) + quote.take };
+  let c = bumpSkill({ ...s.character, inventory: inv, gold: s.character.gold + quote.gold }, "trade", 0.12);
   useGame.setState({
     character: c,
     world: { ...s.world, tiles: s.world.tiles },
-    log: pushLog(s.log, `Сдал в лавку ${tile.owner}: ${n} ${ITEM_LABEL[item]} за ${goldTxt(gold)}.`),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${goldTxt(gold)}`, tone: "gold" as const }].slice(-10),
+    log: pushLog(s.log, `Сдал в лавку ${tile.owner}: ${quote.take} ${ITEM_LABEL[item]} за ${goldTxt(quote.gold)}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${goldTxt(quote.gold)}`, tone: "gold" as const }].slice(-10),
   });
 }
 

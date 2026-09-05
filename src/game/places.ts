@@ -64,7 +64,7 @@ export function placeTitle(tile: Tile) {
 }
 
 export function placeHint(tile: Tile) {
-  if (tile.caravan) return "Тачка 8 золота, телега 24, замок 12. Скупка и живость. На тракте, не в сумке.";
+  if (tile.caravan) return "Тачка 20 золота, телега 48, замок 16. Сырьё пачкой. На тракте, не в сумке.";
   switch (tile.building) {
     case "shack":
       return "Сон, очаг, простое ремесло. Сундук. Замок — кузнец или лавка.";
@@ -74,15 +74,15 @@ export function placeHint(tile: Tile) {
     case "bench":
       return "Верстак. Доска и колесо — плотник. Телега: 2 колеса, 4 дерева, слиток. В сумку не кладётся.";
     case "forge":
-      return "Горн. Руда+уголь → слиток, топор, кирка, замок. Без воды дольше.";
+      return "Горн. Руда+2 угля → слиток, топор, кирка, замок. Без воды дольше.";
     case "oven":
-      return "Печь. 2 еды → хлеб. Без воды дольше.";
+      return "Печь. 3 еды → хлеб. Без воды дольше.";
     case "smoke":
-      return "Коптильня. Рыба → копчёное.";
+      return "Коптильня. Рыба + дерево → копчёное.";
     case "herbs":
       return "Стол трав. 3 травы → настой.";
     case "coalpit":
-      return "Дровница. 3 дерева → 2 угля.";
+      return "Дровница. 4 дерева → 1 уголь.";
     case "stall":
       return tile.owner === "you" ? "Твой прилавок. Курс как у тракта." : "Чужой прилавок.";
     case "shop":
