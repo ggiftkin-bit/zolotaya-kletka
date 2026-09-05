@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { BAG_CELLS, CAPACITY, ITEM_LABEL, ITEMS, TICK_SEC, TICKS_PER_DAY, TRANSPORT_LABEL, WEATHER_LABEL } from "@/game/constants";
-import { BUILDING_LABEL, PROFESSION_LABEL, SKILL_LABEL, goldTxt } from "@/game/economy";
-import { PROF_BLURB, EAT_ORDER, EAT_SAT } from "@/game/craft";
-import { nextGoal, personLevel, skillHow } from "@/game/goal";
+import { BAG_CELLS, CAPACITY, ITEM_LABEL, ITEM_WEIGHT, ITEMS, TICK_SEC, TICKS_PER_DAY, TRANSPORT_LABEL, WEATHER_LABEL } from "@/game/constants";
+import { BUILDING_LABEL, goldTxt } from "@/game/economy";
+import { EAT_ORDER, EAT_SAT } from "@/game/craft";
+import { nextGoal } from "@/game/goal";
 import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, HIRE_GOLD, SKIP_GOLD, deathFee, formatWait, nextEnergyIn, regenPaused } from "@/game/pace";
 import { isHeld, isJailed, isStill, isYours } from "@/game/crime";
 import { TOOL_ITEMS } from "@/game/life";
@@ -11,13 +11,13 @@ import { useGame } from "@/game/store";
 import { pawnKg } from "@/game/travel";
 import { asPile, pileEmpty, pileLabel } from "@/game/pile";
 import { foeById, gearSlot } from "@/game/fight";
-import type { BuildingKind, ItemId, Profession, Skill, ToolMode, Weather } from "@/game/types";
+import type { BuildingKind, ItemId, ToolMode, Weather } from "@/game/types";
 import { tileAt } from "@/game/worldgen";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Floaters } from "./Floaters";
 import { Book, type BookTab } from "./HowTo";
-import { ICO, Ico, ItemPic, JobPic, WeatherPic, GearPic, GEAR_ICO } from "./Sprite";
+import { ICO, Ico, ItemPic, WeatherPic, GearPic, GEAR_ICO } from "./Sprite";
 import { TileBubble } from "./TileBubble";
 import { UserButton } from "@/lib/auth/gates";
 
@@ -42,6 +42,21 @@ const BUILDINGS: Exclude<BuildingKind, "none" | "workshop" | "shop" | "board" | 
   "moat",
 ];
 
+const GEAR_PACK: ItemId[] = [
+  "axe",
+  "pick",
+  "rope",
+  "spear",
+  "shovel",
+  "rod",
+  "club",
+  "knife",
+  "board_shield",
+  "bar_shield",
+  "wadded",
+  "helm",
+];
+
 const HINT: Partial<Record<ToolMode, string>> = {
   move: "тап — наклейки. Пойти — отдельная",
   gather: "стой на клетке с деревьями / дичью и жми ещё раз",
@@ -52,32 +67,17 @@ const HINT: Partial<Record<ToolMode, string>> = {
   build: "выбери постройку в ряду выше и тапни соседнюю клетку",
 };
 
-const PROFESSIONS: Profession[] = [
-  "wanderer",
-  "lumberjack",
-  "miner",
-  "fisher",
-  "farmer",
-  "baker",
-  "carpenter",
-  "smith",
-  "trader",
-  "healer",
-  "hireling",
-];
-
 export function Hud() {
   const g = useGame();
   const [bag, setBag] = useState(false);
-  const [tab, setTab] = useState<"pack" | "tools" | "chest" | "grow">("pack");
+  const [tab, setTab] = useState<"pack" | "tools" | "chest">("pack");
   const [bye, setBye] = useState(false);
   const [help, setHelp] = useState(false);
   const [bookTab, setBookTab] = useState<BookTab>("table");
   const [power, setPower] = useState(false);
   const [vitals, setVitals] = useState<"hp" | "water" | null>(null);
   const [food, setFood] = useState(false);
-  const [askJob, setAskJob] = useState<Profession | null>(null);
-  const [cell, setCell] = useState<ItemId | null>("food");
+  const [cell, setCell] = useState<ItemId | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const inv = g.character.inventory;
   const here = tileAt(g.world, g.character.x, g.character.y);
@@ -87,7 +87,6 @@ export function Hud() {
   const thirsty = g.character.water < 25;
   const cold = g.character.warmth < 20;
   const tired = g.character.energy < 3;
-  const level = personLevel(g.character.skills);
   const goal = nextGoal(g);
   const jailed = isJailed(g.character, now);
   const held = isHeld(g.character, now);
@@ -109,21 +108,31 @@ export function Hud() {
   }, []);
 
   useEffect(() => {
-    if (g.inspect) {
+    if (g.inspect || g.meet) {
       setBag(false);
       setHelp(false);
       setPower(false);
       setVitals(null);
       setFood(false);
     }
-  }, [g.inspect]);
+  }, [g.inspect, g.meet]);
 
   useEffect(() => {
-    if (!bag || tab !== "pack") return;
-    if (cell && (inv[cell] > 0 || BAG_CELLS.includes(cell))) return;
-    const first = BAG_CELLS.find((k) => inv[k] > 0) ?? ITEMS.find((k) => inv[k] > 0) ?? "wood";
-    setCell(first);
-  }, [bag, tab]);
+    if (!bag) return;
+    if (tab === "chest" && !ownChest) {
+      setTab("pack");
+      setCell(null);
+      return;
+    }
+    if (!cell) return;
+    if (tab === "chest") {
+      if ((here?.chest?.[cell] ?? 0) > 0) return;
+      setCell(null);
+      return;
+    }
+    if ((inv[cell] ?? 0) > 0) return;
+    setCell(null);
+  }, [bag, tab, cell, inv, ownChest, here]);
 
   useEffect(() => {
     if (!bye) return;
@@ -131,18 +140,18 @@ export function Hud() {
     return () => window.clearTimeout(id);
   }, [bye]);
 
-  const openBag = (next: "pack" | "tools" | "chest" | "grow" = "pack") => {
+  const openBag = (next: "pack" | "tools" = "pack") => {
     g.closeInspect();
     setHelp(false);
     setPower(false);
     setVitals(null);
-    setAskJob(null);
     setFood(false);
     if (bag && tab === next) {
       setBag(false);
       return;
     }
     setTab(next);
+    setCell(null);
     setBag(true);
   };
 
@@ -565,90 +574,75 @@ export function Hud() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" />
-            <img
-              src="/game/bag-hero.jpg"
-              alt=""
-              className="mb-3 h-20 w-full rounded-[16px] object-cover object-[center_40%]"
-            />
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <JobPic job={g.character.profession} className="size-14 overflow-hidden rounded-[14px]" />
-                <div>
-                  <h2 className="font-display text-2xl leading-none">{g.character.name}</h2>
-                  <p className="mt-1 flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                    <WeatherPic
-                      weather={g.weather}
-                      night={g.phase === "night"}
-                      className="size-6 overflow-hidden rounded-md"
-                    />
-                    {g.phase === "night" ? "ночь" : WEATHER_LABEL[g.weather]}
-                  </p>
-                  <p className="mt-0.5 text-[12px] text-muted-foreground">
-                    {[
-                      g.character.transport !== "walk" ? TRANSPORT_LABEL[g.character.transport] : null,
-                      g.character.transport !== "cart" && g.character.carts > 0 ? "тачка" : null,
-                      g.character.horses > 0 && g.character.transport !== "horse" && g.character.transport !== "wagon"
-                        ? `лошадей ${g.character.horses}`
-                        : null,
-                      g.character.hand ? `в руке ${ITEM_LABEL[g.character.hand]}` : null,
-                      g.character.body ? ITEM_LABEL[g.character.body] : null,
-                      g.character.shield ? ITEM_LABEL[g.character.shield] : null,
-                      g.character.helm ? ITEM_LABEL[g.character.helm] : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || "пешком"}
-                  </p>
-                </div>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h2 className="truncate font-display text-2xl leading-none">{g.character.name}</h2>
+                <p className="mt-1 text-[13px] leading-snug text-muted-foreground">
+                  {weight.toFixed(0)} / {cap} кг · {TRANSPORT_LABEL[g.character.transport]}
+                </p>
               </div>
-              <button type="button" className="size-11 text-xl text-muted-foreground" onClick={() => setBag(false)}>
+              <button type="button" className="size-11 shrink-0 text-xl text-muted-foreground" onClick={() => setBag(false)}>
                 ×
               </button>
             </div>
-            <p className="mt-2 text-[12px] text-muted-foreground">ноша {weight.toFixed(0)}/{cap} кг</p>
 
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <Stat k="сытость" v={Math.round(g.character.satiety)} warn={hungry} ico={ICO.eat} />
-              <Stat k="сила" v={Math.round(g.character.energy)} warn={g.character.energy < 4} ico={ICO.boots} />
-              <Stat k="тепло" v={Math.round(g.character.warmth)} warn={cold} ico={ICO.house} />
-              <Stat k="вода" v={Math.round(g.character.water)} warn={thirsty} water />
-              <Stat k="здоровье" v={Math.round(g.character.hp)} warn={wounded} ico={ICO.stake} />
-            </div>
-
-            <div className="mt-4 flex gap-1 rounded-[14px] bg-raised p-1">
-              {(
-                [
-                  ["pack", "ноша"],
-                  ["tools", "снасть"],
-                  ["chest", "сундук"],
-                  ["grow", "рост"],
-                ] as const
-              ).map(([id, label]) => (
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTab("pack");
+                  setCell(null);
+                }}
+                className={cn(
+                  "h-14 flex-1 rounded-[16px] font-display text-lg",
+                  tab === "pack" ? "bg-accent text-accent-foreground" : "bg-raised text-muted-foreground",
+                )}
+              >
+                ноша
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTab("tools");
+                  setCell(null);
+                }}
+                className={cn(
+                  "h-14 flex-1 rounded-[16px] font-display text-lg",
+                  tab === "tools" ? "bg-accent text-accent-foreground" : "bg-raised text-muted-foreground",
+                )}
+              >
+                снасть
+              </button>
+              {ownChest && (
                 <button
-                  key={id}
                   type="button"
-                  onClick={() => setTab(id)}
+                  onClick={() => {
+                    setTab("chest");
+                    setCell(null);
+                  }}
                   className={cn(
-                    "h-11 flex-1 rounded-[10px] text-sm",
-                    tab === id ? "bg-accent text-accent-foreground" : "text-muted-foreground",
+                    "h-14 w-[4.6rem] shrink-0 rounded-[16px] text-sm",
+                    tab === "chest" ? "bg-accent text-accent-foreground" : "bg-raised text-muted-foreground",
                   )}
                 >
-                  {label}
+                  сундук
                 </button>
-              ))}
+              )}
             </div>
 
             {tab === "pack" && (
               <div className="mt-3 space-y-2">
-                <p className="text-[12px] text-muted-foreground">
-                  Тап: на землю, в сундук, в руку, надеть щит / стёганку / шлем.
-                </p>
+                {ownChest && here && (
+                  <p className="text-[12px] text-muted-foreground">
+                    ноша {packCount(inv)} · сундук {packCount(here.chest)}
+                  </p>
+                )}
                 <BagGrid
                   amounts={inv}
                   selected={cell}
-                  onSelect={setCell}
-                  extras={ITEMS.filter((k) => !BAG_CELLS.includes(k) && inv[k] > 0)}
+                  onSelect={(k) => setCell((c) => (c === k ? null : k))}
                 />
-                {cell && (
+                {cell && (inv[cell] ?? 0) > 0 && (
                   <BagActs
                     k={cell}
                     n={inv[cell]}
@@ -656,25 +650,16 @@ export function Hud() {
                     canHand={(TOOL_ITEMS as readonly string[]).includes(cell)}
                     hand={g.character.hand === cell}
                     wearSlot={gearSlot(cell)}
-                    worn={
-                      gearSlot(cell) === "body"
-                        ? g.character.body === cell
-                        : gearSlot(cell) === "shield"
-                          ? g.character.shield === cell
-                          : gearSlot(cell) === "helm"
-                            ? g.character.helm === cell
-                            : false
-                    }
+                    worn={wornOf(g.character, cell)}
+                    onEat={() => g.eat(cell)}
+                    onDrink={() => g.drinkTonic()}
                     onDrop={(q) => g.dropItem(cell, q)}
                     onChest={(q) => g.storeItem(cell, q)}
                     onHand={() => g.equipHand(g.character.hand === cell ? null : cell)}
-                    onWear={() => g.equipWear(gearSlot(cell) && g.character[gearSlot(cell)!] === cell ? null : cell, gearSlot(cell) ?? undefined)}
+                    onWear={() =>
+                      g.equipWear(gearSlot(cell) && wornOf(g.character, cell) ? null : cell, gearSlot(cell) ?? undefined)
+                    }
                   />
-                )}
-                {inv.tonic > 0 && (
-                  <Button className="h-11 w-full" variant="secondary" onClick={() => g.drinkTonic()}>
-                    Выпить настой · раны, не сила
-                  </Button>
                 )}
                 {here && !pileEmpty(asPile(here.pile)) && (
                   <button
@@ -702,201 +687,83 @@ export function Hud() {
             )}
 
             {tab === "tools" && (
+              <div className="mt-3 space-y-3">
+                <div className="flex gap-2">
+                  <GearSocket
+                    label="рука"
+                    item={g.character.hand}
+                    wear={isWearId(g.character.hand) ? remainingWear(g.character, g.character.hand) : null}
+                    onClick={() => g.equipHand(null)}
+                  />
+                  <GearSocket
+                    label="тело"
+                    item={g.character.body}
+                    wear={null}
+                    onClick={() => g.equipWear(null, "body")}
+                  />
+                  <GearSocket
+                    label="голова"
+                    item={g.character.helm}
+                    wear={null}
+                    onClick={() => g.equipWear(null, "helm")}
+                  />
+                </div>
+                {g.character.shield && (
+                  <button
+                    type="button"
+                    className="flex h-12 w-full items-center gap-2 rounded-[14px] bg-raised px-3"
+                    onClick={() => g.equipWear(null, "shield")}
+                  >
+                    <ItemPic id={g.character.shield} className="size-9 overflow-hidden rounded-md" />
+                    <span className="font-display text-lg leading-none">{ITEM_LABEL[g.character.shield]}</span>
+                    <span className="ml-auto text-[12px] text-muted-foreground">снять</span>
+                  </button>
+                )}
+                <BagGrid
+                  amounts={Object.fromEntries(GEAR_PACK.map((k) => [k, inv[k] ?? 0]))}
+                  selected={null}
+                  marks={[g.character.hand, g.character.body, g.character.shield, g.character.helm]}
+                  onSelect={(k) => {
+                    const slot = gearSlot(k);
+                    if (slot) {
+                      g.equipWear(g.character[slot] === k ? null : k, slot);
+                      return;
+                    }
+                    g.equipHand(g.character.hand === k ? null : k);
+                  }}
+                />
+              </div>
+            )}
+
+            {tab === "chest" && ownChest && here && (
               <div className="mt-3 space-y-2">
                 <p className="text-[12px] text-muted-foreground">
-                  Карман снасти. Топор — дрова. Кирка — камень и руда. Копьё — охота. Удочка — рыба. Верёвка — лошадь. Ведро — вода вдаль от реки. Лопата — яма. Снасть ломается.
+                  ноша {packCount(inv)} · сундук {packCount(here.chest)}
+                  {here.chestLock ? " · на замке, для тебя открыт" : ""}
                 </p>
-                <p className="text-sm">
-                  В руке:{" "}
-                  <span className="font-display text-lg">
-                    {g.character.hand ? ITEM_LABEL[g.character.hand] : "пусто"}
-                  </span>
-                </p>
-                <p className="text-[12px] text-muted-foreground">
-                  тело {g.character.body ? ITEM_LABEL[g.character.body] : "нет"} · щит{" "}
-                  {g.character.shield ? ITEM_LABEL[g.character.shield] : "нет"} · голова{" "}
-                  {g.character.helm ? ITEM_LABEL[g.character.helm] : "нет"}
-                </p>
-                {(["body", "shield", "helm"] as const).map((slot) => {
-                  const id = g.character[slot];
-                  if (!id) return null;
-                  return (
-                    <Button key={slot} className="h-11 w-full" variant="secondary" onClick={() => g.equipWear(null, slot)}>
-                      снять {ITEM_LABEL[id]}
-                    </Button>
-                  );
-                })}
-                {TOOL_ITEMS.map((k) => (
-                  <div key={k} className="flex items-center gap-2 rounded-[14px] bg-raised px-2 py-2">
-                    <ItemPic id={k} className="size-10 overflow-hidden rounded-[10px]" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[11px] text-muted-foreground">{ITEM_LABEL[k]}</p>
-                      <p className="font-display text-lg leading-none tabular-nums">{inv[k]}</p>
-                      {(k === "axe" || k === "pick" || k === "spear" || k === "shovel" || k === "club" || k === "knife") && inv[k] > 0 && (
-                        <p className="text-[11px] text-muted-foreground">
-                          {g.character.hand === k
-                            ? `в руке ещё ${remainingWear(g.character, k as WearId)}`
-                            : ""}
-                          {inv[k] - (g.character.hand === k ? 1 : 0) > 0
-                            ? `${g.character.hand === k ? " · " : ""}${
-                                g.character.bagWear?.[k as WearId]
-                                  ? `сумка ещё ${g.character.bagWear[k as WearId]}`
-                                  : "в сумке новый"
-                              }`
-                            : g.character.hand === k
-                              ? ""
-                              : g.character.bagWear?.[k as WearId]
-                                ? `ещё ${g.character.bagWear[k as WearId]}`
-                                : "новый"}
-                        </p>
+                <BagGrid
+                  amounts={here.chest}
+                  selected={cell}
+                  onSelect={(k) => setCell((c) => (c === k ? null : k))}
+                />
+                {cell && (here.chest[cell] ?? 0) > 0 && (
+                  <div className="rounded-[14px] bg-raised p-3">
+                    <p className="font-display text-lg leading-none">{ITEM_LABEL[cell]}</p>
+                    <p className="mt-1 text-[12px] text-muted-foreground">
+                      {ITEM_WEIGHT[cell]} кг · в сундуке {here.chest[cell]}
+                    </p>
+                    <div className="mt-2 flex gap-1.5">
+                      <Button className="h-12 flex-1" onClick={() => g.takeChest(cell, 1)}>
+                        из сундука
+                      </Button>
+                      {(here.chest[cell] ?? 0) > 1 && (
+                        <Button className="h-12 flex-1" variant="secondary" onClick={() => g.takeChest(cell, here.chest[cell])}>
+                          всё
+                        </Button>
                       )}
                     </div>
-                    <Button
-                      size="sm"
-                      className="h-11"
-                      variant={g.character.hand === k ? "default" : "outline"}
-                      disabled={inv[k] <= 0}
-                      onClick={() => g.equipHand(g.character.hand === k ? null : k)}
-                    >
-                      {g.character.hand === k ? "убрать" : "в руку"}
-                    </Button>
-                  </div>
-                ))}
-                <p className="text-[12px] text-muted-foreground">
-                  Ремесло — не в сумке. Открой шалаш, дом или мастерскую наклейкой «Открыть».
-                </p>
-              </div>
-            )}
-
-            {tab === "chest" && (
-              <div className="mt-3">
-                {ownChest && here ? (
-                  <div className="space-y-2">
-                    <p className="text-[12px] text-muted-foreground">
-                      {here.chestLock ? "Сундук на замке. Для тебя открыт. Чужой — только взлом." : "Сундук. В ношу / из ноши. Не весит."}
-                    </p>
-                    <BagGrid
-                      amounts={here.chest}
-                      selected={cell}
-                      onSelect={setCell}
-                      extras={ITEMS.filter((k) => !BAG_CELLS.includes(k) && (here.chest[k] ?? 0) > 0)}
-                    />
-                    {cell && (
-                      <div className="rounded-[14px] bg-raised p-2">
-                        <p className="font-display text-lg leading-none">{ITEM_LABEL[cell]}</p>
-                        <p className="mt-1 text-[12px] text-muted-foreground">в ношу / из ноши</p>
-                        <div className="mt-2 flex gap-1">
-                          {([1, Math.max(1, Math.floor((here.chest[cell] || 0) / 4)), here.chest[cell] || 0] as const).map((q, i) => (
-                            <button
-                              key={`out-${i}`}
-                              type="button"
-                              disabled={(here.chest[cell] || 0) < q || q <= 0}
-                              className="h-11 min-w-10 flex-1 rounded-[10px] bg-panel text-[12px] disabled:opacity-30"
-                              onClick={() => g.takeChest(cell, q)}
-                            >
-                              {i === 0 ? "1 в ношу" : i === 1 ? "¼" : "всё"}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="mt-1 flex gap-1">
-                          {([1, Math.max(1, Math.floor((inv[cell] || 0) / 4)), inv[cell] || 0] as const).map((q, i) => (
-                            <button
-                              key={`in-${i}`}
-                              type="button"
-                              disabled={(inv[cell] || 0) < q || q <= 0}
-                              className="h-11 min-w-10 flex-1 rounded-[10px] bg-panel text-[12px] disabled:opacity-30"
-                              onClick={() => g.storeItem(cell, q)}
-                            >
-                              {i === 0 ? "1 из ноши" : i === 1 ? "¼" : "всё"}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Сундук — в своём шалаше, доме или складе. Встань на клетку.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {tab === "grow" && (
-              <div className="mt-3">
-                <p className="font-display text-3xl leading-none">Уровень {level}</p>
-                <p className="mt-2 text-[13px] leading-snug text-muted-foreground">
-                  Отдельной кнопки «прокачать» нет. Рубишь, строишь, торгуешь — навык растёт, уровень сам
-                  складывается. Профессия — один раз. Бродяга смотрит всех, «стать» закрывает смену.
-                </p>
-                <p className="mt-2 text-[13px] leading-snug text-muted-foreground">
-                  {PROF_BLURB[g.character.profession]}
-                </p>
-                <p className="mt-4 text-[11px] uppercase tracking-wide text-muted-foreground">Профессия</p>
-                {g.character.profession !== "wanderer" && (
-                  <p className="mt-1 text-[13px] text-muted-foreground">
-                    Уже {PROFESSION_LABEL[g.character.profession]}. Пока так.
-                  </p>
-                )}
-                {askJob && g.character.profession === "wanderer" && (
-                  <div className="mt-2 rounded-[14px] bg-raised p-3">
-                    <p className="text-sm leading-snug">
-                      Стать {PROFESSION_LABEL[askJob]}? Обратно сам не сменишь.
-                    </p>
-                    <div className="mt-2 grid grid-cols-2 gap-1.5">
-                      <Button className="h-11" variant="secondary" onClick={() => setAskJob(null)}>
-                        нет
-                      </Button>
-                      <Button
-                        className="h-11"
-                        onClick={() => {
-                          g.setProfession(askJob);
-                          setAskJob(null);
-                        }}
-                      >
-                        стать
-                      </Button>
-                    </div>
                   </div>
                 )}
-                <div className="mt-1.5 grid grid-cols-4 gap-1.5">
-                  {PROFESSIONS.map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => {
-                        if (g.character.profession !== "wanderer") {
-                          g.setProfession(p);
-                          return;
-                        }
-                        if (p === "wanderer") return;
-                        setAskJob(p);
-                      }}
-                      className={cn(
-                        "flex flex-col items-center gap-1 rounded-[14px] p-1.5",
-                        g.character.profession === p ? "bg-accent text-accent-foreground" : "bg-raised",
-                      )}
-                    >
-                      <JobPic job={p} className="size-12 overflow-hidden rounded-[10px]" />
-                      <span className="text-[10px] leading-tight">{PROFESSION_LABEL[p]}</span>
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-4 text-[11px] uppercase tracking-wide text-muted-foreground">Навыки</p>
-                <ul className="mt-2 space-y-1.5">
-                  {(Object.entries(g.character.skills) as [Skill, number][]).map(([k, n]) => (
-                    <li key={k}>
-                      <div className="flex items-center gap-2">
-                        <span className="w-24 text-[12px] text-muted-foreground">{SKILL_LABEL[k]}</span>
-                        <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-raised">
-                          <span className="block h-full rounded-full bg-accent" style={{ width: `${Math.min(100, n * 5)}%` }} />
-                        </span>
-                        <span className="w-8 font-display tabular-nums">{n.toFixed(1)}</span>
-                      </div>
-                      <p className="pl-0 text-[11px] text-muted-foreground">{skillHow(k)}</p>
-                    </li>
-                  ))}
-                </ul>
               </div>
             )}
             <div className="mt-4 flex gap-1.5">
@@ -1016,26 +883,81 @@ function MeetSheet() {
   );
 }
 
+function packCount(amounts: Partial<Record<ItemId, number>> | undefined) {
+  if (!amounts) return 0;
+  let n = 0;
+  for (const k of ITEMS) n += amounts[k] ?? 0;
+  return n;
+}
+
+function wornOf(c: { body: ItemId | null; shield: ItemId | null; helm: ItemId | null }, k: ItemId) {
+  const slot = gearSlot(k);
+  if (!slot) return false;
+  return c[slot] === k;
+}
+
+function GearSocket({
+  label,
+  item,
+  wear,
+  onClick,
+}: {
+  label: string;
+  item: ItemId | null;
+  wear: number | null;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!item}
+      className={cn(
+        "flex min-h-[72px] flex-1 flex-col items-center justify-center gap-0.5 rounded-[16px] border-2 px-1",
+        item ? "border-border bg-raised" : "border-dashed border-muted-foreground/35 bg-transparent",
+      )}
+    >
+      {item ? (
+        <ItemPic id={item} className="size-10 overflow-hidden rounded-md" />
+      ) : (
+        <span className="text-[12px] text-muted-foreground">{label}</span>
+      )}
+      {item && (
+        <span className="text-[10px] leading-tight text-muted-foreground">
+          {label}
+          {wear != null ? ` · ${wear}` : ""}
+        </span>
+      )}
+    </button>
+  );
+}
+
 function BagGrid({
   amounts,
   selected,
   onSelect,
-  extras,
+  marks,
 }: {
   amounts: Partial<Record<ItemId, number>>;
   selected: ItemId | null;
   onSelect: (k: ItemId) => void;
-  extras: ItemId[];
+  marks?: Array<ItemId | null>;
 }) {
   const seen = new Set<ItemId>();
   const cells: ItemId[] = [];
-  for (const k of [...BAG_CELLS, ...extras]) {
+  for (const k of BAG_CELLS) {
     if (seen.has(k)) continue;
     seen.add(k);
     if ((amounts[k] ?? 0) > 0) cells.push(k);
   }
+  for (const k of ITEMS) {
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if ((amounts[k] ?? 0) > 0) cells.push(k);
+  }
+  const lit = new Set((marks ?? [selected]).filter((x): x is ItemId => !!x));
   return (
-    <div className="grid grid-cols-3 gap-1.5">
+    <div className="grid grid-cols-5 gap-1.5">
       {cells.map((k) => {
         const n = amounts[k] ?? 0;
         return (
@@ -1044,17 +966,17 @@ function BagGrid({
             type="button"
             onClick={() => onSelect(k)}
             className={cn(
-              "flex aspect-square flex-col items-center justify-center rounded-[14px] border border-border bg-raised",
-              selected === k && "border-accent bg-accent/20",
+              "flex min-h-[52px] flex-col items-center justify-center rounded-[12px] border border-border bg-raised py-1",
+              lit.has(k) && "border-accent bg-accent/20",
             )}
           >
-            <ItemPic id={k} className="size-9 overflow-hidden rounded-md" />
-            <span className="mt-0.5 font-display text-sm tabular-nums leading-none">{n}</span>
+            <ItemPic id={k} className="size-8 overflow-hidden rounded-md" />
+            {n > 1 && <span className="mt-0.5 font-display text-sm tabular-nums leading-none">{n}</span>}
           </button>
         );
       })}
       {cells.length === 0 && (
-        <p className="col-span-3 text-sm text-muted-foreground">Пусто.</p>
+        <p className="col-span-5 py-3 text-sm text-muted-foreground">пусто</p>
       )}
     </div>
   );
@@ -1068,6 +990,8 @@ function BagActs({
   hand,
   wearSlot,
   worn,
+  onEat,
+  onDrink,
   onDrop,
   onChest,
   onHand,
@@ -1080,56 +1004,61 @@ function BagActs({
   hand: boolean;
   wearSlot: "body" | "shield" | "helm" | null;
   worn: boolean;
+  onEat: () => void;
+  onDrink: () => void;
   onDrop: (q: number) => void;
   onChest: (q: number) => void;
   onHand: () => void;
   onWear: () => void;
 }) {
-  const q4 = Math.max(1, Math.floor(n / 4));
+  const food = (EAT_ORDER as readonly string[]).includes(k);
+  const wearLbl = wearSlot === "helm" ? "на голову" : wearSlot === "shield" ? "в щит" : "на тело";
   return (
-    <div className="rounded-[14px] bg-raised p-2">
+    <div className="rounded-[14px] bg-raised p-3">
       <p className="font-display text-lg leading-none">{ITEM_LABEL[k]}</p>
-      <p className="mt-2 text-[11px] uppercase tracking-wide text-muted-foreground">На землю</p>
-      <div className="mt-1 flex gap-1">
-        {([1, q4, n] as const).map((q, i) => (
-          <button
-            key={`d-${i}`}
-            type="button"
-            disabled={n < q || q <= 0}
-            className="h-11 flex-1 rounded-[10px] bg-panel text-[12px] disabled:opacity-30"
-            onClick={() => onDrop(q)}
-          >
-            {i === 0 ? "1" : i === 1 ? "¼" : "всё"}
-          </button>
-        ))}
-      </div>
-      <p className="mt-2 text-[11px] uppercase tracking-wide text-muted-foreground">В сундук</p>
-      <div className="mt-1 flex gap-1">
-        {([1, q4, n] as const).map((q, i) => (
-          <button
-            key={`c-${i}`}
-            type="button"
-            disabled={!canChest || n < q || q <= 0}
-            className="h-11 flex-1 rounded-[10px] bg-panel text-[12px] disabled:opacity-30"
-            onClick={() => onChest(q)}
-          >
-            {i === 0 ? "1" : i === 1 ? "¼" : "всё"}
-          </button>
-        ))}
-      </div>
-      {canHand && (
-        <Button className="mt-2 h-11 w-full" variant={hand ? "default" : "outline"} disabled={n <= 0 && !hand} onClick={onHand}>
-          {hand ? "из руки" : "в руку"}
+      <p className="mt-1 text-[12px] text-muted-foreground">
+        {ITEM_WEIGHT[k]} кг{n > 1 ? ` · ×${n}` : ""}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {food && (
+          <Button className="h-12 flex-1" onClick={onEat}>
+            съесть
+          </Button>
+        )}
+        {k === "tonic" && (
+          <Button className="h-12 flex-1" variant="secondary" onClick={onDrink}>
+            выпить
+          </Button>
+        )}
+        {canHand && (
+          <Button className="h-12 flex-1" variant={hand ? "default" : "secondary"} disabled={n <= 0 && !hand} onClick={onHand}>
+            {hand ? "из руки" : "в руку"}
+          </Button>
+        )}
+        {wearSlot && (
+          <Button className="h-12 flex-1" variant={worn ? "default" : "secondary"} disabled={n <= 0 && !worn} onClick={onWear}>
+            {worn ? "снять" : wearLbl}
+          </Button>
+        )}
+        <Button className="h-12 flex-1" variant="outline" disabled={n <= 0} onClick={() => onDrop(1)}>
+          на землю
         </Button>
-      )}
-      {wearSlot && (
-        <Button className="mt-2 h-11 w-full" variant={worn ? "default" : "outline"} disabled={n <= 0 && !worn} onClick={onWear}>
-          {worn ? "снять" : wearSlot === "shield" ? "в щит" : wearSlot === "helm" ? "на голову" : "на тело"}
-        </Button>
-      )}
-      {!canChest && (
-        <p className="mt-1 text-[11px] text-muted-foreground">Сундук — свой шалаш, дом или склад.</p>
-      )}
+        {n > 1 && (
+          <Button className="h-12 flex-1" variant="outline" onClick={() => onDrop(n)}>
+            всё
+          </Button>
+        )}
+        {canChest && (
+          <Button className="h-12 flex-1" variant="secondary" disabled={n <= 0} onClick={() => onChest(1)}>
+            в сундук
+          </Button>
+        )}
+        {canChest && n > 1 && (
+          <Button className="h-12 flex-1" variant="secondary" onClick={() => onChest(n)}>
+            всё в сундук
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

@@ -5,15 +5,17 @@ import { BUILD_HINT } from "@/game/goal";
 import { hamletTitle, friendNames } from "@/game/pact";
 import { useGame } from "@/game/store";
 import type { BuildingKind, Profession } from "@/game/types";
+import { Button } from "@/components/ui/button";
 import { ICO, Ico, ItemPic, JobPic } from "./Sprite";
 import { cn } from "@/lib/utils";
+import { useState } from "react";
 
 export const HOWTO = [
   { k: "Золото", v: "Большая цифра слева сверху. Сдаёшь добро в лавку на тракте — цифра растёт. Нигде нет буквы g: только «N золота».", i: ICO.gold },
   { k: "Сила", v: "Бак 18. Капает сама (~28 с). В шалаше нажми Спать — быстрее, ответ в окне шалаша. Кружка за 6 золота — сразу. Сила 0 не ест дерево: сидишь и ждёшь.", i: ICO.boots },
   { k: "Ход", v: "Тап — только лист клетки. Дело — второй тык по наклейке. «Ко мне» двигает взгляд, не ходит. Ход идёт по часам.", i: ICO.boots },
   { k: "Ноша", v: "Пешком 22 кг. Тачка — 8 золота или 8 дерева: 72 кг, шаг как пешком. Лошадь ×2½, ноша 28 кг. Телега — 24 золота в лавке или плотник: 2 колеса + 4 дерева + слиток. Цепляется к лошади, 180 кг, быстрее тачки, медленнее пустой лошади. В карман не кладётся: отцепил — стоит на клетке, её можно украсть.", i: ICO.bag },
-  { k: "Сумка", v: "Док «Сумка» — квадраты по три в ряд, только то что есть. Тап: на землю, в сундук, в руку. Щит, стёганка, шлем — надеть с той же клетки. Снял и ноша не тянет — на кучу клетки.", i: ICO.bag },
+  { k: "Сумка", v: "Док «Сумка» — две вкладки: ноша и снасть. Квадраты по пять в ряд, только то что есть. Тап выбирает, ест и надевает плашка снизу. Сундук — полоска дома, в поле его нет. Профессия — в книге «Кем быть», не в ноше.", i: ICO.bag },
   { k: "Куча", v: "Выложил, упал, погиб — куча на клетке. «Поднять». Ход и яма ношу не едят.", i: ICO.gather },
   { k: "Удочка", v: "Сколотить дома: 1 дерево и 1 верёвка. Рыбу ловят только ею. Копьё — охота, верёвка — лошадь.", i: ICO.fish },
   { k: "Трава", v: "На равнине, не на поляне. Сорвал — отрастает. Быстрее дерева: первая былинка через две недели, потом ещё. Зимой стоит.", i: ICO.gather },
@@ -158,18 +160,64 @@ function CraftTab() {
 }
 
 function WhoTab() {
+  const g = useGame();
+  const [ask, setAsk] = useState<Profession | null>(null);
+  const job = g.character.profession;
   return (
-    <ul className="space-y-3">
-      {JOBS.map((p) => (
-        <li key={p} className="flex gap-3">
-          <JobPic job={p} className="size-12 overflow-hidden rounded-[12px] shadow-sm" />
-          <div className="min-w-0">
-            <p className="font-display text-lg leading-none">{PROFESSION_LABEL[p]}</p>
-            <p className="mt-1 text-[13px] leading-snug text-muted-foreground">{PROF_BLURB[p]}</p>
+    <div className="space-y-3">
+      <p className="text-[13px] leading-snug text-muted-foreground">
+        Профессия — один раз. Бродяга смотрит всех, «стать» закрывает смену. Не из сумки.
+      </p>
+      {job !== "wanderer" && (
+        <p className="text-[13px] text-muted-foreground">Уже {PROFESSION_LABEL[job]}. Пока так.</p>
+      )}
+      {ask && job === "wanderer" && (
+        <div className="rounded-[14px] bg-raised p-3">
+          <p className="text-sm leading-snug">Стать {PROFESSION_LABEL[ask]}? Обратно сам не сменишь.</p>
+          <div className="mt-2 grid grid-cols-2 gap-1.5">
+            <Button className="h-11" variant="secondary" onClick={() => setAsk(null)}>
+              нет
+            </Button>
+            <Button
+              className="h-11"
+              onClick={() => {
+                g.setProfession(ask);
+                setAsk(null);
+              }}
+            >
+              стать
+            </Button>
           </div>
-        </li>
-      ))}
-    </ul>
+        </div>
+      )}
+      <ul className="space-y-2">
+        {JOBS.map((p) => (
+          <li key={p}>
+            <button
+              type="button"
+              onClick={() => {
+                if (job !== "wanderer") {
+                  g.setProfession(p);
+                  return;
+                }
+                if (p === "wanderer") return;
+                setAsk(p);
+              }}
+              className={cn(
+                "flex w-full gap-3 rounded-[14px] p-2 text-left",
+                job === p ? "bg-accent text-accent-foreground" : "bg-raised",
+              )}
+            >
+              <JobPic job={p} className="size-12 shrink-0 overflow-hidden rounded-[12px] shadow-sm" />
+              <div className="min-w-0">
+                <p className="font-display text-lg leading-none">{PROFESSION_LABEL[p]}</p>
+                <p className="mt-1 text-[13px] leading-snug text-muted-foreground">{PROF_BLURB[p]}</p>
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
