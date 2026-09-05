@@ -267,6 +267,8 @@ export type Character = {
   water: number;
   /** Глотков в ведре (0–3). Не путать с водой тела. */
   pail: number;
+  /** Мировой тик последнего «Напиться» у реки/колодца. */
+  sipTick?: number;
   energyAt: number;
   wanted: number;
   jailedUntil: number;
@@ -368,7 +370,7 @@ export type GameState = {
   log: string[];
   started: boolean;
   floaters: Floater[];
-  hint: { text: string; tone: "ok" | "bad" | "gold" } | null;
+  hint: { text: string; tone: "ok" | "bad" | "gold"; theme?: string; keep?: "jail" | "down" } | null;
   /** Книга мира открыта. Карман v8 — только сетка. */
   bookOn: boolean;
   bookAt: string;

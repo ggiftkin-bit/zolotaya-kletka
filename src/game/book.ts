@@ -2,7 +2,7 @@ import { ENERGY_MAX, splitBodyWater } from "./pace";
 import { emptySkills } from "./economy";
 import { MAP_H, MAP_W, zeroInv } from "./constants";
 import { fatTile, slimTile, type SlimTile } from "./save";
-import type { Busy, Character, Inventory, OtherPawn, Season, Skills, Tile, Transport, Weather, World } from "./types";
+import type { Busy, Character, FenceKind, Inventory, OtherPawn, Season, Skills, Tile, Transport, Weather, World } from "./types";
 
 export type { OtherPawn };
 
@@ -63,6 +63,7 @@ export type PawnBody = {
   wagon: boolean;
   water: number;
   pail: number;
+  sipTick?: number;
   energyAt: number;
   wanted: number;
   jailedUntil: number;
@@ -254,6 +255,7 @@ export function packPawn(c: Character): PawnBody {
     wagon: c.wagon,
     water: c.water,
     pail: c.pail,
+    sipTick: c.sipTick ?? 0,
     energyAt: c.energyAt,
     wanted: c.wanted,
     jailedUntil: c.jailedUntil,
@@ -301,6 +303,7 @@ export function unpackPawn(row: PawnRow): Character {
     carts: packed.carts ?? 0,
     wagon: !!packed.wagon,
     ...splitBodyWater(packed),
+    sipTick: packed.sipTick ?? 0,
     energyAt: packed.energyAt ?? Date.now(),
     wanted: packed.wanted ?? 0,
     jailedUntil: packed.jailedUntil ?? 0,
@@ -319,6 +322,27 @@ export function unpackPawn(row: PawnRow): Character {
   };
 }
 
+const FENCE_RANK: Record<FenceKind, number> = { none: 0, wood: 1, gate: 1, palisade: 2, wall: 3 };
+
+/** Книга без fn/fw не затирает живой тын кармана деревом по умолчанию. Снятый двор (plot→false) — входящее ребро. */
+function mergeBookTile(prev: Tile | undefined, slim: SlimTile, x: number, y: number): Tile {
+  const next = fatTile(slim, x, y);
+  if (!prev) return next;
+  if (prev.plot && !next.plot) return next;
+  const keep = (side: "n" | "w"): FenceKind => {
+    const incoming = side === "n" ? next.fenceN : next.fenceW;
+    const old = side === "n" ? prev.fenceN : prev.fenceW;
+    const has = side === "n" ? slim.fn != null : slim.fw != null;
+    if (!has) return old !== "none" ? old : incoming;
+    if (incoming === "gate") return incoming;
+    if (FENCE_RANK[old] > FENCE_RANK[incoming]) return old;
+    return incoming;
+  };
+  next.fenceN = keep("n");
+  next.fenceW = keep("w");
+  return next;
+}
+
 export function applyLive(world: World, packets: TilePacket[]): World {
   const tiles = world.tiles.slice();
   const fog = (world.fog ?? allDarkFog(tiles.length)).slice();
@@ -326,7 +350,7 @@ export function applyLive(world: World, packets: TilePacket[]): World {
   for (const p of packets) {
     if (p.x < 0 || p.y < 0 || p.x >= world.width || p.y >= world.height) continue;
     const i = tileIndex(p.x, p.y, world.width);
-    tiles[i] = fatTile(p.slim, p.x, p.y);
+    tiles[i] = mergeBookTile(tiles[i], p.slim, p.x, p.y);
     ver[i] = p.ver;
   }
   return { ...world, tiles, fog, ver };
@@ -340,7 +364,7 @@ export function applyMemory(world: World, packets: MemoryPacket[]): World {
     if (p.x < 0 || p.y < 0 || p.x >= world.width || p.y >= world.height) continue;
     const i = tileIndex(p.x, p.y, world.width);
     if (fog[i] === FOG_LIVE) continue;
-    tiles[i] = fatTile(p.slim, p.x, p.y);
+    tiles[i] = mergeBookTile(tiles[i], p.slim, p.x, p.y);
     fog[i] = FOG_MEM;
   }
   return { ...world, tiles, fog, ver };

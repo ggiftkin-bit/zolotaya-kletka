@@ -2,9 +2,9 @@ import type { Character } from "./types";
 
 export const ENERGY_MAX = 18;
 /** Real ms per +1 energy in the field. */
-export const ENERGY_MS = 28_000;
-export const ENERGY_HOME_MS = 14_000;
-export const ENERGY_SLEEP_MS = 8_000;
+export const ENERGY_MS = 90_000;
+export const ENERGY_HOME_MS = 45_000;
+export const ENERGY_SLEEP_MS = 20_000;
 export const BOOST_GOLD = 6;
 export const BOOST_ENERGY = 4;
 export const SKIP_GOLD = 8;
@@ -15,6 +15,8 @@ export const DOWN_MS = 90_000;
 export const DEAD_MS = 120_000;
 /** One game day: 8 ticks × 30 s. Walk lock after death. */
 export const DAY_MS = 240_000;
+
+export const NO_STRENGTH = "Нет силы. Ляг дома или кружка 6 золота.";
 
 /** First death 0, then 10, 20, 30… */
 export function deathFee(deaths: number): number {
@@ -29,6 +31,10 @@ export function energyPeriod(opts: { roof: boolean; sleeping: boolean; hungry: b
   return ms;
 }
 
+export function regenPaused(c: Character, now = Date.now()): boolean {
+  return !!c.busy && c.busy.until > now && !c.busy.hired;
+}
+
 export function formatWait(ms: number): string {
   if (ms <= 0) return "сейчас";
   const s = Math.ceil(ms / 1000);
@@ -39,6 +45,10 @@ export function formatWait(ms: number): string {
 }
 
 export function applyRegen(c: Character, now: number, roof: boolean): Character {
+  if (regenPaused(c, now)) {
+    if (c.energyAt === now) return c;
+    return { ...c, energyAt: now };
+  }
   if (c.energy >= ENERGY_MAX) {
     if (c.resting) return { ...c, resting: false, energyAt: now };
     return c;
@@ -57,6 +67,7 @@ export function applyRegen(c: Character, now: number, roof: boolean): Character 
 }
 
 export function nextEnergyIn(c: Character, now: number, roof: boolean): number {
+  if (regenPaused(c, now)) return -1;
   if (c.energy >= ENERGY_MAX) return 0;
   const last = c.energyAt || now;
   const ms = energyPeriod({ roof, sleeping: !!c.resting, hungry: c.satiety < 25 });

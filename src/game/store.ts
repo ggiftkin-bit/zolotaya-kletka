@@ -38,8 +38,8 @@ import { findPath, pathTotal } from "./path";
 import { canDigReason, fillNeedLine, fillPay, giveOrPile, takePaid } from "./pit";
 import { asPile, dumpAllOn, pileAdd, pileEmpty, pileTake } from "./pile";
 import { canCrossDiag, MAX_PLOT, clearYard, normRect, plotBounds, putGate, setYardGateLock, stampYard, upgradeYard, yardWoodCost } from "./fence";
-import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, SKIP_GOLD, deathFee, energyPeriod, formatWait, splitBodyWater } from "./pace";
-import { applyCatch, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, ownerOf, stealChance } from "./crime";
+import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, NO_STRENGTH, SKIP_GOLD, deathFee, energyPeriod, formatWait, splitBodyWater } from "./pace";
+import { applyCatch, dummyOnYard, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, ownerOf, stealChance } from "./crime";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
 import { clearGame, loadGame, saveGame } from "./save";
 import { stampVillage, clearVillage, friendNames, hamletTitle, hasOwnYard, canFoundVillage, isOutsideYard, setVillageLaw } from "./pact";
@@ -190,6 +190,7 @@ function makeCharacter(name: string, color: string): Character {
     wagon: false,
     water: 100,
     pail: 0,
+    sipTick: 0,
     energyAt: Date.now(),
     wanted: 0,
     jailedUntil: 0,
@@ -222,14 +223,39 @@ function addFloater(x: number, y: number, text: string, tone: Floater["tone"] = 
   });
 }
 
-function speak(line: string, x: number, y: number, short?: string, tone: Floater["tone"] = "ok") {
+function speak(
+  line: string,
+  x: number,
+  y: number,
+  short?: string,
+  tone: Floater["tone"] = "ok",
+  extra?: { theme?: string; keep?: "jail" | "down" },
+) {
   const s = useGame.getState();
   const prev = s.floaters ?? [];
   useGame.setState({
     log: pushLog(s.log, line),
-    hint: { text: line, tone },
+    hint: { text: line, tone, theme: extra?.theme, keep: extra?.keep },
     floaters: [...prev, { id: ++floaterSeq, x, y, text: short ?? line, tone }].slice(-10),
   });
+}
+
+function dropHint(opts?: { theme?: string; force?: boolean }) {
+  const s = useGame.getState();
+  const h = s.hint;
+  if (!h) return;
+  if (!opts?.force) {
+    if (h.keep === "jail" && isJailed(s.character)) return;
+    if (h.keep === "down" && s.character.life === "down") return;
+  }
+  if (opts?.theme && h.theme && h.theme !== opts.theme) return;
+  useGame.setState({ hint: null });
+}
+
+function needStrength(c: Character, n: number, x: number, y: number): boolean {
+  if (c.energy >= n) return true;
+  speak(NO_STRENGTH, x, y, "нет силы", "bad");
+  return false;
 }
 
 function walkTo(x: number, y: number) {
@@ -237,9 +263,12 @@ function walkTo(x: number, y: number) {
   const tile = tileAt(s.world, x, y);
   const c = s.character;
   if (!tile) return;
+  dropHint();
   const hold = heldLine(c);
   if (hold) {
-    speak(hold, c.x, c.y, c.life === "dead" ? "погиб" : c.life === "down" ? "упал" : isStill(c) ? "сутки" : "в яме", "bad");
+    speak(hold, c.x, c.y, c.life === "dead" ? "погиб" : c.life === "down" ? "упал" : isStill(c) ? "сутки" : "в яме", "bad", {
+      keep: isJailed(c) ? "jail" : c.life === "down" ? "down" : undefined,
+    });
     return;
   }
   if (s.meet) {
@@ -451,6 +480,8 @@ type Actions = {
   huntHere: () => void;
   catchHorse: () => void;
   fillBucket: () => void;
+  sipPail: () => void;
+  drinkWater: () => void;
   pourWater: () => void;
   buyLivestock: (kind: "cow" | "horse") => void;
   sellLivestock: (kind: "cow" | "horse") => void;
@@ -505,8 +536,9 @@ type Actions = {
 };
 
 function ctxOf(s: GameState) {
+  const down = s.character.life === "down";
   return {
-    transport: s.character.transport,
+    transport: down ? "walk" as const : s.character.transport,
     inventory: s.character.inventory,
     weather: s.weather,
     extraKg: wornKg(s.character),
@@ -569,6 +601,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         carts: saved.character.carts ?? (saved.character.transport === "cart" ? 1 : 0),
         wagon: !!saved.character.wagon || saved.character.transport === "wagon",
         ...splitBodyWater(saved.character),
+        sipTick: saved.character.sipTick ?? 0,
         energyAt: saved.character.energyAt ?? Date.now(),
         wanted: saved.character.wanted ?? 0,
         jailedUntil: saved.character.jailedUntil ?? 0,
@@ -769,17 +802,22 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (isJailed(s.character) || s.character.life === "dead") {
       const hold = heldLine(s.character) ?? "Не ходит.";
       const short = s.character.life === "dead" ? "погиб" : "в яме";
-      speak(hold, s.character.x, s.character.y, short, "bad");
+      speak(hold, s.character.x, s.character.y, short, "bad", {
+        keep: s.character.life === "dead" ? undefined : "jail",
+      });
       return;
     }
     const tile = tileAt(s.world, x, y);
     if (!tile) return;
+    if (!s.inspect || s.inspect.x !== x || s.inspect.y !== y) dropHint();
     set({ selected: { x, y }, inspect: { x, y }, tool: "move" });
   },
 
   inspectTile: (x, y) => {
     const tile = tileAt(get().world, x, y);
     if (!tile) return;
+    const cur = get().inspect;
+    if (!cur || cur.x !== x || cur.y !== y) dropHint();
     set({ selected: { x, y }, inspect: { x, y } });
   },
 
@@ -797,10 +835,17 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     speak("Стою.", s.character.x, s.character.y, "стой", "ok");
   },
 
-  closeInspect: () => set({ inspect: null }),
+  closeInspect: () => {
+    dropHint();
+    set({ inspect: null });
+  },
 
   setTransport: (t) => {
     const s = get();
+    if (s.character.life === "down") {
+      speak("Упал. Ползи к шалашу.", s.character.x, s.character.y, "ползу", "bad", { keep: "down" });
+      return;
+    }
     if ((s.character.wagon || s.character.transport === "wagon") && t !== "wagon") {
       if (t === "horse") {
         unhitchWagon();
@@ -878,13 +923,20 @@ export const useGame = create<GameState & Actions>((set, get) => ({
 
   setProfession: (p) => {
     const s = get();
-    if (s.character.profWeek === s.week && s.character.profession !== "wanderer") {
-      set({ log: pushLog(s.log, "Профессию на этой неделе уже менял. Завтрашняя неделя — пожалуйста.") });
+    if (s.character.profession !== "wanderer") {
+      speak(
+        `Уже ${PROFESSION_LABEL[s.character.profession]}. Пока так.`,
+        s.character.x,
+        s.character.y,
+        "уже",
+        "ok",
+      );
       return;
     }
+    if (p === "wanderer") return;
     set({
       character: { ...s.character, profession: p, profWeek: s.week },
-      log: pushLog(s.log, `Профессия: ${PROFESSION_LABEL[p]}. ${PROF_BLURB[p]}`),
+      log: pushLog(s.log, `Стал: ${PROFESSION_LABEL[p]}. Обратно сам не сменишь. ${PROF_BLURB[p]}`),
     });
   },
 
@@ -1082,6 +1134,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   huntHere: () => huntHere(),
   catchHorse: () => catchHorse(),
   fillBucket: () => fillBucket(),
+  sipPail: () => sipPail(),
+  drinkWater: () => drinkWater(),
   pourWater: () => pourWater(),
   buyLivestock: (kind) => buyLivestock(kind),
   sellLivestock: (kind) => sellLivestock(kind),
@@ -1171,7 +1225,8 @@ function catchUpSim(dt: number) {
   let live = applyRegen(s.character, now, roof);
   if (live.life === "jailed" && (live.jailedUntil ?? 0) > 0 && now >= live.jailedUntil) {
     live = { ...live, jailedUntil: 0, jailWhy: "", life: "alive" };
-    useGame.setState({ log: pushLog(s.log, "Вышел. Розыск не сброшен.") });
+    dropHint({ force: true });
+    useGame.setState({ log: pushLog(s.log, "Вышел. Розыск не сброшен."), hint: null });
     maybePingHidden("Вышел", "Срок в яме кончился.", "jail");
   }
   if (isJailed(live, now) && s.travel) {
@@ -1183,6 +1238,7 @@ function catchUpSim(dt: number) {
     if (underRoof) {
       if (now - (live.downAt || now) >= 3_000) {
         live = { ...live, life: "alive", hp: Math.max(20, live.hp), downAt: 0, resting: true, energyAt: now };
+        dropHint({ force: true });
         useGame.setState({
           log: pushLog(useGame.getState().log, "Поднялся под крышей. Лежишь — сила капает быстрее."),
           hint: { text: "Поднялся под крышей. Лежишь. Сила капает быстрее.", tone: "ok" },
@@ -1361,10 +1417,8 @@ function worldTick() {
   const roof = hasRoofAt(s, c.x, c.y);
 
   c.satiety = Math.max(0, c.satiety - (roof ? 1 : 3));
-  const wet = nearWater(s.world, c.x, c.y);
+  c.water = Math.max(0, c.water - (roof ? 1 : 2));
   const fire = nearCamp(s.world, c.x, c.y);
-  if (wet) c.water = Math.min(100, c.water + 8);
-  else c.water = Math.max(0, c.water - (roof ? 1 : 2));
   if (c.life === "alive") {
     if (roof) c.warmth = Math.min(100, c.warmth + 4);
     else if (fire) c.warmth = Math.min(100, c.warmth + (phase === "night" ? 3 : 1));
@@ -1392,9 +1446,9 @@ function worldTick() {
     c.hand = null;
     if (c.wagon || c.transport === "wagon") {
       parkWagonNear(s.world, c.x, c.y, "you");
-      c.wagon = false;
-      c.transport = c.horses > 0 ? "horse" : "walk";
     }
+    c.wagon = false;
+    c.transport = "walk";
     c.life = "down";
     c.downAt = Date.now();
     c.hp = 0;
@@ -1402,7 +1456,11 @@ function worldTick() {
     c.resting = false;
     cancelNotice("walk");
     log = pushLog(log, "Упал. Ноша на клетке. Ползи к шалашу — там поднимешься. Без крыши через 90 с — погиб.");
-    useGame.setState({ travel: null, preview: null });
+    useGame.setState({
+      travel: null,
+      preview: null,
+      hint: { text: "Упал. Ползи к шалашу.", tone: "bad", keep: "down" },
+    });
   }
 
   let newDay = false;
@@ -1541,14 +1599,10 @@ function gatherHere() {
     return;
   }
   const item = tile.resource;
-  if (s.character.energy < 1) {
-    speak("Нет сил. Жди или кружка за золото сверху.", here.x, here.y, "нет сил", "bad");
-    return;
-  }
-  let kind: "chop" | "mine" | "forage" = "forage";
-  if (item === "wood") kind = "chop";
-  else if (item === "stone" || item === "ore" || item === "crystal") kind = "mine";
-  let c = { ...s.character, energy: Math.max(0, s.character.energy - 1) };
+  const kind: "chop" | "mine" | "forage" = item === "wood" ? "chop" : item === "stone" || item === "ore" || item === "crystal" ? "mine" : "forage";
+  const cost = kind === "forage" ? 1 : 2;
+  if (!needStrength(s.character, cost, here.x, here.y)) return;
+  let c = { ...s.character, energy: Math.max(0, s.character.energy - cost) };
   let tool: WearId | null = null;
   if (kind === "chop" && c.hand === "axe") tool = "axe";
   if (kind === "mine" && c.hand === "pick") tool = "pick";
@@ -1885,8 +1939,11 @@ function pickLock(kind: "chest" | "gate") {
     speak("Нет сил на взлом.", tile.x, tile.y, "нет силы", "bad");
     return;
   }
-  const p = stealChance(s.world, tile, s.character, s.phase === "night");
-  const caught = Math.random() < Math.min(0.88, p + 0.16);
+  const law = hasLaw(s.world, tile);
+  const ownerHere = dummyOnYard(s.dummies, s.world, tile);
+  const canCatch = law || ownerHere;
+  const p = canCatch ? stealChance(s.world, tile, s.character, s.phase === "night") : 0;
+  const caught = canCatch && Math.random() < Math.min(0.88, p + 0.16);
   tile.mark = { who: s.character.name, at: Date.now() };
   let c = {
     ...s.character,
@@ -1896,8 +1953,7 @@ function pickLock(kind: "chest" | "gate") {
   const betrayal = s.character.pacts[who] === "friend" || (!!s.character.village && tile.village === s.character.village);
   if (betrayal) c = { ...c, pacts: { ...c.pacts, [who]: "feud" }, wanted: (c.wanted ?? 0) + 2 };
   if (caught) {
-    const law = hasLaw(s.world, tile);
-    c = applyCatch(c, law, `взлом у ${who}`);
+    c = applyCatch(c, true, `взлом у ${who}`);
     if (c.wagon || c.transport === "wagon") {
       parkWagonNear(s.world, s.character.x, s.character.y, "you");
       c = { ...c, wagon: false, transport: c.horses > 0 ? "horse" : "walk" };
@@ -1914,14 +1970,16 @@ function pickLock(kind: "chest" | "gate") {
       inspect: null,
       travel: null,
       preview: null,
+      hint: isJailed(c)
+        ? { text: `Сидишь. ${c.jailWhy}. Залог ${goldTxt(BAIL_GOLD)}.`, tone: "bad" as const, keep: "jail" as const }
+        : { text: "Видели взлом. Ямы нет, розыск. Замок цел.", tone: "bad" as const },
       world: { ...s.world, tiles: s.world.tiles },
       log: pushLog(
         s.log,
-        law
-          ? `Поймали за взлом. Закон — яма. Замок цел.`
+        isJailed(c)
+          ? `Поймали за взлом. ${law ? "Закон" : "Хозяин"} — яма. Замок цел.`
           : `Видели взлом. Ямы нет, розыск. Замок цел.`,
       ),
-      hint: { text: "Поймали. Замок цел.", tone: "bad" },
       floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: law ? "яма" : "видели", tone: "bad" as const }].slice(-10),
     });
     return;
@@ -2157,7 +2215,7 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
   inv.wood -= cost.wood;
   inv.stone -= cost.stone;
   if (c.energy < 2) {
-    speak("Нет сил строить.", x, y, "нет сил", "bad");
+    speak(NO_STRENGTH, x, y, "нет силы", "bad");
     return;
   }
   const next = { ...c, inventory: inv, gold: c.gold - cost.gold, energy: Math.max(0, c.energy - 2) };
@@ -2206,7 +2264,7 @@ function buildRoad(x: number, y: number, kind: "dirt" | "stone" | "bridge") {
   inv.wood -= cost.wood;
   inv.stone -= cost.stone;
   if (c.energy < 2) {
-    speak("Нет сил класть путь.", x, y, "нет сил", "bad");
+    speak(NO_STRENGTH, x, y, "нет силы", "bad");
     return;
   }
   const next = { ...c, inventory: inv, energy: Math.max(0, c.energy - 2) };
@@ -2372,11 +2430,13 @@ function bailOut() {
     return;
   }
   if (s.character.gold < BAIL_GOLD) {
-    speak(`Залог ${goldTxt(BAIL_GOLD)}.`, s.character.x, s.character.y, "мало золота", "bad");
+    speak("Сдайте в лавку, потом залог.", s.character.x, s.character.y, "мало золота", "bad", { keep: "jail" });
     return;
   }
+  dropHint({ force: true });
   useGame.setState({
     character: { ...s.character, gold: s.character.gold - BAIL_GOLD, jailedUntil: 0, jailWhy: "", life: s.character.life === "jailed" ? "alive" : s.character.life },
+    hint: null,
     log: pushLog(s.log, `Залог −${goldTxt(BAIL_GOLD)}. Вышел. Розыск остался.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: s.character.x, y: s.character.y, text: "залог", tone: "gold" as const }].slice(-10),
   });
@@ -2456,14 +2516,17 @@ function stealHere() {
   const loot = lootFrom(tile);
   if (!loot) {
     if (tile.chestLock) {
-      speak("Сундук на замке. Сначала взломай — или унеси с кучи у клетки.", tile.x, tile.y, "замок", "bad");
+      speak("Сундук на замке. Сначала взломай — или унеси с кучи у клетки.", tile.x, tile.y, "замок", "bad", { theme: "empty" });
       return;
     }
-    speak("Пусто. Уже вынесли.", tile.x, tile.y, "пусто", "bad");
+    speak("Пусто. Уже вынесли.", tile.x, tile.y, "пусто", "bad", { theme: "empty" });
     return;
   }
-  const p = stealChance(s.world, tile, s.character, s.phase === "night");
-  const caught = Math.random() < p;
+  const law = hasLaw(s.world, tile);
+  const ownerHere = dummyOnYard(s.dummies, s.world, tile);
+  const canCatch = law || ownerHere;
+  const p = canCatch ? stealChance(s.world, tile, s.character, s.phase === "night") : 0;
+  const caught = canCatch && Math.random() < p;
   const inv = { ...s.character.inventory };
   inv[loot.item] += loot.n;
   if (!tile.chestLock && tile.chest[loot.item] > 0) tile.chest[loot.item] -= loot.n;
@@ -2481,8 +2544,7 @@ function stealHere() {
     c = { ...c, pacts: { ...c.pacts, [who]: "feud" }, wanted: (c.wanted ?? 0) + 2 };
   }
   if (caught) {
-    const law = hasLaw(s.world, tile);
-    c = applyCatch(c, law, `кража у ${who}`);
+    c = applyCatch(c, true, `кража у ${who}`);
     if (c.wagon || c.transport === "wagon") {
       parkWagonNear(s.world, s.character.x, s.character.y, "you");
       c = { ...c, wagon: false, transport: c.horses > 0 ? "horse" : "walk" };
@@ -2494,19 +2556,16 @@ function stealHere() {
       viewPos.x = spot.x;
       viewPos.y = spot.y;
     }
+    const why = law ? "Закон двора — яма." : "Хозяин на дворе — яма.";
     useGame.setState({
       character: c,
       inspect: null,
       travel: null,
       preview: null,
+      hint: { text: `Сидишь. ${c.jailWhy}. Залог ${goldTxt(BAIL_GOLD)}.`, tone: "bad", keep: "jail" },
       world: { ...s.world, tiles: s.world.tiles },
-      log: pushLog(
-        s.log,
-        law
-          ? `Поймали за кражу. Закон двора — яма. ${c.jailWhy}. Успел унести ${loot.n} ${ITEM_LABEL[loot.item]}.`
-          : `Видели кражу. Закона нет — ямы нет, розыск. Унёс ${loot.n} ${ITEM_LABEL[loot.item]}.`,
-      ),
-      floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: law ? "яма" : "видели", tone: "bad" as const }].slice(-10),
+      log: pushLog(s.log, `Поймали за кражу. ${why} ${c.jailWhy}. Успел унести ${loot.n} ${ITEM_LABEL[loot.item]}.`),
+      floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "яма", tone: "bad" as const }].slice(-10),
     });
     return;
   }
@@ -2637,6 +2696,8 @@ function equipHand(item: ItemId | null) {
     character: c,
     log: pushLog(s.log, item ? `В руке: ${ITEM_LABEL[item]}.` : "Рука пуста."),
   });
+  if (item === "rod") dropHint({ theme: "rod" });
+  if (item === "rope") dropHint({ theme: "rope" });
 }
 
 function takeOffSlot(c: Character, slot: "body" | "shield" | "helm", tile: ReturnType<typeof hereTile>): Character {
@@ -2712,12 +2773,9 @@ function huntHere() {
     speak("Дичи здесь нет. Заяц на равнине, олень в лесу.", s.character.x, s.character.y, "нет дичи", "bad");
     return;
   }
-  if (s.character.energy < 1) {
-    speak("Нет сил на охоту.", tile.x, tile.y, "нет сил", "bad");
-    return;
-  }
+  if (!needStrength(s.character, 2, tile.x, tile.y)) return;
   const ms = workMs("hunt", tile.herd.kind, s.character);
-  let c = { ...s.character, energy: Math.max(0, s.character.energy - 1) };
+  let c = { ...s.character, energy: Math.max(0, s.character.energy - 2) };
   if (c.hand === "spear") {
     const worn = takeWear(c, "spear");
     c = worn.c;
@@ -2745,18 +2803,19 @@ function catchHorse() {
   }
   if (busyBlock()) return;
   const tile = hereTile();
-  if (!tile?.herd || tile.herd.kind !== "horse" || !tile.herd.wild) {
-    speak("Диких лошадей нет. Ищи табун на равнине.", s.character.x, s.character.y, "нет табуна", "bad");
+  if (!tile?.herd || tile.herd.kind !== "horse" || !tile.herd.wild || tile.herd.count <= 0) {
+    if ((s.character.horses ?? 0) > 0) {
+      speak("Здесь уже никого. Конь при тебе.", s.character.x, s.character.y, "пусто", "ok", { theme: "horse" });
+    } else {
+      speak("Диких лошадей нет. Ищи табун на равнине.", s.character.x, s.character.y, "нет табуна", "bad");
+    }
     return;
   }
-  if ((s.character.inventory.rope ?? 0) <= 0 && s.character.hand !== "rope") {
-    speak("Нужна верёвка в руке. Плетётся из травы дома или в мастерской.", tile.x, tile.y, "нет верёвки", "bad");
+  if (s.character.hand !== "rope") {
+    speak("Нужна верёвка в руке.", tile.x, tile.y, "нет верёвки", "bad", { theme: "rope" });
     return;
   }
-  if (s.character.energy < 1) {
-    speak("Нет сил ловить.", tile.x, tile.y, "нет сил", "bad");
-    return;
-  }
+  if (!needStrength(s.character, 1, tile.x, tile.y)) return;
   const ms = workMs("catch", "horse", s.character);
   useGame.setState({
     character: {
@@ -2764,9 +2823,9 @@ function catchHorse() {
       energy: Math.max(0, s.character.energy - 1),
       busy: makeBusy("catch", tile.x, tile.y, Date.now() + ms),
       resting: false,
-      hand: s.character.hand ?? "rope",
     },
     inspect: null,
+    hint: null,
     log: pushLog(s.log, `Ловлю лошадь · ${Math.ceil(ms / 1000)} с.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `ловлю ${Math.ceil(ms / 1000)}с`, tone: "ok" as const }].slice(-10),
   });
@@ -2791,13 +2850,10 @@ function fishHere() {
     return;
   }
   if (s.character.hand !== "rod" && tile.building !== "net") {
-    speak("Нужна удочка в руке. Сколотить дома: 1 дерево и 1 верёвка. Или поставь сеть на берегу.", tile.x, tile.y, "нужна удочка", "bad");
+    speak("Нужна удочка в руке. Сколотить дома: 1 дерево и 1 верёвка. Или поставь сеть на берегу.", tile.x, tile.y, "нужна удочка", "bad", { theme: "rod" });
     return;
   }
-  if (s.character.energy < 1) {
-    speak("Нет сил ловить.", tile.x, tile.y, "нет сил", "bad");
-    return;
-  }
+  if (!needStrength(s.character, 2, tile.x, tile.y)) return;
   if ((tile.resource === "fish" ? tile.amount : 6 - tile.takings) <= 0) {
     speak("Разгнали. Завтра подойдут.", tile.x, tile.y, "пусто", "bad");
     return;
@@ -2806,11 +2862,12 @@ function fishHere() {
   useGame.setState({
     character: {
       ...s.character,
-      energy: Math.max(0, s.character.energy - 1),
+      energy: Math.max(0, s.character.energy - 2),
       busy: makeBusy("fish", tile.x, tile.y, Date.now() + ms),
       resting: false,
     },
     inspect: null,
+    hint: null,
     log: pushLog(s.log, `Ловлю рыбу · ${Math.ceil(ms / 1000)} с.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `ловлю ${Math.ceil(ms / 1000)}с`, tone: "ok" as const }].slice(-10),
   });
@@ -3052,18 +3109,20 @@ function resolveHunt(s: GameState, c0: Character, tile: NonNullable<ReturnType<t
 }
 
 function resolveCatch(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>) {
-  if (!tile.herd || tile.herd.kind !== "horse" || !tile.herd.wild) {
-    useGame.setState({ character: c0, log: pushLog(s.log, "Табуна уже нет.") });
+  if (!tile.herd || tile.herd.kind !== "horse" || !tile.herd.wild || tile.herd.count <= 0) {
+    useGame.setState({
+      character: c0,
+      log: pushLog(s.log, (c0.horses ?? 0) > 0 ? "Здесь уже никого. Конь при тебе." : "Табуна уже нет."),
+      hint: { text: (c0.horses ?? 0) > 0 ? "Здесь уже никого. Конь при тебе." : "Табуна уже нет.", tone: "ok", theme: "horse" },
+    });
     return;
   }
   const chance = 0.4 + c0.skills.agro * 0.04;
   if (Math.random() > chance) {
-    tile.herd.count -= Math.random() < 0.3 ? 1 : 0;
-    if (tile.herd.count <= 0) tile.herd = null;
     useGame.setState({
       character: c0,
       world: { ...s.world, tiles: s.world.tiles },
-      log: pushLog(s.log, "Лошадь вырвалась. Ещё раз, или купи в лавке."),
+      log: pushLog(s.log, "Лошадь вырвалась. Ещё раз — верёвка в руке."),
       floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "сорвалась", tone: "bad" as const }].slice(-10),
     });
     noteDeed("catch");
@@ -3076,7 +3135,8 @@ function resolveCatch(s: GameState, c0: Character, tile: NonNullable<ReturnType<
   useGame.setState({
     character: c,
     world: { ...s.world, tiles: s.world.tiles },
-    log: pushLog(s.log, "Поймал лошадь. Седлай в сумке или поставь в конюшню."),
+    hint: null,
+    log: pushLog(s.log, "Поймал лошадь. Седлай в сумке — транспорт «лошадь», не второй лов."),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "+лошадь", tone: "ok" as const }].slice(-10),
   });
   noteDeed("catch");
@@ -3103,9 +3163,11 @@ function resolveFish(s: GameState, c0: Character, tile: NonNullable<ReturnType<t
   if (tile.resource === "fish") tile.amount = Math.max(0, tile.amount - got);
   const given = giveOrPile({ ...c0.inventory }, c0.transport, tile, "fish", got);
   const c = bumpSkill({ ...c0, inventory: given.inv }, "survival", 0.12);
+  dropHint({ theme: "rod" });
   useGame.setState({
     character: c,
     world: { ...s.world, tiles: s.world.tiles },
+    hint: null,
     log: pushLog(s.log, `Вытащил ${got} рыбы.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${got} рыба`, tone: "ok" as const }].slice(-10),
   });
@@ -3434,7 +3496,7 @@ function fillBucket() {
   const tile = hereTile();
   if (!tile) return;
   if ((s.character.inventory.bucket ?? 0) <= 0) {
-    speak("Нужно ведро. Лепится из глины и дерева в мастерской.", tile.x, tile.y, "нет ведра", "bad");
+    speak("Нужно ведро в ноше.", tile.x, tile.y, "нет ведра", "bad", { theme: "bucket" });
     return;
   }
   if (tile.biome !== "river" && tile.biome !== "ford" && tile.building !== "well") {
@@ -3442,9 +3504,46 @@ function fillBucket() {
     return;
   }
   useGame.setState({
-    character: { ...s.character, water: Math.min(100, s.character.water + 20), pail: 3, hand: "bucket" },
-    log: pushLog(s.log, "Ведро полное. Вылей на поле или загон вдали от реки."),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "вода", tone: "ok" as const }].slice(-10),
+    character: { ...s.character, pail: 3, hand: s.character.hand === "bucket" ? "bucket" : s.character.hand },
+    hint: null,
+    log: pushLog(s.log, "Ведро полное · 3 глотка в путь. Это не питьё тела."),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "ведро", tone: "ok" as const }].slice(-10),
+  });
+}
+
+function drinkWater() {
+  const s = useGame.getState();
+  const tile = hereTile();
+  if (!tile) return;
+  if (tile.biome !== "river" && tile.biome !== "ford" && tile.building !== "well") {
+    speak("Напиться — у реки, брода или колодца.", tile.x, tile.y, "нет воды", "bad");
+    return;
+  }
+  if ((s.character.sipTick ?? -1) === s.clock) {
+    speak("Подожди тик. Глоток раз за мировой ход.", tile.x, tile.y, "подожди", "ok");
+    return;
+  }
+  const water = Math.min(100, s.character.water + 16);
+  useGame.setState({
+    character: { ...s.character, water, sipTick: s.clock },
+    hint: null,
+    log: pushLog(s.log, `Напился. Вода тела ${Math.round(water)}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "+вода", tone: "ok" as const }].slice(-10),
+  });
+}
+
+function sipPail() {
+  const s = useGame.getState();
+  if ((s.character.pail ?? 0) <= 0) {
+    speak("Ведро пустое. Набери у реки.", s.character.x, s.character.y, "пусто", "bad");
+    return;
+  }
+  const water = Math.min(100, s.character.water + 16);
+  useGame.setState({
+    character: { ...s.character, pail: s.character.pail - 1, water },
+    hint: null,
+    log: pushLog(s.log, `Глоток из ведра. Вода тела ${Math.round(water)}. Глотков ${s.character.pail - 1}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: s.character.x, y: s.character.y, text: "глоток", tone: "ok" as const }].slice(-10),
   });
 }
 
@@ -4017,7 +4116,7 @@ function doCraft(kind: CraftKind) {
   const slow = (def.bench === "forge" || def.bench === "oven") && !wet;
   const needE = def.energy + (slow ? 1 : 0);
   if (s.character.energy < needE) {
-    speak(slow ? "Нет сил. Горн/печь без воды — дольше." : "Нет сил на ремесло.", tile!.x, tile!.y, "нет сил", "bad");
+    speak(NO_STRENGTH, tile!.x, tile!.y, "нет сил", "bad");
     return;
   }
   const inv = { ...s.character.inventory };
@@ -4244,11 +4343,8 @@ function excavateHere() {
     speak(why === "чужой двор" ? "чужой двор" : why, tile.x, tile.y, why, "bad");
     return;
   }
-  if (s.character.energy < 1) {
-    speak("Нет сил копать.", tile.x, tile.y, "нет сил", "bad");
-    return;
-  }
-  let c = { ...s.character, energy: Math.max(0, s.character.energy - 1) };
+  if (!needStrength(s.character, 2, tile.x, tile.y)) return;
+  let c = { ...s.character, energy: Math.max(0, s.character.energy - 2) };
   const worn = takeWear(c, "shovel");
   c = worn.c;
   const ms = workMs("dig", null, c);
@@ -4457,7 +4553,7 @@ function meetHit() {
       preview: null,
       inspect: null,
       log: pushLog(s.log, `Удар прошёл (${hit.dmg}). Закон двора — яма.`),
-      hint: { text: "Поймали после удара. Яма.", tone: "bad" },
+      hint: { text: "Поймали после удара. Яма.", tone: "bad", keep: "jail" },
       floaters: [...s.floaters, { id: ++floaterSeq, x: foe.x, y: foe.y, text: bits.join(" · "), tone: "bad" as const }].slice(-10),
     });
     useGame.getState().persist();
@@ -4537,7 +4633,10 @@ function dummyAnswer() {
       downAt: Date.now(),
       busy: null,
       resting: false,
+      wagon: false,
+      transport: "walk",
     };
+    if (c0.wagon || c0.transport === "wagon") parkWagonNear(s.world, c.x, c.y, "you");
     useGame.setState({
       character: c,
       dummies: applyDummy(s.dummies, nextFoe),
@@ -4546,7 +4645,7 @@ function dummyAnswer() {
       preview: null,
       world: { ...s.world, tiles: s.world.tiles },
       log: pushLog(s.log, `Упал от удара ${foe.name}. Ноша на клетке. Ползи к шалашу.`),
-      hint: { text: "Упал. Не погиб — ползи под крышу.", tone: "bad" },
+      hint: { text: "Упал. Ползи к шалашу.", tone: "bad", keep: "down" },
       floaters: [...s.floaters, { id: ++floaterSeq, x: c.x, y: c.y, text: `−${hit.dmg}`, tone: "bad" as const }].slice(-10),
     });
     useGame.getState().persist();

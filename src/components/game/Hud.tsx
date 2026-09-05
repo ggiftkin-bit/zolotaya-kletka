@@ -3,7 +3,7 @@ import { BAG_CELLS, CAPACITY, ITEM_LABEL, ITEMS, TICK_SEC, TICKS_PER_DAY, TRANSP
 import { BUILDING_LABEL, PROFESSION_LABEL, SKILL_LABEL, goldTxt } from "@/game/economy";
 import { PROF_BLURB } from "@/game/craft";
 import { nextGoal, personLevel, skillHow } from "@/game/goal";
-import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, HIRE_GOLD, SKIP_GOLD, deathFee, formatWait, nextEnergyIn } from "@/game/pace";
+import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, HIRE_GOLD, SKIP_GOLD, deathFee, formatWait, nextEnergyIn, regenPaused } from "@/game/pace";
 import { isHeld, isJailed, isStill, isYours } from "@/game/crime";
 import { TOOL_ITEMS } from "@/game/life";
 import { BUSY_LABEL, isRoof, isWearId, remainingWear, type WearId } from "@/game/work";
@@ -80,6 +80,8 @@ export function Hud() {
   const [help, setHelp] = useState(false);
   const [bookTab, setBookTab] = useState<BookTab>("table");
   const [power, setPower] = useState(false);
+  const [vitals, setVitals] = useState<"hp" | "water" | null>(null);
+  const [askJob, setAskJob] = useState<Profession | null>(null);
   const [cell, setCell] = useState<ItemId | null>("food");
   const [now, setNow] = useState(() => Date.now());
   const inv = g.character.inventory;
@@ -99,6 +101,8 @@ export function Hud() {
   const still = isStill(g.character, now);
   const wait = nextEnergyIn(g.character, now, isRoof(here) || (g.character.profession === "hireling" && g.character.resting));
   const busy = !held && g.character.busy && g.character.busy.until > now ? g.character.busy : null;
+  const paused = regenPaused(g.character, now);
+  const wounded = g.character.hp < 40;
   const ownChest =
     here &&
     isYours(here) &&
@@ -114,6 +118,7 @@ export function Hud() {
       setBag(false);
       setHelp(false);
       setPower(false);
+      setVitals(null);
     }
   }, [g.inspect]);
 
@@ -134,6 +139,8 @@ export function Hud() {
     g.closeInspect();
     setHelp(false);
     setPower(false);
+    setVitals(null);
+    setAskJob(null);
     if (bag && tab === next) {
       setBag(false);
       return;
@@ -167,6 +174,7 @@ export function Hud() {
               g.closeInspect();
               setBag(false);
               setHelp(false);
+              setVitals(null);
               setPower((v) => !v);
             }}
           />
@@ -184,6 +192,19 @@ export function Hud() {
             warn={cold}
             onClick={() => openBag("pack")}
           />
+          <Chip
+            ico={ICO.stake}
+            value={Math.round(g.character.hp)}
+            label="здоровье"
+            warn={wounded || down}
+            onClick={() => {
+              g.closeInspect();
+              setBag(false);
+              setHelp(false);
+              setPower(false);
+              setVitals((v) => (v === "hp" ? null : "hp"));
+            }}
+          />
           <button
             type="button"
             aria-label="Как играть"
@@ -200,7 +221,23 @@ export function Hud() {
           tickAt={g.tickAt || now}
           water={g.character.water}
           thirsty={thirsty}
+          onWater={() => {
+            g.closeInspect();
+            setBag(false);
+            setHelp(false);
+            setPower(false);
+            setVitals((v) => (v === "water" ? null : "water"));
+          }}
         />
+        {jailed && (
+          <button
+            type="button"
+            onClick={() => g.bailOut()}
+            className="pointer-events-auto mx-auto mt-1 flex h-12 w-full max-w-lg items-center justify-center rounded-2xl border border-danger bg-panel px-3 font-display text-base shadow-panel"
+          >
+            залог {goldTxt(BAIL_GOLD)}
+          </button>
+        )}
         {(jailed || down || dead || still || busy || goal || g.hint) && (
           <p className="pointer-events-none mx-auto mt-1 max-w-lg line-clamp-2 rounded-xl bg-table/75 px-2 py-1 text-center text-xs leading-snug text-panel">
           {dead
@@ -239,7 +276,9 @@ export function Hud() {
                   ? `Отлёживаешься. Ход через ${formatWait(g.character.stillUntil - now)}.`
                 : g.character.energy >= ENERGY_MAX
                   ? "Полная."
-                  : `Следующая +1 через ${formatWait(wait)}. Дома быстрее. Еда сытость, не сила.`}
+                  : paused && busy
+                    ? `пока ${BUSY_LABEL[busy.kind]} — сила не растёт`
+                    : `Следующая +1 через ${formatWait(wait)}. Поле 90 с, крыша 45 с, сон 20 с. Еда сытость, не сила.`}
             </p>
             {g.character.wanted > 0 && (
               <p className="mt-1 text-[12px] text-danger">Розыск {g.character.wanted}</p>
@@ -261,6 +300,17 @@ export function Hud() {
               )}
             </div>
           </div>
+        )}
+        {vitals === "hp" && (
+          <div className="pointer-events-auto mx-auto mt-1.5 max-w-lg rounded-2xl border border-border bg-panel p-3 shadow-panel">
+            <p className="font-display text-xl leading-none">Здоровье {Math.round(g.character.hp)}</p>
+            <p className="mt-2 text-sm leading-snug text-muted-foreground">
+              Здоровье. Сытость на нуле его ест. На нуле — упал.
+            </p>
+          </div>
+        )}
+        {vitals === "water" && (
+          <WaterSheet onClose={() => setVitals(null)} />
         )}
       </div>
 
@@ -528,6 +578,7 @@ export function Hud() {
               <Stat k="сила" v={Math.round(g.character.energy)} warn={g.character.energy < 4} ico={ICO.boots} />
               <Stat k="тепло" v={Math.round(g.character.warmth)} warn={cold} ico={ICO.house} />
               <Stat k="вода" v={Math.round(g.character.water)} warn={thirsty} water />
+              <Stat k="здоровье" v={Math.round(g.character.hp)} warn={wounded} ico={ICO.stake} />
             </div>
 
             <div className="mt-4 flex gap-1 rounded-[14px] bg-raised p-1">
@@ -743,18 +794,51 @@ export function Hud() {
                 <p className="font-display text-3xl leading-none">Уровень {level}</p>
                 <p className="mt-2 text-[13px] leading-snug text-muted-foreground">
                   Отдельной кнопки «прокачать» нет. Рубишь, строишь, торгуешь — навык растёт, уровень сам
-                  складывается. Профессия даёт бонус к своему делу, раз в неделю можно сменить.
+                  складывается. Профессия — один раз. Бродяга смотрит всех, «стать» закрывает смену.
                 </p>
                 <p className="mt-2 text-[13px] leading-snug text-muted-foreground">
                   {PROF_BLURB[g.character.profession]}
                 </p>
                 <p className="mt-4 text-[11px] uppercase tracking-wide text-muted-foreground">Профессия</p>
+                {g.character.profession !== "wanderer" && (
+                  <p className="mt-1 text-[13px] text-muted-foreground">
+                    Уже {PROFESSION_LABEL[g.character.profession]}. Пока так.
+                  </p>
+                )}
+                {askJob && g.character.profession === "wanderer" && (
+                  <div className="mt-2 rounded-[14px] bg-raised p-3">
+                    <p className="text-sm leading-snug">
+                      Стать {PROFESSION_LABEL[askJob]}? Обратно сам не сменишь.
+                    </p>
+                    <div className="mt-2 grid grid-cols-2 gap-1.5">
+                      <Button className="h-11" variant="secondary" onClick={() => setAskJob(null)}>
+                        нет
+                      </Button>
+                      <Button
+                        className="h-11"
+                        onClick={() => {
+                          g.setProfession(askJob);
+                          setAskJob(null);
+                        }}
+                      >
+                        стать
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <div className="mt-1.5 grid grid-cols-4 gap-1.5">
                   {PROFESSIONS.map((p) => (
                     <button
                       key={p}
                       type="button"
-                      onClick={() => g.setProfession(p)}
+                      onClick={() => {
+                        if (g.character.profession !== "wanderer") {
+                          g.setProfession(p);
+                          return;
+                        }
+                        if (p === "wanderer") return;
+                        setAskJob(p);
+                      }}
                       className={cn(
                         "flex flex-col items-center gap-1 rounded-[14px] p-1.5",
                         g.character.profession === p ? "bg-accent text-accent-foreground" : "bg-raised",
@@ -1062,6 +1146,7 @@ function PhaseStrip({
   tickAt,
   water,
   thirsty,
+  onWater,
 }: {
   phase: "day" | "night";
   weather: Weather;
@@ -1069,6 +1154,7 @@ function PhaseStrip({
   tickAt: number;
   water: number;
   thirsty: boolean;
+  onWater: () => void;
 }) {
   const now = Date.now();
   const span = TICKS_PER_DAY / 2;
@@ -1076,16 +1162,65 @@ function PhaseStrip({
   const frac = Math.max(0, Math.min(1, (now - tickAt) / (TICK_SEC * 1000)));
   const prog = Math.max(0, Math.min(1, (pos + frac) / span));
   return (
-    <div className="pointer-events-none mx-auto mt-1 flex max-w-lg items-center gap-2 rounded-2xl bg-table/90 px-2.5 py-1.5 text-panel">
+    <div className="mx-auto mt-1 flex max-w-lg items-center gap-2 rounded-2xl bg-table/90 px-2.5 py-1.5 text-panel">
       <WeatherPic weather={weather} night={phase === "night"} className="size-7 shrink-0 overflow-hidden rounded-md" />
-      <span className="shrink-0 font-display text-sm leading-none">{phase === "night" ? "Ночь" : "День"}</span>
-      <span className="relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-panel/20">
+      <span className="pointer-events-none shrink-0 font-display text-sm leading-none">{phase === "night" ? "Ночь" : "День"}</span>
+      <span className="pointer-events-none relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-panel/20">
         <span className="absolute inset-y-0 left-0 rounded-full bg-panel/90" style={{ width: `${Math.round(prog * 100)}%` }} />
       </span>
-      <span className={cn("ml-1 flex shrink-0 items-center gap-1", thirsty && "text-danger")}>
+      <button
+        type="button"
+        onClick={onWater}
+        className={cn("pointer-events-auto ml-1 flex shrink-0 items-center gap-1", thirsty && "text-danger")}
+      >
         <GearPic i={GEAR_ICO.water} className="size-5 overflow-hidden rounded-sm" alt="" />
         <span className="font-display text-base leading-none tabular-nums">{Math.round(water)}</span>
-      </span>
+      </button>
+    </div>
+  );
+}
+
+function WaterSheet({ onClose }: { onClose: () => void }) {
+  const g = useGame();
+  const here = tileAt(g.world, g.character.x, g.character.y);
+  const at = here && (here.biome === "river" || here.biome === "ford" || here.building === "well");
+  const pail = g.character.pail ?? 0;
+  const hasBucket = (g.character.inventory.bucket ?? 0) > 0;
+  const where = at
+    ? here!.building === "well"
+      ? "колодец"
+      : here!.biome === "ford"
+        ? "брод"
+        : "река"
+    : "набери у реки, брода или колодца";
+  return (
+    <div className="pointer-events-auto mx-auto mt-1.5 max-w-lg rounded-2xl border border-border bg-panel p-3 shadow-panel">
+      <div className="flex items-start justify-between gap-2">
+        <p className="font-display text-xl leading-none">Вода</p>
+        <button type="button" className="size-9 text-lg text-muted-foreground" onClick={onClose}>
+          ×
+        </button>
+      </div>
+      <p className="mt-2 text-sm leading-snug text-muted-foreground">
+        Тело {Math.round(g.character.water)} · глотков в ведре {pail} · {where}
+      </p>
+      <div className="mt-3 flex flex-col gap-1.5">
+        {at && (
+          <Button className="h-12" onClick={() => g.drinkWater()}>
+            Напиться · тело +16
+          </Button>
+        )}
+        {at && (
+          <Button className="h-12" variant="secondary" onClick={() => g.fillBucket()} disabled={!hasBucket}>
+            {hasBucket ? "Набрать ведро · 3 глотка" : "Набрать ведро · нужно ведро"}
+          </Button>
+        )}
+        {pail > 0 && (
+          <Button className="h-12" variant="secondary" onClick={() => g.sipPail()}>
+            Глоток из ведра · тело +16
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

@@ -164,17 +164,6 @@ function Sheet({ tile }: { tile: Tile }) {
         </button>
       </div>
 
-      {g.hint && (
-        <p
-          className={cn(
-            "mt-3 rounded-[14px] bg-raised px-3 py-2 text-sm leading-snug",
-            g.hint.tone === "bad" && "text-danger",
-          )}
-        >
-          {g.hint.text}
-        </p>
-      )}
-
       {pane === "pick" && (
         <PickPane tile={tile} here={here} near={near} loot={loot} onPane={setPane} />
       )}
@@ -465,15 +454,30 @@ function PickPane({
         />
       )}
       {here && (tile.biome === "river" || tile.biome === "ford" || tile.building === "well") && (
+        <>
+          <Sticker
+            title="Напиться"
+            sub="тело +16 · без ведра"
+            ico={<GearPic i={1} className="size-11 overflow-hidden rounded-[12px]" />}
+            onClick={() => g.drinkWater()}
+          />
+          <Sticker
+            title="Набрать ведро"
+            sub={(g.character.inventory.bucket ?? 0) > 0 ? "pail 3" : "нужно ведро"}
+            ico={<GearPic i={1} className="size-11 overflow-hidden rounded-[12px]" />}
+            onClick={() => g.fillBucket()}
+          />
+        </>
+      )}
+      {here && (g.character.pail ?? 0) > 0 && (
         <Sticker
-          title="Набрать воду"
-          sub="ведро"
-          ico={<GearPic i={1} className="size-11 overflow-hidden rounded-[12px]" />}
-          onClick={() => g.fillBucket()}
+          title="Глоток из ведра"
+          sub={`${g.character.pail} · тело +16`}
+          onClick={() => g.sipPail()}
         />
       )}
       {here && (g.character.pail ?? 0) > 0 && tile.biome !== "river" && (
-        <Sticker title="Вылить воду" sub={`${g.character.pail}`} onClick={() => g.pourWater()} />
+        <Sticker title="Вылить воду" sub={`${g.character.pail} · на поле, не питьё`} onClick={() => g.pourWater()} />
       )}
       {tile.owner && tile.owner !== "you" && near && (
         <>
@@ -495,7 +499,7 @@ function PickPane({
           )}
           <Sticker
             title={`Украсть у ${hamletTitle(tile.owner)}`}
-            sub={tile.chestLock ? "сундук на замке — сначала взлом" : "если поймают — по законам"}
+            sub="С соседней клетки. Поймают — яма, залог 12."
             onClick={() => g.stealHere()}
           />
           {g.character.pacts[tile.owner] !== "friend" && (
@@ -706,38 +710,33 @@ function HomeBody({ tile }: { tile: Tile }) {
 function WorkshopBody({ tile }: { tile: Tile }) {
   const g = useGame();
   const crafts = CRAFTS.filter((c) => canDoCraft(c, g.character.profession, tile));
-  const gray = CRAFTS.filter((c) => c.bench === tile.building || (c.bench === "workshop" && tile.building === "bench"));
+  const isBench = tile.building === "bench" || tile.building === "workshop";
   return (
     <div className="mt-4 flex flex-col gap-2">
       <p className="text-[13px] text-muted-foreground">{placeHint(tile)}</p>
-      {(g.character.carts ?? 0) < 1 && (
+      {isBench && (g.character.carts ?? 0) < 1 && (
         <Button variant="outline" className="h-12 justify-between px-3" onClick={() => g.craftCart()}>
           <span>Тачка</span>
           <span className="text-[12px] text-muted-foreground">{CART_WOOD} дерева · груз, шаг как пешком</span>
         </Button>
       )}
-      {!g.character.wagon && g.character.transport !== "wagon" && !g.world.tiles.some((t) => t.wagon === "you") && (
+      {isBench &&
+        g.character.profession === "carpenter" &&
+        !g.character.wagon &&
+        g.character.transport !== "wagon" &&
+        !g.world.tiles.some((t) => t.wagon === "you") && (
         <Button variant="outline" className="h-12 justify-between px-3" onClick={() => g.craftWagon()}>
           <span>Телега</span>
           <span className="text-[12px] text-muted-foreground">2 колеса · 4 дерева · слиток · плотник</span>
         </Button>
       )}
-      {gray.map((c) => {
-        const ok = crafts.some((x) => x.id === c.id);
-        return (
-          <Button
-            key={c.id}
-            className="h-12 justify-between px-3"
-            variant="outline"
-            disabled={!ok}
-            onClick={() => ok && g.doCraft(c.id)}
-          >
-            <span>{c.label}</span>
-            <span className="text-[12px] text-muted-foreground">{ok ? c.hint : "не твоё дело"}</span>
-          </Button>
-        );
-      })}
-      {gray.length === 0 && crafts.length === 0 && (
+      {crafts.map((c) => (
+        <Button key={c.id} variant="outline" className="h-12 justify-between px-3" onClick={() => g.doCraft(c.id)}>
+          <span>{c.label}</span>
+          <span className="text-[12px] text-muted-foreground">{c.hint}</span>
+        </Button>
+      ))}
+      {crafts.length === 0 && (
         <p className="text-sm text-muted-foreground">Для твоего дела здесь нечего ковать.</p>
       )}
     </div>
@@ -874,10 +873,18 @@ function PenBody({ tile }: { tile: Tile }) {
 function WellBody() {
   const g = useGame();
   return (
-    <div className="mt-4">
-      <Button className="h-12 w-full" onClick={() => g.fillBucket()}>
-        Набрать воду в ведро
+    <div className="mt-4 flex flex-col gap-2">
+      <Button className="h-12 w-full" onClick={() => g.drinkWater()}>
+        Напиться
       </Button>
+      <Button className="h-12 w-full" variant="secondary" onClick={() => g.fillBucket()}>
+        Набрать ведро
+      </Button>
+      {(g.character.pail ?? 0) > 0 && (
+        <Button className="h-12 w-full" variant="outline" onClick={() => g.sipPail()}>
+          Глоток из ведра
+        </Button>
+      )}
     </div>
   );
 }

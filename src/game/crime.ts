@@ -1,7 +1,7 @@
 import { JAIL_MS } from "./pace";
 import { plotBounds, yardStrength } from "./fence";
 import { asPile } from "./pile";
-import type { Character, ItemId, Tile, World } from "./types";
+import type { Character, Dummy, ItemId, Tile, World } from "./types";
 import { tileAt } from "./worldgen";
 
 export function isJailed(c: Character, now = Date.now()): boolean {
@@ -116,8 +116,30 @@ export function hasLaw(world: World, tile: Tile): boolean {
   return false;
 }
 
+/** Хозяин-манекен на этом дворе. Пустой двор без него и без закона — не яма. */
+export function dummyOnYard(dummies: Dummy[] | undefined, world: World, tile: Tile): boolean {
+  const list = dummies ?? [];
+  const b = tile.plot ? plotBounds(world, tile.x, tile.y) : null;
+  return list.some((d) => {
+    if (d.life !== "alive") return false;
+    if (b) return d.x >= b.x0 && d.x <= b.x1 && d.y >= b.y0 && d.y <= b.y1;
+    return d.x === tile.x && d.y === tile.y;
+  });
+}
+
 export function jailSpot(world: World, fx: number, fy: number): { x: number; y: number } {
-  const j = world.tiles.find((t) => t.building === "jail");
+  const here = tileAt(world, fx, fy);
+  const b = here?.plot ? plotBounds(world, fx, fy) : null;
+  if (b) {
+    for (let y = b.y0; y <= b.y1; y++) {
+      for (let x = b.x0; x <= b.x1; x++) {
+        const t = tileAt(world, x, y);
+        if (t?.building === "jail") return { x: t.x, y: t.y };
+      }
+    }
+    if (here && !here.caravan) return { x: fx, y: fy };
+  }
+  const j = world.tiles.find((t) => t.building === "jail" && !t.caravan);
   if (j) return { x: j.x, y: j.y };
   return { x: fx, y: fy };
 }

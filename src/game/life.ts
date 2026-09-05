@@ -31,7 +31,7 @@ export function isWatered(world: World, tile: Tile): boolean {
 
 export function waterHint(world: World, tile: Tile): string {
   if (tile.biome === "river" || tile.biome === "ford") return "вода здесь";
-  if (nearWater(world, tile.x, tile.y)) return "вода рядом — само течёт";
+  if (nearWater(world, tile.x, tile.y)) return "вода рядом";
   if ((tile.cistern ?? 0) > 0) return `бочка ${tile.cistern}`;
   return "сухо · ведро, колодец или река";
 }
