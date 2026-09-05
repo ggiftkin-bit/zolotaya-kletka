@@ -682,7 +682,7 @@ function paintBiome(
   if (img) drawAtlas(ctx, img, 3, 3, biomeIndex(biome, false, wooded), x, y, TILE, TILE, TILE_ATLAS_PAD);
 }
 
-const INNER = 14;
+const INNER = 8;
 
 function paintRiverGround(
   ctx: CanvasRenderingContext2D,
@@ -698,15 +698,24 @@ function paintRiverGround(
   const sW = isWater(n.s);
   const wW = isWater(n.w);
   const ford = tile.biome === "ford";
+  const anyBank = !nW || !eW || !sW || !wW;
   const waterFill = ford ? BIOME_FILL.ford : BIOME_FILL.river;
   const seW = isWater(tileAt(world, tile.x + 1, tile.y + 1));
   const neW = isWater(tileAt(world, tile.x + 1, tile.y - 1));
   const swW = isWater(tileAt(world, tile.x - 1, tile.y + 1));
   const nwW = isWater(tileAt(world, tile.x - 1, tile.y - 1));
-  const grass = "#9aaa62";
 
-  ctx.fillStyle = waterFill;
-  ctx.fillRect(x, y, TILE, TILE);
+  if (anyBank) {
+    ctx.fillStyle = SAND;
+    ctx.fillRect(x, y, TILE, TILE);
+    ctx.fillStyle = SAND_WET;
+    ctx.globalAlpha = 0.35;
+    ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
+    ctx.globalAlpha = 1;
+  } else {
+    ctx.fillStyle = waterFill;
+    ctx.fillRect(x, y, TILE, TILE);
+  }
 
   const padN = nW ? 0 : BANK;
   const padE = eW ? 0 : BANK;
@@ -716,35 +725,12 @@ function paintRiverGround(
   const iy = y + padN;
   const iw = TILE - padW - padE;
   const ih = TILE - padN - padS;
-  const Ro = BANK + 4;
   const radii: [number, number, number, number] = [
-    padN && padW ? Ro : 0,
-    padN && padE ? Ro : 0,
-    padS && padE ? Ro : 0,
-    padS && padW ? Ro : 0,
+    padN && padW ? BANK + 4 : 0,
+    padN && padE ? BANK + 4 : 0,
+    padS && padE ? BANK + 4 : 0,
+    padS && padW ? BANK + 4 : 0,
   ];
-
-  ctx.fillStyle = SAND;
-  if (!nW) {
-    const x0 = x + (wW && nwW ? INNER : 0);
-    const x1 = x + TILE - (eW && neW ? INNER : 0);
-    if (x1 > x0) ctx.fillRect(x0, y, x1 - x0, BANK);
-  }
-  if (!sW) {
-    const x0 = x + (wW && swW ? INNER : 0);
-    const x1 = x + TILE - (eW && seW ? INNER : 0);
-    if (x1 > x0) ctx.fillRect(x0, y + TILE - BANK, x1 - x0, BANK);
-  }
-  if (!wW) {
-    const y0 = y + (nW && nwW ? INNER : 0);
-    const y1 = y + TILE - (sW && swW ? INNER : 0);
-    if (y1 > y0) ctx.fillRect(x, y0, BANK, y1 - y0);
-  }
-  if (!eW) {
-    const y0 = y + (nW && neW ? INNER : 0);
-    const y1 = y + TILE - (sW && seW ? INNER : 0);
-    if (y1 > y0) ctx.fillRect(x + TILE - BANK, y0, BANK, y1 - y0);
-  }
 
   ctx.save();
   ctx.beginPath();
@@ -764,28 +750,30 @@ function paintRiverGround(
       ctx.fill();
     }
   } else if ((nW ? 1 : 0) + (eW ? 1 : 0) + (sW ? 1 : 0) + (wW ? 1 : 0) >= 2) {
-    ctx.fillStyle = "rgba(32, 52, 62, 0.14)";
+    ctx.fillStyle = "rgba(32, 52, 62, 0.16)";
     ctx.fillRect(ix, iy, iw, ih);
   }
   ctx.restore();
 
-  const cap = (cx: number, cy: number, a0: number, a1: number) => {
-    ctx.fillStyle = grass;
+  const punch = (cx: number, cy: number, a0: number, a1: number) => {
+    ctx.fillStyle = SAND;
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, INNER, a0, a1, true);
     ctx.closePath();
     ctx.fill();
   };
-  if (nW && eW && !neW) cap(x + TILE, y, Math.PI, Math.PI / 2);
-  if (nW && wW && !nwW) cap(x, y, Math.PI / 2, 0);
-  if (sW && eW && !seW) cap(x + TILE, y + TILE, (Math.PI * 3) / 2, Math.PI);
-  if (sW && wW && !swW) cap(x, y + TILE, 0, (Math.PI * 3) / 2);
+  if (anyBank) {
+    if (nW && eW && !neW) punch(x + TILE, y, Math.PI, Math.PI / 2);
+    if (nW && wW && !nwW) punch(x, y, Math.PI / 2, 0);
+    if (sW && eW && !seW) punch(x + TILE, y + TILE, (Math.PI * 3) / 2, Math.PI);
+    if (sW && wW && !swW) punch(x, y + TILE, 0, (Math.PI * 3) / 2);
+  }
 
-  if (!nW || !eW || !sW || !wW) {
+  if (anyBank) {
     ctx.save();
     ctx.strokeStyle = "rgba(70, 52, 32, 0.4)";
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = 1.3;
     ctx.beginPath();
     if (!nW) {
       ctx.moveTo(ix + radii[0], iy);
