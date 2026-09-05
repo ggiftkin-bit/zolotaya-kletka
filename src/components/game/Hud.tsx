@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BAG_CELLS, CAPACITY, ITEM_LABEL, ITEM_WEIGHT, ITEMS, TICK_SEC, TICKS_PER_DAY, TRANSPORT_LABEL, WEATHER_LABEL } from "@/game/constants";
+import { BAG_CELLS, CAPACITY, GAME_VERSION, ITEM_LABEL, ITEM_WEIGHT, ITEMS, TICK_SEC, TICKS_PER_DAY, TRANSPORT_LABEL, WEATHER_LABEL } from "@/game/constants";
 import { BUILDING_LABEL, CART_GOLD, CART_WOOD, goldTxt } from "@/game/economy";
 import { EAT_ORDER, EAT_SAT } from "@/game/craft";
 import { nextGoal } from "@/game/goal";
@@ -533,6 +533,7 @@ export function Hud() {
             />
             <div className="flex items-baseline justify-between gap-2">
               <h2 className="font-display text-2xl leading-none">Книга</h2>
+              <span className="text-[11px] font-medium tracking-wide text-muted-foreground">версия {GAME_VERSION}</span>
               <button type="button" className="size-11 text-xl text-muted-foreground" onClick={() => setHelp(false)}>
                 ×
               </button>

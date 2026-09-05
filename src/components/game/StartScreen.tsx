@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MEEPLE_COLORS } from "@/game/constants";
+import { GAME_VERSION, MEEPLE_COLORS } from "@/game/constants";
 import { useGame } from "@/game/store";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -43,6 +43,7 @@ export function StartScreen({ error, onStart }: Props) {
         <h1 className="mt-2 font-display text-4xl leading-none tracking-tight text-panel md:text-5xl">
           Золотая Клетка
         </h1>
+        <p className="mt-1 text-[11px] font-medium tracking-wide text-panel/70">версия {GAME_VERSION}</p>
         <p className="mt-3 max-w-sm text-sm leading-relaxed text-panel/80">
           Клетка пишется в книгу мира. Пока ты один — та же поляна, на которую потом выйдут другие.
         </p>

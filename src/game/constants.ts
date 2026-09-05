@@ -1,5 +1,8 @@
 import type { Biome, BuildingKind, Inventory, ItemId, Profession, Season, Transport, Weather } from "./types";
 
+/** Альфа. Вторая цифра — новая механика, третья — доработка. */
+export const GAME_VERSION = "0.8.3";
+
 export const MAP_W = 96;
 export const MAP_H = 96;
 export const TILE = 44;
