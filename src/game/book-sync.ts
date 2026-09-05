@@ -8,6 +8,7 @@ import {
   liveTilesOf,
   maskLiveFog,
   packPawn,
+  rememberFog,
   slimOf,
   unpackPawn,
   WORLD_SEED,
@@ -106,6 +107,10 @@ export async function openBookFromServer(): Promise<boolean> {
       return false;
     }
     let world = darkWorld(WORLD_SEED);
+    const pocketFog = pocket?.world?.fog;
+    if (pocketFog && pocketFog.length === world.fog!.length) {
+      world = { ...world, fog: rememberFog(pocketFog, world.fog!.length) };
+    }
     world = applyMemory(world, shot.memory);
     world = applyLive(world, shot.live);
     const at = shot.pawn ? { x: shot.pawn.x, y: shot.pawn.y } : { x: pocket?.character?.x ?? spawn.x, y: pocket?.character?.y ?? spawn.y };

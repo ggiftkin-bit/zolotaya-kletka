@@ -188,7 +188,7 @@ function readRaw(): unknown | null {
 
 export function loadGame(): GameState | null {
   try {
-    const parsed = readRaw() as (Partial<GameState> & { pack?: number; world?: { seed?: string; width?: number; height?: number; tiles?: unknown } }) | null;
+    const parsed = readRaw() as (Partial<GameState> & { pack?: number; world?: { seed?: string; width?: number; height?: number; tiles?: unknown; fog?: number[]; ver?: number[] } }) | null;
     if (!parsed?.world) return null;
     const width = parsed.world.width ?? MAP_W;
     const height = parsed.world.height ?? MAP_H;
@@ -202,6 +202,8 @@ export function loadGame(): GameState | null {
           width,
           height,
           tiles: [],
+          fog: parsed.world.fog,
+          ver: parsed.world.ver,
         },
         started: !!parsed.started,
       };
@@ -213,6 +215,8 @@ export function loadGame(): GameState | null {
         width,
         height,
         tiles,
+        fog: parsed.world.fog,
+        ver: parsed.world.ver,
       },
       started: !!parsed.started,
     };
@@ -232,6 +236,8 @@ export function saveGame(state: GameState): boolean {
       width: state.world.width,
       height: state.world.height,
       tiles: state.bookOn ? [] : state.world.tiles.map(slimTile),
+      fog: state.world.fog,
+      ver: state.world.ver,
     },
     character: state.character,
     weather: state.weather,

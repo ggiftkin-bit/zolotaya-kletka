@@ -459,7 +459,7 @@ function PickPane({
         <>
           <Sticker
             title="Напиться"
-            sub="тело +16 · без ведра"
+            sub="вода тела 100"
             ico={<GearPic i={1} className="size-11 overflow-hidden rounded-[12px]" />}
             onClick={() => g.drinkWater()}
           />
@@ -474,7 +474,7 @@ function PickPane({
       {here && (g.character.pail ?? 0) > 0 && (
         <Sticker
           title="Глоток из ведра"
-          sub={`${g.character.pail} · тело +16`}
+          sub={`${g.character.pail} · тело +25`}
           onClick={() => g.sipPail()}
         />
       )}

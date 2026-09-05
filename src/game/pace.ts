@@ -31,7 +31,8 @@ export function energyPeriod(opts: { roof: boolean; sleeping: boolean; hungry: b
   return ms;
 }
 
-export function regenPaused(c: Character, now = Date.now()): boolean {
+export function regenPaused(c: Character, now = Date.now(), walking = false): boolean {
+  if (walking) return true;
   return !!c.busy && c.busy.until > now && !c.busy.hired;
 }
 
@@ -44,8 +45,8 @@ export function formatWait(ms: number): string {
   return r ? `${m} мин ${r} с` : `${m} мин`;
 }
 
-export function applyRegen(c: Character, now: number, roof: boolean): Character {
-  if (regenPaused(c, now)) {
+export function applyRegen(c: Character, now: number, roof: boolean, walking = false): Character {
+  if (regenPaused(c, now, walking)) {
     if (c.energyAt === now) return c;
     return { ...c, energyAt: now };
   }
@@ -66,8 +67,8 @@ export function applyRegen(c: Character, now: number, roof: boolean): Character 
   };
 }
 
-export function nextEnergyIn(c: Character, now: number, roof: boolean): number {
-  if (regenPaused(c, now)) return -1;
+export function nextEnergyIn(c: Character, now: number, roof: boolean, walking = false): number {
+  if (regenPaused(c, now, walking)) return -1;
   if (c.energy >= ENERGY_MAX) return 0;
   const last = c.energyAt || now;
   const ms = energyPeriod({ roof, sleeping: !!c.resting, hungry: c.satiety < 25 });

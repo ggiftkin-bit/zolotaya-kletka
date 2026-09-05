@@ -43,7 +43,7 @@ import { applyCatch, dummyOnYard, hasLaw, isForeignYard, isHeld, isJailed, isSti
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
 import { clearGame, loadGame, saveGame } from "./save";
 import { stampVillage, clearVillage, friendNames, hamletTitle, hasOwnYard, canFoundVillage, isOutsideYard, setVillageLaw } from "./pact";
-import { cargoWeight, loadRatio, wornKg } from "./travel";
+import { cargoWeight, loadRatio, pailKg, stepEnergy, wornKg } from "./travel";
 import { atBench, CRAFTS, EAT_ORDER, EAT_SAT, PROF_BLURB, type CraftKind } from "./craft";
 import { markDepleted, tickGrow, REGROW_WAIT } from "./grow";
 import { lootOn, canOpenPlace } from "./places";
@@ -93,7 +93,7 @@ import type {
 import { chebyshev, dummyHome, foeById, gearSlot, leaveChance, makeHamletDummies, occupantAt, strikeDmg, talkChance, youFighter } from "./fight";
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
-import { FOG_DARK, allDarkFog, fogAt, maskLiveFog } from "./book";
+import { FOG_DARK, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
 import { bindBookStore, flushBook, noteDeed, openBookFromServer, pullSpot, resetBookPawn } from "./book-sync";
 
 let worldAcc = 0;
@@ -291,8 +291,8 @@ function walkTo(x: number, y: number) {
     );
     return;
   }
-  if (c.energy < 1 && c.life !== "down") {
-    speak("Силы нет. Зайди в шалаш и нажми Спать — или кружка сверху.", c.x, c.y, "нет силы", "bad");
+  if (c.energy < stepEnergy(c.transport) && c.life !== "down") {
+    speak("Нет силы. Ляг или кружка.", c.x, c.y, "нет силы", "bad");
     return;
   }
   if (isBusy(c) && !c.busy?.hired) {
@@ -546,7 +546,7 @@ function ctxOf(s: GameState) {
     transport: down ? "walk" as const : s.character.transport,
     inventory: s.character.inventory,
     weather: s.weather,
-    extraKg: wornKg(s.character),
+    extraKg: wornKg(s.character) + pailKg(s.character.pail),
   };
 }
 
@@ -646,7 +646,12 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         })(),
       }));
       const world = maskLiveFog(
-        { ...saved.world, tiles, fog: allDarkFog(tiles.length), ver: tiles.map(() => 1) },
+        {
+          ...saved.world,
+          tiles,
+          fog: rememberFog(saved.world.fog, tiles.length),
+          ver: saved.world.ver && saved.world.ver.length === tiles.length ? saved.world.ver : tiles.map(() => 1),
+        },
         character.x,
         character.y,
       );
@@ -1230,7 +1235,7 @@ function catchUpSim(dt: number) {
   const roof =
     hasRoofAt(s, s.character.x, s.character.y) ||
     (s.character.profession === "hireling" && s.character.resting);
-  let live = applyRegen(s.character, now, roof);
+  let live = applyRegen(s.character, now, roof, !!s.travel);
   if (live.life === "jailed" && (live.jailedUntil ?? 0) > 0 && now >= live.jailedUntil) {
     live = { ...live, jailedUntil: 0, jailWhy: "", life: "alive" };
     dropHint({ force: true });
@@ -1367,19 +1372,29 @@ function advanceTravel(now: number) {
   let x = s.character.x;
   let y = s.character.y;
   let energy = s.character.energy;
-  let satiety = s.character.satiety;
-  let water = s.character.water;
   let stepped = false;
+  const drain = s.character.life === "down" ? 0 : stepEnergy(s.character.transport);
   while (index < travel.path.length) {
     const cur = travel.path[index]!;
     if (elapsed < cur.cost) break;
+    if (drain > 0 && energy < drain) {
+      elapsed = 0;
+      cancelNotice("walk");
+      const c = useGame.getState().character;
+      speak("Нет силы. Ляг или кружка.", x, y, "нет силы", "bad");
+      useGame.setState({
+        character: { ...c, x, y, px: x, py: y, energy },
+        travel: null,
+        preview: null,
+        selected: { x, y },
+      });
+      return;
+    }
     elapsed -= cur.cost;
     x = cur.x;
     y = cur.y;
     index += 1;
-    energy = Math.max(0, energy - 0.15);
-    satiety = Math.max(0, satiety - 0.35);
-    water = Math.max(0, water - 0.25);
+    energy = Math.max(0, energy - drain);
     stepped = true;
   }
   if (index >= travel.path.length) {
@@ -1389,7 +1404,7 @@ function advanceTravel(now: number) {
     cancelNotice("walk");
     maybePingHidden("Пришёл", "Ход кончился — ты на месте.", "walk");
     useGame.setState({
-      character: { ...c, x, y, px: x, py: y, energy, satiety, water },
+      character: { ...c, x, y, px: x, py: y, energy },
       travel: null,
       preview: null,
       selected: { x, y },
@@ -1410,7 +1425,7 @@ function advanceTravel(now: number) {
     const c = useGame.getState().character;
     cancelNotice("walk");
     useGame.setState({
-      character: { ...c, x, y, px: x, py: y, energy, satiety, water },
+      character: { ...c, x, y, px: x, py: y, energy },
       travel: null,
       preview: null,
       selected: { x, y },
@@ -1427,7 +1442,7 @@ function advanceTravel(now: number) {
   if (stepped) {
     const curS = useGame.getState();
     useGame.setState({
-      character: { ...curS.character, x, y, px: x, py: y, energy, satiety, water },
+      character: { ...curS.character, x, y, px: x, py: y, energy },
       travel: { ...travel, index, elapsed, t0: now },
     });
     void pullSpot();
@@ -1447,7 +1462,7 @@ function worldTick() {
   let c = { ...s.character };
   const roof = hasRoofAt(s, c.x, c.y);
 
-  c.satiety = Math.max(0, c.satiety - (roof ? 1 : 3));
+  c.satiety = Math.max(0, c.satiety - (roof ? 1 : 2));
   c.water = Math.max(0, c.water - (roof ? 1 : 2));
   const fire = nearCamp(s.world, c.x, c.y);
   if (c.life === "alive") {
@@ -1458,7 +1473,8 @@ function worldTick() {
     if (c.satiety === 0) c.hp = Math.max(0, c.hp - 3);
     if (c.warmth === 0) c.hp = Math.max(0, c.hp - 2);
     if (c.water === 0) c.hp = Math.max(0, c.hp - 2);
-    if (c.satiety > 40 && c.warmth > 40 && c.water > 40) c.hp = Math.min(100, c.hp + 1);
+    if (roof && c.satiety > 40) c.hp = Math.min(100, c.hp + 3);
+    else if (c.satiety > 40 && c.warmth > 40 && c.water > 40) c.hp = Math.min(100, c.hp + 1);
   }
   if (c.horses < 1 && (c.transport === "horse" || c.transport === "wagon")) {
     if (c.wagon || c.transport === "wagon") parkWagonNear(s.world, c.x, c.y, "you");
@@ -2709,7 +2725,7 @@ function equipHand(item: ItemId | null) {
   const tile = hereTile();
   const prev = s.character.hand;
   let c = gripHand(s.character, item);
-  if (!item && prev && isWearId(prev) && loadRatio(c.inventory, c.transport, wornKg(c)) > 1 && tile) {
+  if (!item && prev && isWearId(prev) && loadRatio(c.inventory, c.transport, wornKg(c) + pailKg(c.pail)) > 1 && tile) {
     pileAdd(tile, prev, 1);
     const inv = { ...c.inventory, [prev]: Math.max(0, (c.inventory[prev] ?? 0) - 1) };
     const bagWear = { ...(c.bagWear ?? {}) };
@@ -2737,7 +2753,7 @@ function takeOffSlot(c: Character, slot: "body" | "shield" | "helm", tile: Retur
   const stripped = { ...c, [slot]: null as ItemId | null };
   const inv = { ...c.inventory, [id]: (c.inventory[id] ?? 0) + 1 };
   const next = { ...stripped, inventory: inv };
-  if (tile && loadRatio(inv, c.transport, wornKg(next)) > 1) {
+  if (tile && loadRatio(inv, c.transport, wornKg(next) + pailKg(next.pail)) > 1) {
     pileAdd(tile, id, 1);
     return stripped;
   }
@@ -3550,16 +3566,15 @@ function drinkWater() {
     speak("Напиться — у реки, брода или колодца.", tile.x, tile.y, "нет воды", "bad");
     return;
   }
-  if ((s.character.sipTick ?? -1) === s.clock) {
-    speak("Подожди тик. Глоток раз за мировой ход.", tile.x, tile.y, "подожди", "ok");
+  if (s.character.water >= 100) {
+    speak("Уже полный.", tile.x, tile.y, "полный", "ok");
     return;
   }
-  const water = Math.min(100, s.character.water + 16);
   useGame.setState({
-    character: { ...s.character, water, sipTick: s.clock },
+    character: { ...s.character, water: 100 },
     hint: null,
-    log: pushLog(s.log, `Напился. Вода тела ${Math.round(water)}.`),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "+вода", tone: "ok" as const }].slice(-10),
+    log: pushLog(s.log, "Напился досыта. Вода тела 100."),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "вода 100", tone: "ok" as const }].slice(-10),
   });
 }
 
@@ -3569,12 +3584,16 @@ function sipPail() {
     speak("Ведро пустое. Набери у реки.", s.character.x, s.character.y, "пусто", "bad");
     return;
   }
-  const water = Math.min(100, s.character.water + 16);
+  if (s.character.water >= 100) {
+    speak("Уже полный.", s.character.x, s.character.y, "полный", "ok");
+    return;
+  }
+  const water = Math.min(100, s.character.water + 25);
   useGame.setState({
     character: { ...s.character, pail: s.character.pail - 1, water },
     hint: null,
     log: pushLog(s.log, `Глоток из ведра. Вода тела ${Math.round(water)}. Глотков ${s.character.pail - 1}.`),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: s.character.x, y: s.character.y, text: "глоток", tone: "ok" as const }].slice(-10),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: s.character.x, y: s.character.y, text: "+25 вода", tone: "ok" as const }].slice(-10),
   });
 }
 

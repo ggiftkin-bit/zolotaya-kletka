@@ -208,6 +208,17 @@ export function allDarkFog(n = MAP_W * MAP_H): number[] {
   return new Array(n).fill(FOG_DARK);
 }
 
+/** Живое пятно прошлого входа → память. Нет массива — тьма. */
+export function rememberFog(fog: number[] | undefined, n: number): number[] {
+  if (!fog || fog.length !== n) return allDarkFog(n);
+  const out = fog.slice();
+  for (let i = 0; i < out.length; i++) {
+    const f = out[i] ?? FOG_DARK;
+    out[i] = f === FOG_LIVE ? FOG_MEM : f;
+  }
+  return out;
+}
+
 export function allOnesVer(n = MAP_W * MAP_H): number[] {
   return new Array(n).fill(1);
 }

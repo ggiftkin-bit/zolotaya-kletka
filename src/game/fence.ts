@@ -67,7 +67,7 @@ export function canCross(world: World, ax: number, ay: number, bx: number, by: n
   return true;
 }
 
-/** Diagonal: both cardinal routes must be open, иначе угол забора срезают. */
+/** Diagonal: угол тына — оба кардинальных пути. Река на угле сушу не режет. */
 export function canCrossDiag(world: World, ax: number, ay: number, bx: number, by: number, who = "you"): boolean {
   if (ax === bx || ay === by) return canCross(world, ax, ay, bx, by, who);
   const mx = bx;

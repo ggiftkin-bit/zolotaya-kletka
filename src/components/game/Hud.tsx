@@ -93,9 +93,9 @@ export function Hud() {
   const down = g.character.life === "down";
   const dead = g.character.life === "dead";
   const still = isStill(g.character, now);
-  const wait = nextEnergyIn(g.character, now, isRoof(here) || (g.character.profession === "hireling" && g.character.resting));
+  const wait = nextEnergyIn(g.character, now, isRoof(here) || (g.character.profession === "hireling" && g.character.resting), !!g.travel);
   const busy = !held && g.character.busy && g.character.busy.until > now ? g.character.busy : null;
-  const paused = regenPaused(g.character, now);
+  const paused = regenPaused(g.character, now, !!g.travel);
   const wounded = g.character.hp < 40;
   const ownChest =
     here &&
@@ -321,7 +321,7 @@ export function Hud() {
           <div className="pointer-events-auto mx-auto mt-1.5 max-w-lg rounded-2xl border border-border bg-panel p-3 shadow-panel">
             <p className="font-display text-xl leading-none">Здоровье {Math.round(g.character.hp)}</p>
             <p className="mt-2 text-sm leading-snug text-muted-foreground">
-              Здоровье. Сытость на нуле его ест. На нуле — упал.
+              Ест здоровье: сытость 0, тепло 0, вода тела 0. Растёт под крышей при сытости больше 40 — +3 за тик; в поле, если сытость, тепло и вода все больше 40 — +1. Настой как был. На нуле — упал.
             </p>
           </div>
         )}
@@ -1170,7 +1170,7 @@ function WaterSheet({ onClose }: { onClose: () => void }) {
       <div className="mt-3 flex flex-col gap-1.5">
         {at && (
           <Button className="h-12" onClick={() => g.drinkWater()}>
-            Напиться · тело +16
+            Напиться досыта
           </Button>
         )}
         {at && (
@@ -1180,7 +1180,7 @@ function WaterSheet({ onClose }: { onClose: () => void }) {
         )}
         {pail > 0 && (
           <Button className="h-12" variant="secondary" onClick={() => g.sipPail()}>
-            Глоток из ведра · тело +16
+            Глоток из ведра · тело +25
           </Button>
         )}
       </div>

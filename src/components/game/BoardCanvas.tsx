@@ -744,9 +744,6 @@ function paintRiverGround(
   ctx.clip();
   ctx.fillStyle = waterFill;
   ctx.fillRect(x, y, TILE, TILE);
-  if (art && !linked) {
-    drawAtlas(ctx, art.tiles, 3, 3, biomeIndex(tile.biome, false, true), x - 10, y - 10, TILE + 20, TILE + 20, TILE_ATLAS_PAD);
-  }
   if (ford) {
     ctx.fillStyle = "rgba(210, 214, 200, 0.22)";
     ctx.fillRect(x, y, TILE, TILE);
@@ -905,10 +902,10 @@ function paintForestGround(
 
   ctx.save();
   ctx.beginPath();
-  const clipX = x + (wF ? -6 : 1);
-  const clipY = y + (nF ? -6 : 1);
-  const clipW = TILE + (wF ? 6 : -1) + (eF ? 6 : -1);
-  const clipH = TILE + (nF ? 6 : -1) + (sF ? 6 : -1);
+  const clipX = x + (wF && !isWater(n.w) ? -6 : 1);
+  const clipY = y + (nF && !isWater(n.n) ? -6 : 1);
+  const clipW = TILE + (wF && !isWater(n.w) ? 6 : -1) + (eF && !isWater(n.e) ? 6 : -1);
+  const clipH = TILE + (nF && !isWater(n.n) ? 6 : -1) + (sF && !isWater(n.s) ? 6 : -1);
   ctx.rect(clipX, clipY, clipW, clipH);
   ctx.clip();
 
@@ -1047,7 +1044,7 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
 
   if (!isWater(tile)) paintWaterShade(ctx, tile, world, x, y);
 
-  paintCut(ctx, tile, x, y);
+  if (!isWater(tile)) paintCut(ctx, tile, x, y);
 
   if (tile.bank && !tile.pit) paintBank(ctx, x, y);
   if (tile.pit) paintPit(ctx, tile, world, x, y);
@@ -1098,9 +1095,10 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
 
   paintFence(ctx, tile, x, y, world);
 
-  paintHerb(ctx, tile, x, y);
+  if (!isWater(tile)) paintHerb(ctx, tile, x, y);
 
   if (
+    !isWater(tile) &&
     tile.amount > 0 &&
     tile.resource &&
     tile.resource !== "herb" &&

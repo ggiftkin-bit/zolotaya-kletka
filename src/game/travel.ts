@@ -24,8 +24,30 @@ export function wornKg(c: { body?: ItemId | null; shield?: ItemId | null; helm?:
   return w;
 }
 
-export function pawnKg(c: { inventory: Inventory; body?: ItemId | null; shield?: ItemId | null; helm?: ItemId | null }): number {
-  return cargoWeight(c.inventory) + wornKg(c);
+export function pawnKg(c: {
+  inventory: Inventory;
+  body?: ItemId | null;
+  shield?: ItemId | null;
+  helm?: ItemId | null;
+  pail?: number;
+}): number {
+  return cargoWeight(c.inventory) + wornKg(c) + pailKg(c.pail);
+}
+
+/** Полное ведро тяжелее пустого. Пустое ведро — вес предмета как был. */
+export function pailKg(pail?: number): number {
+  const n = pail ?? 0;
+  if (n >= 3) return 4;
+  if (n >= 2) return 3;
+  if (n >= 1) return 2;
+  return 0;
+}
+
+export function stepEnergy(transport: Transport): number {
+  if (transport === "horse") return 0.2;
+  if (transport === "cart") return 0.7;
+  if (transport === "wagon") return 0.4;
+  return 0.5;
 }
 
 export function loadRatio(inv: Inventory, transport: Transport, extraKg = 0): number {

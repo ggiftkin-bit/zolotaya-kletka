@@ -145,9 +145,6 @@ export function findPath(
       const ny = cy + dy;
       if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
       if (dx !== 0 && dy !== 0) {
-        const a = tileAt(world, cx + dx, cy);
-        const b = tileAt(world, cx, cy + dy);
-        if (!isWalkable(a, world) || !isWalkable(b, world)) continue;
         if (!canCrossDiag(world, cx, cy, nx, ny)) continue;
       } else if (!canCross(world, cx, cy, nx, ny)) {
         continue;
