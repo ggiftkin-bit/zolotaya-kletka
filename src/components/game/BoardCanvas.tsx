@@ -669,36 +669,6 @@ function paintMeadow(
   }
 }
 
-function paintLandCape(ctx: CanvasRenderingContext2D, tile: Tile, world: World, x: number, y: number) {
-  if (isWater(tile)) return;
-  const n = sides4(world, tile.x, tile.y);
-  const nW = isWater(n.n);
-  const eW = isWater(n.e);
-  const sW = isWater(n.s);
-  const wW = isWater(n.w);
-  const R = 13;
-  const waterOf = (a: Tile | null | undefined, b: Tile | null | undefined) =>
-    a?.biome === "ford" || b?.biome === "ford" ? BIOME_FILL.ford : BIOME_FILL.river;
-  const cap = (cx: number, cy: number, a0: number, a1: number, wa: Tile | null | undefined, wb: Tile | null | undefined) => {
-    ctx.fillStyle = SAND;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, R, a0, a1, false);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = waterOf(wa, wb);
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, Math.max(4, R - BANK), a0, a1, false);
-    ctx.closePath();
-    ctx.fill();
-  };
-  if (nW && wW) cap(x, y, 0, Math.PI / 2, n.n, n.w);
-  if (nW && eW) cap(x + TILE, y, Math.PI / 2, Math.PI, n.n, n.e);
-  if (sW && eW) cap(x + TILE, y + TILE, Math.PI, (Math.PI * 3) / 2, n.s, n.e);
-  if (sW && wW) cap(x, y + TILE, (Math.PI * 3) / 2, Math.PI * 2, n.s, n.w);
-}
-
 function paintBiome(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement | null | undefined,
@@ -712,13 +682,15 @@ function paintBiome(
   if (img) drawAtlas(ctx, img, 3, 3, biomeIndex(biome, false, wooded), x, y, TILE, TILE, TILE_ATLAS_PAD);
 }
 
+const INNER = 12;
+
 function paintRiverGround(
   ctx: CanvasRenderingContext2D,
   tile: Tile,
   world: World,
   x: number,
   y: number,
-  art: ReturnType<typeof getArt>,
+  _art: ReturnType<typeof getArt>,
 ) {
   const n = sides4(world, tile.x, tile.y);
   const nW = isWater(n.n);
@@ -728,16 +700,17 @@ function paintRiverGround(
   const ford = tile.biome === "ford";
   const anyBank = !nW || !eW || !sW || !wW;
   const waterFill = ford ? BIOME_FILL.ford : BIOME_FILL.river;
+  const seW = isWater(tileAt(world, tile.x + 1, tile.y + 1));
+  const neW = isWater(tileAt(world, tile.x + 1, tile.y - 1));
+  const swW = isWater(tileAt(world, tile.x - 1, tile.y + 1));
+  const nwW = isWater(tileAt(world, tile.x - 1, tile.y - 1));
 
   if (anyBank) {
     ctx.fillStyle = SAND;
     ctx.fillRect(x, y, TILE, TILE);
     ctx.fillStyle = SAND_WET;
-    ctx.globalAlpha = 0.4;
-    ctx.beginPath();
-    ctx.ellipse(x + 11 + hash01(tile.x, tile.y, 1) * 16, y + 13, 7, 4, 0.2, 0, Math.PI * 2);
-    ctx.ellipse(x + 29, y + 31, 6, 3.5, -0.3, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.globalAlpha = 0.35;
+    ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
     ctx.globalAlpha = 1;
   } else {
     ctx.fillStyle = waterFill;
@@ -753,45 +726,11 @@ function paintRiverGround(
   const iw = TILE - padW - padE;
   const ih = TILE - padN - padS;
   const radii: [number, number, number, number] = [
-    padN && padW ? BANK : 0,
-    padN && padE ? BANK : 0,
-    padS && padE ? BANK : 0,
-    padS && padW ? BANK : 0,
+    padN && padW ? BANK + 4 : 0,
+    padN && padE ? BANK + 4 : 0,
+    padS && padE ? BANK + 4 : 0,
+    padS && padW ? BANK + 4 : 0,
   ];
-  const linked = nW || eW || sW || wW;
-  const seW = isWater(tileAt(world, tile.x + 1, tile.y + 1));
-  const neW = isWater(tileAt(world, tile.x + 1, tile.y - 1));
-  const swW = isWater(tileAt(world, tile.x - 1, tile.y + 1));
-  const nwW = isWater(tileAt(world, tile.x - 1, tile.y - 1));
-
-  if (anyBank) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(ix, iy, iw, ih, radii);
-    ctx.strokeStyle = SAND_WET;
-    ctx.lineWidth = 5;
-    if (linked) {
-      ctx.beginPath();
-      if (!nW) {
-        ctx.moveTo(ix + (padW ? 4 : 0), iy);
-        ctx.lineTo(ix + iw - (padE ? 4 : 0), iy);
-      }
-      if (!sW) {
-        ctx.moveTo(ix + (padW ? 4 : 0), iy + ih);
-        ctx.lineTo(ix + iw - (padE ? 4 : 0), iy + ih);
-      }
-      if (!wW) {
-        ctx.moveTo(ix, iy + (padN ? 4 : 0));
-        ctx.lineTo(ix, iy + ih - (padS ? 4 : 0));
-      }
-      if (!eW) {
-        ctx.moveTo(ix + iw, iy + (padN ? 4 : 0));
-        ctx.lineTo(ix + iw, iy + ih - (padS ? 4 : 0));
-      }
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
 
   ctx.save();
   ctx.beginPath();
@@ -810,42 +749,31 @@ function paintRiverGround(
       ctx.ellipse(sx, sy, 3.2, 2.2, 0.2 * i, 0, Math.PI * 2);
       ctx.fill();
     }
-  } else if (linked) {
-    let cx = x + TILE / 2;
-    let cy = y + TILE / 2;
-    if (eW && !wW) cx += 7;
-    if (wW && !eW) cx -= 7;
-    if (sW && !nW) cy += 7;
-    if (nW && !sW) cy -= 7;
-    if (eW && sW && seW) {
-      cx = x + TILE - 6;
-      cy = y + TILE - 6;
-    } else if (wW && sW && swW) {
-      cx = x + 6;
-      cy = y + TILE - 6;
-    } else if (eW && nW && neW) {
-      cx = x + TILE - 6;
-      cy = y + 6;
-    } else if (wW && nW && nwW) {
-      cx = x + 6;
-      cy = y + 6;
-    }
-    ctx.fillStyle = "rgba(32, 52, 62, 0.32)";
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, 20, 18, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(120, 150, 150, 0.16)";
-    if (padN) ctx.fillRect(x, y + padN, TILE, 8);
-    if (padS) ctx.fillRect(x, y + TILE - padS - 8, TILE, 8);
-    if (padW) ctx.fillRect(x + padW, y, 8, TILE);
-    if (padE) ctx.fillRect(x + TILE - padE - 8, y, 8, TILE);
+  } else if ((nW ? 1 : 0) + (eW ? 1 : 0) + (sW ? 1 : 0) + (wW ? 1 : 0) >= 2) {
+    ctx.fillStyle = "rgba(32, 52, 62, 0.16)";
+    ctx.fillRect(ix, iy, iw, ih);
   }
   ctx.restore();
 
+  const punch = (cx: number, cy: number, a0: number, a1: number) => {
+    ctx.fillStyle = SAND;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, INNER, a0, a1, true);
+    ctx.closePath();
+    ctx.fill();
+  };
+  if (anyBank) {
+    if (nW && eW && !neW) punch(x + TILE, y, Math.PI, Math.PI / 2);
+    if (nW && wW && !nwW) punch(x, y, Math.PI / 2, 0);
+    if (sW && eW && !seW) punch(x + TILE, y + TILE, (Math.PI * 3) / 2, Math.PI);
+    if (sW && wW && !swW) punch(x, y + TILE, 0, (Math.PI * 3) / 2);
+  }
+
   if (anyBank) {
     ctx.save();
-    ctx.strokeStyle = "rgba(70, 52, 32, 0.38)";
-    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = "rgba(70, 52, 32, 0.4)";
+    ctx.lineWidth = 1.3;
     ctx.beginPath();
     if (!nW) {
       ctx.moveTo(ix + radii[0], iy);
@@ -1111,7 +1039,6 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
   }
 
   if (!isWater(tile)) paintWaterShade(ctx, tile, world, x, y);
-  if (!isWater(tile)) paintLandCape(ctx, tile, world, x, y);
 
   if (!isWater(tile)) paintCut(ctx, tile, x, y);
 
