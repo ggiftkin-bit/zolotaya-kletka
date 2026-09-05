@@ -479,10 +479,10 @@ function paintRiverGround(
     ctx.fillStyle = SAND;
     ctx.fillRect(x, y, TILE, TILE);
     ctx.fillStyle = SAND_WET;
-    ctx.globalAlpha = 0.45;
+    ctx.globalAlpha = 0.4;
     ctx.beginPath();
-    ctx.ellipse(x + 12 + hash01(tile.x, tile.y, 1) * 18, y + 14, 7, 4, 0.2, 0, Math.PI * 2);
-    ctx.ellipse(x + 28, y + 30, 6, 3.5, -0.3, 0, Math.PI * 2);
+    ctx.ellipse(x + 11 + hash01(tile.x, tile.y, 1) * 16, y + 13, 7, 4, 0.2, 0, Math.PI * 2);
+    ctx.ellipse(x + 29, y + 31, 6, 3.5, -0.3, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
   } else {
@@ -505,6 +505,16 @@ function paintRiverGround(
     padS && padW ? BANK : 0,
   ];
 
+  if (anyBank) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(ix, iy, iw, ih, radii);
+    ctx.strokeStyle = SAND_WET;
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    ctx.restore();
+  }
+
   ctx.save();
   ctx.beginPath();
   ctx.roundRect(ix, iy, iw, ih, radii);
@@ -512,9 +522,9 @@ function paintRiverGround(
   ctx.fillStyle = waterFill;
   ctx.fillRect(x, y, TILE, TILE);
   if (art) {
-    drawAtlas(ctx, art.tiles, 3, 3, biomeIndex(tile.biome, false, true), x, y, TILE, TILE, TILE_ATLAS_PAD);
+    drawAtlas(ctx, art.tiles, 3, 3, biomeIndex(tile.biome, false, true), x - 10, y - 10, TILE + 20, TILE + 20, TILE_ATLAS_PAD);
     if (ford) {
-      ctx.fillStyle = "rgba(210, 214, 200, 0.16)";
+      ctx.fillStyle = "rgba(210, 214, 200, 0.2)";
       ctx.fillRect(x, y, TILE, TILE);
     }
   }
@@ -534,8 +544,8 @@ function paintRiverGround(
     ctx.save();
     ctx.beginPath();
     ctx.roundRect(ix, iy, iw, ih, radii);
-    ctx.strokeStyle = "rgba(90, 70, 42, 0.5)";
-    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = "rgba(70, 52, 32, 0.38)";
+    ctx.lineWidth = 1.4;
     ctx.stroke();
     ctx.restore();
     if (!nW) paintShoreGrass(ctx, x, y, "n", tile.x, tile.y);
@@ -553,32 +563,36 @@ function paintShoreGrass(
   tx: number,
   ty: number,
 ) {
-  const n = 2 + (hash01(tx, ty, side.charCodeAt(0)) > 0.55 ? 1 : 0);
-  ctx.fillStyle = "#5a7a42";
+  const n = 3 + (hash01(tx, ty, side.charCodeAt(0)) > 0.5 ? 1 : 0);
   for (let i = 0; i < n; i++) {
-    const t = (i + 0.35 + hash01(tx, ty, 10 + i) * 0.4) / (n + 0.2);
+    const t = (i + 0.3 + hash01(tx, ty, 10 + i) * 0.45) / (n + 0.15);
     let gx = x + 6;
     let gy = y + 6;
     if (side === "n") {
-      gx = x + 6 + t * (TILE - 12);
-      gy = y + 5 + hash01(tx, ty, 20 + i) * 4;
+      gx = x + 5 + t * (TILE - 10);
+      gy = y + 4 + hash01(tx, ty, 20 + i) * 5;
     } else if (side === "s") {
-      gx = x + 6 + t * (TILE - 12);
-      gy = y + TILE - 7 - hash01(tx, ty, 21 + i) * 4;
+      gx = x + 5 + t * (TILE - 10);
+      gy = y + TILE - 8 - hash01(tx, ty, 21 + i) * 4;
     } else if (side === "w") {
-      gx = x + 5 + hash01(tx, ty, 22 + i) * 4;
-      gy = y + 8 + t * (TILE - 16);
+      gx = x + 4 + hash01(tx, ty, 22 + i) * 5;
+      gy = y + 7 + t * (TILE - 14);
     } else {
-      gx = x + TILE - 8 - hash01(tx, ty, 23 + i) * 4;
-      gy = y + 8 + t * (TILE - 16);
+      gx = x + TILE - 9 - hash01(tx, ty, 23 + i) * 4;
+      gy = y + 7 + t * (TILE - 14);
     }
+    ctx.fillStyle = i % 2 ? "#4a6b32" : "#5a7a42";
     ctx.beginPath();
-    ctx.moveTo(gx, gy + 3);
-    ctx.lineTo(gx + 1.6, gy - 4);
-    ctx.lineTo(gx + 3.2, gy + 3);
+    ctx.moveTo(gx, gy + 4);
+    ctx.lineTo(gx + 2.1, gy - 5);
+    ctx.lineTo(gx + 4.2, gy + 4);
     ctx.closePath();
     ctx.fill();
   }
+}
+
+function isOpenLand(t: Tile | null | undefined): boolean {
+  return !!t && !isWater(t) && !isWooded(t);
 }
 
 function paintForestGround(
@@ -595,53 +609,64 @@ function paintForestGround(
   const sF = !!n.s && isWooded(n.s);
   const wF = !!n.w && isWooded(n.w);
   const count = (nF ? 1 : 0) + (eF ? 1 : 0) + (sF ? 1 : 0) + (wF ? 1 : 0);
-  const interior = count >= 4;
+  const fieldOpen = isOpenLand(n.n) || isOpenLand(n.e) || isOpenLand(n.s) || isOpenLand(n.w);
+  const interior = count >= 4 || (count >= 3 && !fieldOpen);
   if (interior || tile.plot || tile.building !== "none") {
     paintBiome(ctx, art?.tiles, "forest", x, y, true);
     return;
   }
 
   paintBiome(ctx, art?.tiles, "plains", x, y, true);
+  if (!nF) paintShoreGrass(ctx, x, y, "n", tile.x, tile.y);
+  if (!eF) paintShoreGrass(ctx, x, y, "e", tile.x, tile.y);
+  if (!sF) paintShoreGrass(ctx, x, y, "s", tile.x, tile.y);
+  if (!wF) paintShoreGrass(ctx, x, y, "w", tile.x, tile.y);
 
-  let x0 = x + (wF ? -3 : TILE * 0.36);
-  let y0 = y + (nF ? -3 : TILE * 0.36);
-  let x1 = x + TILE + (eF ? 3 : -TILE * 0.36);
-  let y1 = y + TILE + (sF ? 3 : -TILE * 0.36);
-  if (x1 - x0 < 16) {
+  const edge = 12;
+  let x0 = x + (wF ? -4 : edge);
+  let y0 = y + (nF ? -4 : edge);
+  let x1 = x + TILE + (eF ? 4 : -edge);
+  let y1 = y + TILE + (sF ? 4 : -edge);
+  if (x1 - x0 < 18) {
     const mid = (x0 + x1) / 2;
-    x0 = mid - 8;
-    x1 = mid + 8;
+    x0 = mid - 9;
+    x1 = mid + 9;
   }
-  if (y1 - y0 < 16) {
+  if (y1 - y0 < 18) {
     const mid = (y0 + y1) / 2;
-    y0 = mid - 8;
-    y1 = mid + 8;
+    y0 = mid - 9;
+    y1 = mid + 9;
   }
 
   ctx.save();
   ctx.beginPath();
-  const clipX = x + (wF ? -5 : 1);
-  const clipY = y + (nF ? -5 : 1);
-  const clipW = TILE + (wF ? 5 : -1) + (eF ? 5 : -1);
-  const clipH = TILE + (nF ? 5 : -1) + (sF ? 5 : -1);
+  const clipX = x + (wF ? -6 : 1);
+  const clipY = y + (nF ? -6 : 1);
+  const clipW = TILE + (wF ? 6 : -1) + (eF ? 6 : -1);
+  const clipH = TILE + (nF ? 6 : -1) + (sF ? 6 : -1);
   ctx.rect(clipX, clipY, clipW, clipH);
   ctx.clip();
 
-  const trees = 3 + Math.floor(hash01(tile.x, tile.y, 2) * 3);
+  ctx.fillStyle = "rgba(58, 78, 40, 0.28)";
+  ctx.beginPath();
+  ctx.ellipse((x0 + x1) / 2, (y0 + y1) / 2, Math.max(8, (x1 - x0) / 2 - 2), Math.max(8, (y1 - y0) / 2 - 2), 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  const trees = count >= 2 ? 4 + Math.floor(hash01(tile.x, tile.y, 2) * 2) : 3 + Math.floor(hash01(tile.x, tile.y, 2) * 2);
   for (let i = 0; i < trees; i++) {
     const u = hash01(tile.x, tile.y, 30 + i);
     const v = hash01(tile.x, tile.y, 50 + i);
-    let cx = x0 + 6 + u * Math.max(8, x1 - x0 - 12);
-    let cy = y0 + 8 + v * Math.max(8, y1 - y0 - 14);
+    let cx = x0 + 7 + u * Math.max(8, x1 - x0 - 14);
+    let cy = y0 + 10 + v * Math.max(8, y1 - y0 - 16);
     if (tile.road !== "none") {
       const dx = cx - (x + TILE / 2);
       const dy = cy - (y + TILE / 2);
-      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
-        cx += dx >= 0 ? 12 : -12;
-        cy += dy >= 0 ? 8 : -8;
+      if (Math.abs(dx) < 11 && Math.abs(dy) < 11) {
+        cx += dx >= 0 ? 13 : -13;
+        cy += dy >= 0 ? 9 : -9;
       }
     }
-    const s = 0.78 + hash01(tile.x, tile.y, 70 + i) * 0.32;
+    const s = 0.85 + hash01(tile.x, tile.y, 70 + i) * 0.35;
     paintTree(ctx, cx, cy, s);
   }
   ctx.restore();
