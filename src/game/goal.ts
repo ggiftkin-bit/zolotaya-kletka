@@ -37,7 +37,6 @@ export const BUILD_HINT: Record<Exclude<BuildingKind, "none">, string> = {
 export function nextGoal(s: GameState): string {
   const c = s.character;
   const inv = c.inventory;
-  const food = inv.food + inv.fish + (inv.bread ?? 0) + (inv.smoked ?? 0);
   const here = s.world.tiles[c.y * s.world.width + c.x];
   const roofNow = here && (here.building === "shack" || here.building === "house") && !here.burned;
   const ownRoof = s.world.tiles.some(
@@ -57,7 +56,7 @@ export function nextGoal(s: GameState): string {
     if (ownRoof) return "Зайди в шалаш — там тепло и сон";
     return "Холодно. Нужен шалаш";
   }
-  if (c.satiety < 25 || food <= 0) return "Голоден. Съешь из сумки";
+  if (c.satiety < 25) return "Голоден. Съешь из сумки";
   if (c.energy < 1) return roofNow ? "Силы нет. Нажми Спать" : "Силы нет. Лечь дома или кружка";
   if (c.hp < 50) return "Слаб. Крыша и настой";
   const own = s.world.tiles.some((t) => t.plot && t.owner === "you");

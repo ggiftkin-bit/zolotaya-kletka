@@ -23,7 +23,7 @@ const BIOME_FILL: Record<Biome, string> = {
   ford: "#6a8490",
 };
 
-const BANK = 12;
+const BANK = 6;
 const SAND = "#d2bc86";
 const SAND_WET = "#b89568";
 const YARD_STONE = "#7a7064";
@@ -644,6 +644,61 @@ function draw(
   if (cssW >= 720) drawMinimap(ctx, g, cssW, cssH);
 }
 
+function paintMeadow(
+  ctx: CanvasRenderingContext2D,
+  tile: Tile,
+  x: number,
+  y: number,
+  fertile: boolean,
+) {
+  ctx.fillStyle = fertile ? "#a8b06c" : "#9aaa62";
+  ctx.fillRect(x, y, TILE, TILE);
+  ctx.fillStyle = fertile ? "rgba(92, 118, 48, 0.22)" : "rgba(80, 108, 44, 0.2)";
+  ctx.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
+  ctx.fillStyle = fertile ? "rgba(122, 148, 64, 0.35)" : "rgba(110, 138, 58, 0.32)";
+  for (let i = 0; i < 3; i++) {
+    const gx = x + 6 + ((i * 13 + tile.x * 5) % (TILE - 12));
+    const gy = y + 10 + ((i * 11 + tile.y * 7) % (TILE - 16));
+    ctx.fillRect(gx, gy, 8, 2);
+  }
+  if (hash01(tile.x, tile.y, 3) > 0.82) {
+    ctx.fillStyle = "rgba(120, 114, 96, 0.7)";
+    ctx.beginPath();
+    ctx.ellipse(x + 10 + hash01(tile.x, tile.y, 4) * 22, y + 14 + hash01(tile.x, tile.y, 5) * 16, 3.2, 2.1, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function paintLandCape(ctx: CanvasRenderingContext2D, tile: Tile, world: World, x: number, y: number) {
+  if (isWater(tile)) return;
+  const n = sides4(world, tile.x, tile.y);
+  const nW = isWater(n.n);
+  const eW = isWater(n.e);
+  const sW = isWater(n.s);
+  const wW = isWater(n.w);
+  const R = 13;
+  const waterOf = (a: Tile | null | undefined, b: Tile | null | undefined) =>
+    a?.biome === "ford" || b?.biome === "ford" ? BIOME_FILL.ford : BIOME_FILL.river;
+  const cap = (cx: number, cy: number, a0: number, a1: number, wa: Tile | null | undefined, wb: Tile | null | undefined) => {
+    ctx.fillStyle = SAND;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, R, a0, a1, false);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = waterOf(wa, wb);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, Math.max(4, R - BANK), a0, a1, false);
+    ctx.closePath();
+    ctx.fill();
+  };
+  if (nW && wW) cap(x, y, 0, Math.PI / 2, n.n, n.w);
+  if (nW && eW) cap(x + TILE, y, Math.PI / 2, Math.PI, n.n, n.e);
+  if (sW && eW) cap(x + TILE, y + TILE, Math.PI, (Math.PI * 3) / 2, n.s, n.e);
+  if (sW && wW) cap(x, y + TILE, (Math.PI * 3) / 2, Math.PI * 2, n.s, n.w);
+}
+
 function paintBiome(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement | null | undefined,
@@ -832,22 +887,22 @@ function paintShoreGrass(
     let gy = y + 6;
     if (side === "n") {
       gx = x + 5 + t * (TILE - 10);
-      gy = y + 4 + hash01(tx, ty, 20 + i) * 5;
+      gy = y + 1 + hash01(tx, ty, 20 + i) * 3;
     } else if (side === "s") {
       gx = x + 5 + t * (TILE - 10);
-      gy = y + TILE - 8 - hash01(tx, ty, 21 + i) * 4;
+      gy = y + TILE - 6 - hash01(tx, ty, 21 + i) * 2;
     } else if (side === "w") {
-      gx = x + 4 + hash01(tx, ty, 22 + i) * 5;
+      gx = x + 1 + hash01(tx, ty, 22 + i) * 3;
       gy = y + 7 + t * (TILE - 14);
     } else {
-      gx = x + TILE - 9 - hash01(tx, ty, 23 + i) * 4;
+      gx = x + TILE - 6 - hash01(tx, ty, 23 + i) * 2;
       gy = y + 7 + t * (TILE - 14);
     }
     ctx.fillStyle = i % 2 ? "#4a6b32" : "#5a7a42";
     ctx.beginPath();
-    ctx.moveTo(gx, gy + 4);
-    ctx.lineTo(gx + 2.1, gy - 5);
-    ctx.lineTo(gx + 4.2, gy + 4);
+    ctx.moveTo(gx, gy + 3);
+    ctx.lineTo(gx + 1.6, gy - 3);
+    ctx.lineTo(gx + 3.2, gy + 3);
     ctx.closePath();
     ctx.fill();
   }
@@ -874,11 +929,33 @@ function paintForestGround(
   const fieldOpen = isOpenLand(n.n) || isOpenLand(n.e) || isOpenLand(n.s) || isOpenLand(n.w);
   const interior = count >= 4 || (count >= 3 && !fieldOpen);
   if (interior || tile.plot || tile.building !== "none") {
-    paintBiome(ctx, art?.tiles, "forest", x, y, true);
+    ctx.fillStyle = "#5c6a42";
+    ctx.fillRect(x, y, TILE, TILE);
+    ctx.fillStyle = "rgba(42, 56, 28, 0.28)";
+    ctx.beginPath();
+    ctx.ellipse(x + TILE / 2, y + TILE / 2, 16, 15, 0, 0, Math.PI * 2);
+    ctx.fill();
+    const trees = tile.plot || tile.building !== "none" ? 2 : 5;
+    for (let i = 0; i < trees; i++) {
+      const u = hash01(tile.x, tile.y, 30 + i);
+      const v = hash01(tile.x, tile.y, 50 + i);
+      let cx = x + 8 + u * (TILE - 16);
+      let cy = y + 12 + v * (TILE - 18);
+      if (tile.road !== "none") {
+        const dx = cx - (x + TILE / 2);
+        const dy = cy - (y + TILE / 2);
+        if (Math.abs(dx) < 11 && Math.abs(dy) < 11) {
+          cx += dx >= 0 ? 13 : -13;
+          cy += dy >= 0 ? 9 : -9;
+        }
+      }
+      const s = 0.8 + hash01(tile.x, tile.y, 70 + i) * 0.3;
+      paintTree(ctx, cx, cy, s);
+    }
     return;
   }
 
-  paintBiome(ctx, art?.tiles, "plains", x, y, true);
+  paintMeadow(ctx, tile, x, y, false);
   if (!nF) paintShoreGrass(ctx, x, y, "n", tile.x, tile.y);
   if (!eF) paintShoreGrass(ctx, x, y, "e", tile.x, tile.y);
   if (!sF) paintShoreGrass(ctx, x, y, "s", tile.x, tile.y);
@@ -1016,12 +1093,6 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
   const y = tile.y * TILE;
   const lushForest = isWooded(tile);
   const crops = tile.amount > 0 && (tile.biome === "fertile" || tile.building === "field");
-  const ground: Biome =
-    tile.biome === "forest" && !lushForest
-      ? "plains"
-      : (tile.biome === "fertile" || tile.building === "field") && !crops
-        ? "plains"
-        : tile.biome;
   const art = getArt();
   if (isWater(tile)) {
     paintRiverGround(ctx, tile, world, x, y, art);
@@ -1033,16 +1104,14 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
     paintFieldEarth(ctx, x, y);
   } else if (lushForest) {
     paintForestGround(ctx, tile, world, x, y, art);
+  } else if (tile.biome === "forest" || tile.biome === "plains" || (tile.biome === "fertile" && !crops)) {
+    paintMeadow(ctx, tile, x, y, tile.biome === "fertile");
   } else {
-    ctx.fillStyle = BIOME_FILL[ground];
-    ctx.fillRect(x, y, TILE, TILE);
-    if (art) {
-      const lush = tile.biome === "fertile" ? crops : true;
-      drawAtlas(ctx, art.tiles, 3, 3, biomeIndex(tile.biome, false, lush), x, y, TILE, TILE, TILE_ATLAS_PAD);
-    }
+    paintBiome(ctx, art?.tiles, tile.biome, x, y, true);
   }
 
   if (!isWater(tile)) paintWaterShade(ctx, tile, world, x, y);
+  if (!isWater(tile)) paintLandCape(ctx, tile, world, x, y);
 
   if (!isWater(tile)) paintCut(ctx, tile, x, y);
 
@@ -1597,15 +1666,10 @@ function paintCut(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: numbe
       ctx.fillStyle = "rgba(62, 48, 32, 0.92)";
     }
     if (tile.amount > 0) {
-      ctx.fillStyle = "rgba(62, 92, 44, 0.9)";
-      for (let i = 0; i < tile.amount; i++) {
-        const sx = x + 10 + i * 10;
-        ctx.beginPath();
-        ctx.moveTo(sx + 4, y + 8);
-        ctx.lineTo(sx + 10, y + 22);
-        ctx.lineTo(sx - 2, y + 22);
-        ctx.closePath();
-        ctx.fill();
+      const keep = Math.min(2, tile.amount);
+      for (let i = 0; i < keep; i++) {
+        const sx = x + 12 + i * 14;
+        paintTree(ctx, sx, y + 18, 0.7);
       }
     }
     return;

@@ -122,15 +122,12 @@ function isRiverish(t: Tile | undefined) {
   return !!t && (t.biome === "river" || t.biome === "ford");
 }
 
-/** 2 клетки кругом. Гора рядом или своя башня — дальше. */
+/** 2 клетки кругом. Дальше — только стоя на горе / жиле или в своей башне. */
 export function sightRadius(world: World, px: number, py: number): number {
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      const t = tileOf(world, px + dx, py + dy);
-      if (!t) continue;
-      if (t.biome === "mountain" || t.building === "tower") return FOG_R_HIGH;
-    }
-  }
+  const here = tileOf(world, px, py);
+  if (!here) return FOG_R;
+  if (here.biome === "mountain" || here.biome === "ore") return FOG_R_HIGH;
+  if (here.building === "tower" && (!here.owner || here.owner === "you")) return FOG_R_HIGH;
   return FOG_R;
 }
 

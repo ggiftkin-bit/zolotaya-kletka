@@ -3,7 +3,7 @@ import { BAG_CELLS, CAPACITY, GAME_VERSION, ITEM_LABEL, ITEM_WEIGHT, ITEMS, TICK
 import { BUILDING_LABEL, CART_GOLD, CART_WOOD, goldTxt } from "@/game/economy";
 import { EAT_ORDER, EAT_SAT } from "@/game/craft";
 import { nextGoal } from "@/game/goal";
-import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, HIRE_GOLD, SKIP_GOLD, deathFee, formatWait, nextEnergyIn, regenPaused } from "@/game/pace";
+import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, SKIP_GOLD, deathFee, formatWait, nextEnergyIn, regenPaused } from "@/game/pace";
 import { isHeld, isJailed, isStill, isYours } from "@/game/crime";
 import { TOOL_ITEMS } from "@/game/life";
 import { BUSY_LABEL, isRoof, isWearId, remainingWear, type WearId } from "@/game/work";
@@ -254,7 +254,7 @@ export function Hud() {
             залог {goldTxt(BAIL_GOLD)}
           </button>
         )}
-        {(jailed || down || dead || still || busy || goal || g.hint) && (
+        {(jailed || down || dead || still || ((goal || g.hint) && !busy && !g.travel)) && (
           <p className="pointer-events-none mx-auto mt-1 max-w-lg line-clamp-2 rounded-xl bg-table/75 px-2 py-1 text-center text-xs leading-snug text-panel">
           {dead
             ? `Погиб. Выйдешь дома через ${formatWait(Math.max(0, g.character.deadUntil - now))}`
@@ -266,8 +266,6 @@ export function Hud() {
             ? `Яма${g.character.jailWhy ? ` · ${g.character.jailWhy}` : ""}. Залог ${goldTxt(BAIL_GOLD)}. Ещё ${formatWait(g.character.jailedUntil - now)}`
             : still
               ? `Сутки без хода · ${formatWait(g.character.stillUntil - now)}`
-            : busy
-              ? `${BUSY_LABEL[busy.kind]} ещё ${formatWait(busy.until - now)}`
               : g.hint
                 ? g.hint.text
               : goal}
@@ -333,23 +331,23 @@ export function Hud() {
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 p-2 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
           <div className="pointer-events-auto mx-auto max-w-lg">
             {busy && !bag && !help && !food && (
-              <div className="mb-1.5 flex gap-1">
+              <div className="mb-1.5 flex min-w-0 gap-1">
+                <p className="flex h-11 min-w-0 flex-1 items-center truncate rounded-[16px] border border-border bg-panel px-3 text-[13px] shadow-panel">
+                  <span className="min-w-0 truncate">{BUSY_LABEL[busy.kind]} {formatWait(busy.until - now)}</span>
+                </p>
                 <button
                   type="button"
                   onClick={() => g.skipBusy()}
-                  className="flex h-11 flex-1 items-center justify-between rounded-[16px] border border-border bg-panel px-3 text-[13px] shadow-panel"
+                  className="h-11 shrink-0 rounded-[16px] border border-border bg-panel px-3 text-[13px] font-display shadow-panel"
                 >
-                  <span>
-                    {BUSY_LABEL[busy.kind]} {formatWait(busy.until - now)}
-                  </span>
-                  <span className="font-display">ускорить {goldTxt(SKIP_GOLD)}</span>
+                  ускорить {goldTxt(SKIP_GOLD)}
                 </button>
                 <button
                   type="button"
                   onClick={() => g.hireBusy()}
                   className="h-11 shrink-0 rounded-[16px] border border-border bg-panel px-3 text-[13px] shadow-panel"
                 >
-                  руки {goldTxt(HIRE_GOLD)}
+                  руки
                 </button>
                 <button
                   type="button"
