@@ -26,9 +26,23 @@ const BIOME_FILL: Record<Biome, string> = {
 const BANK = 12;
 const SAND = "#d2bc86";
 const SAND_WET = "#b89568";
+const YARD_STONE = "#7a7064";
+const STREET_STONE = "#a3947c";
 
 function isWater(t: Tile | null | undefined): boolean {
   return !!t && (t.biome === "river" || t.biome === "ford");
+}
+
+function isFieldFloor(t: Tile): boolean {
+  return t.building === "field" || (t.biome === "fertile" && (t.amount > 0 || t.plot));
+}
+
+function isYardPave(t: Tile): boolean {
+  return !!t.plot && !isFieldFloor(t) && !t.pit && !isWater(t);
+}
+
+function isStreetPave(t: Tile): boolean {
+  return !!t.commons && !t.plot && !t.pit && !isWater(t) && t.building !== "field";
 }
 
 function hash01(x: number, y: number, s: number): number {
@@ -698,6 +712,57 @@ function paintWaterShade(ctx: CanvasRenderingContext2D, tile: Tile, world: World
   if (isWater(n.e)) ctx.fillRect(x + TILE - 3, y, 3, TILE);
 }
 
+function paintFieldEarth(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  ctx.fillStyle = "#8a623c";
+  ctx.fillRect(x, y, TILE, TILE);
+  ctx.fillStyle = "#9a7048";
+  ctx.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
+  ctx.fillStyle = "rgba(58, 40, 24, 0.28)";
+  ctx.fillRect(x + 3, y + 8, TILE - 6, 3);
+  ctx.fillRect(x + 4, y + 18, TILE - 8, 3);
+  ctx.fillRect(x + 3, y + 28, TILE - 6, 3);
+}
+
+function paintCobbles(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number, street: boolean) {
+  ctx.fillStyle = street ? STREET_STONE : YARD_STONE;
+  ctx.fillRect(x, y, TILE, TILE);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, TILE, TILE);
+  ctx.clip();
+  let yy = y;
+  for (let r = 0; r < 3; r++) {
+    const rowH = r === 2 ? y + TILE - yy : 13 + hash01(tile.x, tile.y, 7 + r) * 3.5;
+    const stagger = (r % 2) * (7 + hash01(tile.x, tile.y, 3 + r) * 6);
+    let xx = x - stagger;
+    let k = 0;
+    while (xx < x + TILE + 2) {
+      const w = 12 + hash01(tile.x, tile.y, 20 + r * 8 + k) * 8;
+      const tone = hash01(tile.x, tile.y, 40 + r * 8 + k);
+      if (street) {
+        ctx.fillStyle = tone < 0.34 ? "#b7a68c" : tone < 0.67 ? "#c6b498" : "#a89074";
+      } else {
+        ctx.fillStyle = tone < 0.34 ? "#8c8274" : tone < 0.67 ? "#9c9182" : "#74685c";
+      }
+      ctx.fillRect(xx + 0.7, yy + 0.7, w - 1.4, rowH - 1.4);
+      xx += w;
+      k += 1;
+    }
+    yy += rowH;
+  }
+  ctx.fillStyle = "rgba(239, 230, 214, 0.28)";
+  const chips = 1 + (hash01(tile.x, tile.y, 9) > 0.5 ? 1 : 0);
+  for (let i = 0; i < chips; i++) {
+    ctx.fillRect(
+      x + 7 + hash01(tile.x, tile.y, 50 + i) * 28,
+      y + 8 + hash01(tile.x, tile.y, 60 + i) * 26,
+      2.6,
+      2,
+    );
+  }
+  ctx.restore();
+}
+
 function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, world: World) {
   const x = tile.x * TILE;
   const y = tile.y * TILE;
@@ -710,16 +775,14 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
         ? "plains"
         : tile.biome;
   const art = getArt();
-  if (tile.commons) {
-    ctx.fillStyle = "#c2ad7e";
-    ctx.fillRect(x, y, TILE, TILE);
-    ctx.fillStyle = "rgba(90, 70, 40, 0.16)";
-    ctx.fillRect(x + 4, y + 10, TILE - 8, 6);
-    ctx.fillRect(x + 8, y + 22, TILE - 16, 5);
-    ctx.fillStyle = "rgba(70, 56, 36, 0.18)";
-    ctx.fillRect(x + 12, y + 30, 10, 4);
-  } else if (isWater(tile)) {
+  if (isWater(tile)) {
     paintRiverGround(ctx, tile, world, x, y, art);
+  } else if (isYardPave(tile)) {
+    paintCobbles(ctx, tile, x, y, false);
+  } else if (isStreetPave(tile)) {
+    paintCobbles(ctx, tile, x, y, true);
+  } else if (tile.plot && isFieldFloor(tile)) {
+    paintFieldEarth(ctx, x, y);
   } else if (lushForest) {
     paintForestGround(ctx, tile, world, x, y, art);
   } else {
@@ -739,8 +802,10 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
   if (tile.pit) paintPit(ctx, tile, world, x, y);
 
   if (tile.village) {
-    ctx.fillStyle = "rgba(70, 90, 110, 0.2)";
-    ctx.fillRect(x, y, TILE, TILE);
+    if (!isYardPave(tile) && !isStreetPave(tile)) {
+      ctx.fillStyle = "rgba(70, 90, 110, 0.2)";
+      ctx.fillRect(x, y, TILE, TILE);
+    }
     ctx.strokeStyle = "rgba(40, 55, 70, 0.55)";
     ctx.lineWidth = 2;
     const n = tileAt(world, tile.x, tile.y - 1);
@@ -765,9 +830,6 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
       ctx.lineTo(x + TILE - 1, y + TILE);
     }
     ctx.stroke();
-  } else if (tile.plot) {
-    ctx.fillStyle = "rgba(90, 70, 40, 0.14)";
-    ctx.fillRect(x, y, TILE, TILE);
   }
 
   if (tile.road !== "none") paintRoad(ctx, tile, world, x, y);
@@ -1160,7 +1222,7 @@ function paintPit(ctx: CanvasRenderingContext2D, tile: Tile, world: World, x: nu
 }
 
 function paintHerb(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number) {
-  if (tile.building !== "none" || tile.caravan || tile.commons) return;
+  if (tile.building !== "none" || tile.caravan || tile.commons || tile.plot) return;
   const has = tile.resource === "herb" && tile.amount > 0;
   const meadow = tile.biome === "plains" && !tile.commons;
   if (meadow && has) {
@@ -1279,6 +1341,8 @@ function drawMinimap(
       const t = tileAt(g.world, x, y);
       if (!t) continue;
       ctx.fillStyle = BIOME_FILL[t.biome === "forest" && t.amount < 4 ? "plains" : t.biome];
+      if (t.plot && t.building !== "field" && !t.pit && t.biome !== "river" && t.biome !== "ford") ctx.fillStyle = "#8a7d64";
+      else if (t.commons && !t.plot && t.biome !== "river") ctx.fillStyle = "#b09e82";
       if (fog === FOG_MEM) ctx.fillStyle = "#3a3228";
       if (t.bank && !t.pit) ctx.fillStyle = "#c9b06a";
       if (t.pit) ctx.fillStyle = "#3a3228";
