@@ -90,7 +90,7 @@ import type {
   Trader,
   Weather,
 } from "./types";
-import { chebyshev, dummyAt, dummyHome, gearSlot, leaveChance, makeHamletDummies, strikeDmg, talkChance, youFighter } from "./fight";
+import { chebyshev, dummyHome, foeById, gearSlot, leaveChance, makeHamletDummies, occupantAt, strikeDmg, talkChance, youFighter } from "./fight";
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, allDarkFog, fogAt, maskLiveFog } from "./book";
@@ -342,11 +342,16 @@ function meetBlock(): boolean {
   return true;
 }
 
+let meetIgnore = "";
+
 function maybeMeetHere(x: number, y: number) {
   const s = useGame.getState();
   if (s.meet) return;
-  const d = dummyAt(s.dummies ?? [], x, y);
-  if (d && d.life === "alive") startMeet(d.id);
+  const d = occupantAt(s.dummies ?? [], s.others ?? [], x, y);
+  if (!d || d.life !== "alive") return;
+  if (meetIgnore === `${x},${y},${d.id}`) return;
+  if (meetWhy(s, d)) return;
+  startMeet(d.id);
 }
 
 function busyBlock(): boolean {
@@ -450,7 +455,7 @@ type Actions = {
   setSeason: (s: Season) => void;
   setTimeScale: (n: number) => void;
   setProfession: (p: Profession) => void;
-  eat: () => void;
+  eat: (item: ItemId) => void;
   sellToCaravan: (item: ItemId, qty: number) => void;
   takeJob: (id: string) => void;
   grant: (kind: "wood" | "stone" | "cart" | "horse" | "gold" | "wagon" | "lock") => void;
@@ -940,11 +945,10 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     });
   },
 
-  eat: () => {
+  eat: (item) => {
     const s = get();
     const inv = { ...s.character.inventory };
-    const foodItem = EAT_ORDER.find((k) => inv[k] > 0);
-    if (!foodItem) {
+    if (!EAT_ORDER.includes(item) || (inv[item] ?? 0) <= 0) {
       speak("Еды нет.", s.character.x, s.character.y, "еды нет", "bad");
       return;
     }
@@ -952,12 +956,12 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       speak("Сыт. Сила капает сама, еда её не копирует.", s.character.x, s.character.y, "сыт", "ok");
       return;
     }
-    inv[foodItem] -= 1;
-    const bonus = s.character.profession === "baker" && foodItem === "bread" ? 8 : 0;
-    const satiety = Math.min(100, s.character.satiety + (EAT_SAT[foodItem] ?? 14) + bonus);
+    inv[item] -= 1;
+    const bonus = s.character.profession === "baker" && item === "bread" ? 8 : 0;
+    const satiety = Math.min(100, s.character.satiety + (EAT_SAT[item] ?? 14) + bonus);
     set({
       character: { ...s.character, inventory: inv, satiety },
-      log: pushLog(s.log, `Съел. Сытость ${Math.round(satiety)}. Сила сама капает — еда её не копирует.`),
+      log: pushLog(s.log, `Съел ${ITEM_LABEL[item]}. Сытость ${Math.round(satiety)}. Сила сама капает — еда её не копирует.`),
       floaters: [
         ...s.floaters,
         { id: ++floaterSeq, x: s.character.x, y: s.character.y, text: "+сытость", tone: "ok" as const },
@@ -1328,6 +1332,12 @@ function catchUpSim(dt: number) {
   }
   useGame.setState({ clockAt: now });
   advanceTravel(now);
+  const here = useGame.getState();
+  if (meetIgnore) {
+    const [ix, iy] = meetIgnore.split(",");
+    if (`${here.character.x}` !== ix || `${here.character.y}` !== iy) meetIgnore = "";
+  }
+  if (!here.meet) maybeMeetHere(here.character.x, here.character.y);
 }
 
 function advanceTravel(now: number) {
@@ -1384,6 +1394,23 @@ function advanceTravel(now: number) {
         ...useGame.getState().floaters,
         { id: ++floaterSeq, x, y, text: "пришёл", tone: "ok" as const },
       ].slice(-10),
+    });
+    void pullSpot();
+    queueMicrotask(() => maybeMeetHere(x, y));
+    return;
+  }
+  const occ = occupantAt(s.dummies ?? [], s.others ?? [], x, y);
+  if (stepped && occ && occ.life === "alive") {
+    viewPos.x = x;
+    viewPos.y = y;
+    const c = useGame.getState().character;
+    cancelNotice("walk");
+    useGame.setState({
+      character: { ...c, x, y, px: x, py: y, energy, satiety, water },
+      travel: null,
+      preview: null,
+      selected: { x, y },
+      inspect: null,
     });
     void pullSpot();
     queueMicrotask(() => maybeMeetHere(x, y));
@@ -4399,7 +4426,7 @@ function fillPitHere() {
 
 function foeOf(s: GameState) {
   if (!s.meet) return null;
-  return s.dummies.find((d) => d.id === s.meet!.foeId) ?? null;
+  return foeById(s.dummies ?? [], s.others ?? [], s.meet.foeId);
 }
 
 function meetWhy(s: GameState, foe: Dummy): string | null {
@@ -4438,7 +4465,7 @@ function yardFlags(s: GameState, x: number, y: number, who: string) {
 
 function startMeet(foeId: string) {
   const s = useGame.getState();
-  const foe = s.dummies.find((d) => d.id === foeId);
+  const foe = foeById(s.dummies ?? [], s.others ?? [], foeId);
   if (!foe) {
     speak("Никого.", s.character.x, s.character.y, "пусто", "bad");
     return;
@@ -4448,9 +4475,10 @@ function startMeet(foeId: string) {
     speak(why, foe.x, foe.y, "нельзя", "bad");
     return;
   }
+  cancelNotice("walk");
   useGame.setState({
-    meet: { foeId, turn: "you", steps: 0, spoke: false, firstDone: false },
-    inspect: { x: foe.x, y: foe.y },
+    meet: { foeId, turn: "you", steps: 0, spoke: false, firstDone: false, live: !foe.dummy },
+    inspect: null,
     travel: null,
     preview: null,
     log: pushLog(s.log, `Встреча с ${foe.name}. Один шаг — один выбор.`),
@@ -4460,8 +4488,16 @@ function startMeet(foeId: string) {
 }
 
 function closeMeet(extra?: Partial<GameState>) {
+  noteMeetClosed();
   useGame.setState({ meet: null, ...extra });
   useGame.getState().persist();
+}
+
+function noteMeetClosed() {
+  const s = useGame.getState();
+  if (!s.meet) return;
+  const foe = foeById(s.dummies ?? [], s.others ?? [], s.meet.foeId);
+  if (foe && foe.x === s.character.x && foe.y === s.character.y) meetIgnore = `${foe.x},${foe.y},${foe.id}`;
 }
 
 function applyDummy(dummies: Dummy[], next: Dummy): Dummy[] {
@@ -4505,6 +4541,18 @@ function meetHit() {
   if (hit.sneak) c = bumpSkill(c, "stealth", 0.08);
   if (c.pacts[foe.id] === "friend") {
     c = { ...c, pacts: { ...c.pacts, [foe.id]: "feud" } };
+  }
+  const live = !!(s.meet.live || !foe.dummy);
+  if (live) {
+    useGame.setState({
+      character: c,
+      meet: { ...s.meet, firstDone: true, steps: s.meet.steps + 1, live: true },
+      log: pushLog(s.log, `Ударил ${foe.name}. Ждёт его шага. Можно отойти.`),
+      hint: { text: `Удар. ${foe.name} стоит.`, tone: "ok" },
+      floaters: [...s.floaters, { id: ++floaterSeq, x: foe.x, y: foe.y, text: "удар", tone: "ok" as const }].slice(-10),
+    });
+    useGame.getState().persist();
+    return;
   }
   const tile = tileAt(s.world, foe.x, foe.y);
   const lawNow = tile ? hasLaw(s.world, tile) && isForeignYard(tile) : false;
@@ -4573,6 +4621,7 @@ function meetHit() {
 function dummyAnswer() {
   const s = useGame.getState();
   if (!s.meet || s.meet.turn !== "foe") return;
+  if (s.meet.live) return;
   const foe = foeOf(s);
   if (!foe || foe.life !== "alive") {
     closeMeet();
@@ -4689,7 +4738,8 @@ function meetLeave() {
     return;
   }
   const c0 = { ...s.character, energy: Math.max(0, s.character.energy - 1) };
-  if (s.phase === "night" && Math.random() > leaveChance(true, c0.skills.stealth ?? 0)) {
+  const live = !!(s.meet.live || !foe.dummy);
+  if (!live && s.phase === "night" && Math.random() > leaveChance(true, c0.skills.stealth ?? 0)) {
     useGame.setState({
       character: c0,
       meet: { ...s.meet, turn: "foe", steps: s.meet.steps + 1, firstDone: true },
@@ -4728,6 +4778,7 @@ function meetDrop() {
   }
   const tile = tileAt(s.world, s.character.x, s.character.y);
   if (!tile) return;
+  noteMeetClosed();
   const c = dumpBagKeepHand(s.character, tile);
   useGame.setState({
     character: c,
@@ -4784,16 +4835,31 @@ function meetTalk() {
     speak("Говорить — красноречие 3 или друг.", s.character.x, s.character.y, "молчит", "bad");
     return;
   }
+  const live = !!(s.meet.live || !foe.dummy);
   const you = youFighter(s.character);
   const ok = Math.random() < talkChance(you, s.character.profession === "trader") || friend;
   if (!ok) {
     useGame.setState({
-      meet: { ...s.meet, turn: "foe", spoke: true, firstDone: true, steps: s.meet.steps + 1 },
+      meet: live
+        ? { ...s.meet, spoke: true, firstDone: true, steps: s.meet.steps + 1, live: true }
+        : { ...s.meet, turn: "foe", spoke: true, firstDone: true, steps: s.meet.steps + 1 },
       log: pushLog(s.log, `${foe.name} не отдал. Молчание.`),
       hint: { text: "Не вышло.", tone: "bad" },
     });
     useGame.getState().persist();
-    window.setTimeout(() => dummyAnswer(), 420);
+    if (!live) window.setTimeout(() => dummyAnswer(), 420);
+    return;
+  }
+  if (live) {
+    const c = bumpSkill(s.character, "speech", 0.2);
+    noteMeetClosed();
+    useGame.setState({
+      character: c,
+      meet: null,
+      log: pushLog(s.log, `Поговорил с ${foe.name}. Сумки свои.`),
+      hint: { text: "Разошлись. Сумки свои.", tone: "ok" },
+    });
+    useGame.getState().persist();
     return;
   }
   const tile = tileAt(s.world, foe.x, foe.y);

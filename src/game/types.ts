@@ -317,6 +317,8 @@ export type Meet = {
   steps: number;
   spoke: boolean;
   firstDone: boolean;
+  /** Живой человек, не манекен. Пока нет его шага по сети — не бьёт в ответ. */
+  live?: boolean;
 };
 
 export type Dummy = {
@@ -337,7 +339,7 @@ export type Dummy = {
   profession: Profession;
   skills: Skills;
   life: "alive" | "down";
-  dummy: true;
+  dummy: boolean;
   downAt: number;
   inventory: Partial<Inventory>;
 };

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { BAG_CELLS, CAPACITY, ITEM_LABEL, ITEMS, TICK_SEC, TICKS_PER_DAY, TRANSPORT_LABEL, WEATHER_LABEL } from "@/game/constants";
 import { BUILDING_LABEL, PROFESSION_LABEL, SKILL_LABEL, goldTxt } from "@/game/economy";
-import { PROF_BLURB } from "@/game/craft";
+import { PROF_BLURB, EAT_ORDER, EAT_SAT } from "@/game/craft";
 import { nextGoal, personLevel, skillHow } from "@/game/goal";
 import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, HIRE_GOLD, SKIP_GOLD, deathFee, formatWait, nextEnergyIn, regenPaused } from "@/game/pace";
 import { isHeld, isJailed, isStill, isYours } from "@/game/crime";
@@ -10,7 +10,7 @@ import { BUSY_LABEL, isRoof, isWearId, remainingWear, type WearId } from "@/game
 import { useGame } from "@/game/store";
 import { pawnKg } from "@/game/travel";
 import { asPile, pileEmpty, pileLabel } from "@/game/pile";
-import { gearSlot } from "@/game/fight";
+import { foeById, gearSlot } from "@/game/fight";
 import type { BuildingKind, ItemId, Profession, Skill, ToolMode, Weather } from "@/game/types";
 import { tileAt } from "@/game/worldgen";
 import { Button } from "@/components/ui/button";
@@ -40,12 +40,6 @@ const BUILDINGS: Exclude<BuildingKind, "none" | "workshop" | "shop" | "board" | 
   "adit",
   "stakes",
   "moat",
-];
-
-const MODES: { id: ToolMode; label: string; ico: number }[] = [
-  { id: "move", label: "Стой", ico: ICO.boots },
-  { id: "gather", label: "Сбор", ico: ICO.gather },
-  { id: "claim", label: "Двор", ico: ICO.stake },
 ];
 
 const HINT: Partial<Record<ToolMode, string>> = {
@@ -81,6 +75,7 @@ export function Hud() {
   const [bookTab, setBookTab] = useState<BookTab>("table");
   const [power, setPower] = useState(false);
   const [vitals, setVitals] = useState<"hp" | "water" | null>(null);
+  const [food, setFood] = useState(false);
   const [askJob, setAskJob] = useState<Profession | null>(null);
   const [cell, setCell] = useState<ItemId | null>("food");
   const [now, setNow] = useState(() => Date.now());
@@ -119,6 +114,7 @@ export function Hud() {
       setHelp(false);
       setPower(false);
       setVitals(null);
+      setFood(false);
     }
   }, [g.inspect]);
 
@@ -141,6 +137,7 @@ export function Hud() {
     setPower(false);
     setVitals(null);
     setAskJob(null);
+    setFood(false);
     if (bag && tab === next) {
       setBag(false);
       return;
@@ -153,14 +150,24 @@ export function Hud() {
     g.closeInspect();
     setBag(false);
     setPower(false);
+    setFood(false);
     setHelp((v) => !v);
+  };
+
+  const openFood = () => {
+    g.closeInspect();
+    setBag(false);
+    setHelp(false);
+    setPower(false);
+    setVitals(null);
+    setFood((v) => !v);
   };
 
   return (
     <>
       <Floaters />
       {g.meet && <MeetSheet />}
-      {!g.meet && !bag && !help && <TileBubble />}
+      {!g.meet && !bag && !help && !food && <TileBubble />}
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-50 px-2 pt-[max(0.4rem,env(safe-area-inset-top))]">
         <div className="pointer-events-auto mx-auto flex max-w-lg items-stretch gap-1">
@@ -183,7 +190,7 @@ export function Hud() {
             value={Math.round(g.character.satiety)}
             label="сытость"
             warn={hungry}
-            onClick={() => g.eat()}
+            onClick={() => openFood()}
           />
           <Chip
             ico={ICO.house}
@@ -316,7 +323,7 @@ export function Hud() {
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 p-2 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
           <div className="pointer-events-auto mx-auto max-w-lg">
-            {busy && !bag && !help && (
+            {busy && !bag && !help && !food && (
               <div className="mb-1.5 flex gap-1">
                 <button
                   type="button"
@@ -344,7 +351,7 @@ export function Hud() {
                 </button>
               </div>
             )}
-          {g.travel && !bag && !help && !held && (
+          {g.travel && !bag && !help && !food && !held && (
               <button
                 type="button"
                 onClick={() => g.skipTravel()}
@@ -408,45 +415,27 @@ export function Hud() {
               <p className="mb-1 text-center text-[11px] text-panel/90">{HINT[g.tool]}</p>
             )}
             <div className="flex gap-1 rounded-[20px] border border-border bg-panel p-1 shadow-panel">
-              {MODES.map((m) => {
-                const on = g.tool === m.id;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => {
-                      if (bag || help) {
-                        setBag(false);
-                        setHelp(false);
-                      }
-                      if (m.id === "move") {
-                        g.stopWalk();
-                        g.setTool("move");
-                        return;
-                      }
-                      g.setTool(on ? "move" : m.id);
-                    }}
-                    className={cn(
-                      "flex h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[14px]",
-                      m.id === "move"
-                        ? g.travel
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground"
-                        : on
-                          ? "bg-accent text-accent-foreground"
-                          : "text-foreground",
-                    )}
-                  >
-                    <Ico i={m.ico} className="size-7 overflow-hidden rounded-md" alt="" />
-                    <span className="text-[10px] font-medium leading-none">{m.label}</span>
-                  </button>
-                );
-              })}
+              {g.travel || busy ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (g.travel) g.stopWalk();
+                    else if (busy) g.cancelBusy();
+                  }}
+                  className="flex h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[14px] bg-accent text-accent-foreground"
+                >
+                  <Ico i={ICO.boots} className="size-7 overflow-hidden rounded-md" alt="" />
+                  <span className="text-[10px] font-medium leading-none">Стоп</span>
+                </button>
+              ) : (
+                <div className="h-12 min-w-0 flex-1" aria-hidden />
+              )}
               <button
                 type="button"
                 onClick={() => {
                   setBag(false);
                   setHelp(false);
+                  setFood(false);
                   g.focusMe();
                 }}
                 className="flex h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[14px] text-foreground"
@@ -456,8 +445,11 @@ export function Hud() {
               </button>
               <button
                 type="button"
-                onClick={() => g.eat()}
-                className="flex h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[14px] text-foreground"
+                onClick={() => openFood()}
+                className={cn(
+                  "flex h-12 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[14px]",
+                  food ? "bg-accent text-accent-foreground" : "text-foreground",
+                )}
               >
                 <Ico i={ICO.eat} className="size-7 overflow-hidden rounded-md" alt="" />
                 <span className="text-[10px] font-medium leading-none">Съесть</span>
@@ -477,6 +469,47 @@ export function Hud() {
           </div>
         </div>
 
+      {food && (
+        <div className="absolute inset-0 z-40 bg-table/50" onClick={() => setFood(false)} role="presentation">
+          <div
+            className="absolute inset-x-0 bottom-[var(--hud-dock)] mx-auto max-w-lg overflow-y-auto rounded-t-[24px] border border-border bg-panel px-4 pb-4 pt-3 shadow-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" />
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="font-display text-2xl leading-none">Еда</p>
+              <button type="button" className="size-11 text-xl text-muted-foreground" onClick={() => setFood(false)}>
+                ×
+              </button>
+            </div>
+            <p className="mt-1 text-[13px] text-muted-foreground">Сытость. Силу еда не копирует.</p>
+            <div className="mt-3 flex flex-col gap-2">
+              {EAT_ORDER.filter((k) => (inv[k] ?? 0) > 0).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  className="flex h-14 items-center gap-3 rounded-[16px] border border-border bg-raised px-3 text-left"
+                  onClick={() => {
+                    g.eat(k);
+                    setFood(false);
+                  }}
+                >
+                  <ItemPic id={k} className="size-10 overflow-hidden rounded-md" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-display text-xl leading-none">{ITEM_LABEL[k]}</span>
+                    <span className="mt-0.5 block text-[12px] text-muted-foreground">
+                      ×{inv[k]} · сытость +{EAT_SAT[k] ?? 14}
+                    </span>
+                  </span>
+                </button>
+              ))}
+              {EAT_ORDER.every((k) => (inv[k] ?? 0) <= 0) && (
+                <p className="rounded-[14px] bg-raised px-3 py-3 text-sm text-muted-foreground">Еды нет</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {help && (
         <div className="absolute inset-0 z-40 bg-table/50" onClick={() => setHelp(false)} role="presentation">
           <div
@@ -918,10 +951,11 @@ function MeetSheet() {
   const g = useGame();
   const meet = g.meet;
   if (!meet) return null;
-  const foe = g.dummies.find((d) => d.id === meet.foeId);
+  const foe = foeById(g.dummies ?? [], g.others ?? [], meet.foeId);
   if (!foe) return null;
   const you = g.character;
   const mine = meet.turn === "you";
+  const live = !!(meet.live || !foe.dummy);
   const friend = you.pacts[foe.id] === "friend";
   const canTalk = !meet.spoke && ((you.skills.speech ?? 0) >= 3 || friend);
   return (
@@ -935,7 +969,7 @@ function MeetSheet() {
         <p className="mt-1 text-[13px] text-muted-foreground">
           {foe.name}
           {friend ? " · друг" : you.pacts[foe.id] === "feud" ? " · вражда" : ""}
-          {foe.dummy ? " · манекен хутора" : ""}
+          {live ? " · человек" : foe.dummy ? " · манекен хутора" : ""}
         </p>
         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
           <p>
@@ -946,7 +980,7 @@ function MeetSheet() {
           </p>
         </div>
         <p className="mt-1 text-[12px] text-muted-foreground">
-          {mine ? "Твой шаг." : "Ждёт ответа."} Сила {Math.floor(you.energy)} · в руке{" "}
+          {mine ? (live && meet.firstDone ? "Удар прошёл. Ждёт его шага." : "Твой шаг.") : "Ждёт ответа."} Сила {Math.floor(you.energy)} · в руке{" "}
           {you.hand ? ITEM_LABEL[you.hand] : "пусто"}
           {you.body ? ` · ${ITEM_LABEL[you.body]}` : ""}
           {you.shield ? ` · ${ITEM_LABEL[you.shield]}` : ""}

@@ -3,7 +3,7 @@ import { LIFE_INDEX, biomeIndex, drawAtlas, ensureArt, getArt, propIndex } from 
 import { isWatered } from "@/game/life";
 import { isWooded } from "@/game/grow";
 import { FENCE_STR, normRect } from "@/game/fence";
-import { TILE } from "@/game/constants";
+import { TILE, MEEPLE_COLORS } from "@/game/constants";
 import { cam as viewCam, look } from "@/game/cam";
 import { useGame } from "@/game/store";
 import type { Biome, Tile, World } from "@/game/types";
@@ -334,7 +334,9 @@ function draw(
     ctx.strokeRect(g.hover.x * TILE + 5, g.hover.y * TILE + 5, TILE - 10, TILE - 10);
   }
 
-  const share = (g.dummies ?? []).some((d) => d.x === g.character.x && d.y === g.character.y);
+  const share =
+    (g.dummies ?? []).some((d) => d.x === g.character.x && d.y === g.character.y) ||
+    (g.others ?? []).some((o) => o.x === g.character.x && o.y === g.character.y);
   const mx = viewPos.x * TILE + TILE / 2 + (share ? -TILE * 0.22 : 0);
   const my = viewPos.y * TILE + TILE / 2;
   if (g.character.wagon || g.character.transport === "wagon") {
@@ -345,9 +347,9 @@ function draw(
   ctx.ellipse(mx, my + 11, 9, 4, 0, 0, Math.PI * 2);
   ctx.fill();
   const art = getArt();
+  const frame = Math.floor(performance.now() / 280) % 4;
   if (art) {
-    const frame = Math.floor(performance.now() / 280) % 4;
-    drawAtlas(ctx, art.meeple, 2, 2, frame, mx - 16, my - 26, 32, 36, 0.08);
+    paintMeeple(ctx, art.meeple, mx - 16, my - 26, 32, 36, frame);
   } else {
     ctx.fillStyle = g.character.color;
     ctx.beginPath();
@@ -359,21 +361,32 @@ function draw(
   }
 
   for (const o of g.others ?? []) {
-    if (o.x === g.character.x && o.y === g.character.y) continue;
     if (fogAt(g.world, o.x, o.y) !== 2) continue;
-    const ox = o.x * TILE + TILE / 2;
-    const oy = o.y * TILE + TILE / 2;
+    const same = o.x === g.character.x && o.y === g.character.y;
+    const ox = o.x * TILE + TILE / 2 + (same ? TILE * 0.42 : 0);
+    const oy = o.y * TILE + TILE / 2 + (same ? -TILE * 0.18 : 0);
     ctx.fillStyle = "rgba(28,22,18,0.22)";
     ctx.beginPath();
     ctx.ellipse(ox, oy + 11, 9, 4, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = o.color || "#6b3a2a";
-    ctx.beginPath();
-    ctx.arc(ox, oy - 2, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "#efe6d6";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+    const tint = o.color && o.color !== g.character.color ? o.color : MEEPLE_COLORS[1]!;
+    if (art) {
+      paintMeeple(ctx, art.meeple, ox - 16, oy - 26, 32, 36, frame, tint);
+    } else {
+      ctx.fillStyle = tint;
+      ctx.beginPath();
+      ctx.arc(ox, oy - 2, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#efe6d6";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.font = "600 9px Manrope, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#1c1612";
+    ctx.fillText(o.name, ox + 0.5, oy + 18.5);
+    ctx.fillStyle = "#efe6d6";
+    ctx.fillText(o.name, ox, oy + 18);
   }
 
   for (const d of g.dummies ?? []) {
@@ -386,13 +399,17 @@ function draw(
     ctx.beginPath();
     ctx.ellipse(ox, oy + 11, 9, 4, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = d.color || "#6b3a2a";
-    ctx.beginPath();
-    ctx.arc(ox, oy - 2, d.life === "down" ? 7 : 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "#efe6d6";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+    if (art) {
+      paintMeeple(ctx, art.meeple, ox - 16, oy - 26, 32, 36, frame, d.color);
+    } else {
+      ctx.fillStyle = d.color || "#6b3a2a";
+      ctx.beginPath();
+      ctx.arc(ox, oy - 2, d.life === "down" ? 7 : 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#efe6d6";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -633,6 +650,43 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
     ctx.fillStyle = `rgba(20,16,14,${night})`;
     ctx.fillRect(x, y, TILE, TILE);
   }
+}
+
+let meepleTint: HTMLCanvasElement | null = null;
+
+function paintMeeple(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  dx: number,
+  dy: number,
+  dw: number,
+  dh: number,
+  frame: number,
+  tint?: string,
+) {
+  if (!tint) {
+    drawAtlas(ctx, img, 2, 2, frame, dx, dy, dw, dh, 0.08);
+    return;
+  }
+  if (!meepleTint) meepleTint = document.createElement("canvas");
+  const w = Math.max(1, Math.ceil(dw));
+  const h = Math.max(1, Math.ceil(dh));
+  if (meepleTint.width !== w) meepleTint.width = w;
+  if (meepleTint.height !== h) meepleTint.height = h;
+  const t = meepleTint.getContext("2d");
+  if (!t) {
+    drawAtlas(ctx, img, 2, 2, frame, dx, dy, dw, dh, 0.08);
+    return;
+  }
+  t.clearRect(0, 0, w, h);
+  drawAtlas(t, img, 2, 2, frame, 0, 0, dw, dh, 0.08);
+  t.globalCompositeOperation = "source-atop";
+  t.fillStyle = tint;
+  t.globalAlpha = 0.48;
+  t.fillRect(0, 0, w, h);
+  t.globalAlpha = 1;
+  t.globalCompositeOperation = "source-over";
+  ctx.drawImage(meepleTint, dx, dy);
 }
 
 function paintWagon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number) {

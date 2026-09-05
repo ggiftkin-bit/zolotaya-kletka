@@ -1,7 +1,7 @@
 import { ENERGY_MAX } from "./pace";
 import { HAMLETS } from "./pact";
 import { MEEPLE_COLORS } from "./constants";
-import type { Character, Dummy, ItemId, Profession, Skills, World } from "./types";
+import type { Character, Dummy, ItemId, OtherPawn, Profession, Skills, World } from "./types";
 
 export type Fighter = {
   id: string;
@@ -157,6 +157,45 @@ export function makeHamletDummies(world: World, prev?: Fighter[]): Dummy[] {
 
 export function dummyAt(dummies: Dummy[], x: number, y: number): Dummy | null {
   return dummies.find((d) => d.x === x && d.y === y) ?? null;
+}
+
+/** Живого на клетке рисуем тем же листом, что манекена. Здоровье книги не трогаем. */
+export function liveAsDummy(o: OtherPawn): Dummy {
+  return {
+    id: o.id,
+    name: o.name || "чужой",
+    color: o.color || MEEPLE_COLORS[0]!,
+    x: o.x,
+    y: o.y,
+    hp: 100,
+    energy: ENERGY_MAX,
+    satiety: 80,
+    warmth: 80,
+    water: 80,
+    hand: null,
+    body: null,
+    shield: null,
+    helm: null,
+    profession: "wanderer",
+    skills: zSkills(0, 0, 0),
+    life: "alive",
+    dummy: false,
+    downAt: 0,
+    inventory: {},
+  };
+}
+
+export function occupantAt(dummies: Dummy[], others: OtherPawn[], x: number, y: number): Dummy | null {
+  const o = others.find((p) => p.x === x && p.y === y);
+  if (o) return liveAsDummy(o);
+  return dummyAt(dummies, x, y);
+}
+
+export function foeById(dummies: Dummy[], others: OtherPawn[], id: string): Dummy | null {
+  const d = dummies.find((x) => x.id === id);
+  if (d) return d;
+  const o = others.find((p) => p.id === id);
+  return o ? liveAsDummy(o) : null;
 }
 
 export function gearSlot(id: ItemId): "body" | "shield" | "helm" | null {
