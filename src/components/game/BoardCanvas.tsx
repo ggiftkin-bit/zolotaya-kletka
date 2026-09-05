@@ -3,13 +3,13 @@ import { LIFE_INDEX, TILE_ATLAS_PAD, biomeIndex, drawAtlas, ensureArt, getArt, p
 import { isWatered } from "@/game/life";
 import { isWooded } from "@/game/grow";
 import { FENCE_STR, normRect } from "@/game/fence";
-import { TILE, MEEPLE_COLORS } from "@/game/constants";
+import { TILE, MEEPLE_COLORS, TICKS_PER_DAY } from "@/game/constants";
 import { cam as viewCam, look } from "@/game/cam";
 import { useGame } from "@/game/store";
 import type { Biome, Tile, World } from "@/game/types";
 import { viewPos } from "@/game/view-pos";
 import { tileAt } from "@/game/worldgen";
-import { FOG_DARK, FOG_MEM, fogAt } from "@/game/book";
+import { FOG_DARK, FOG_MEM, FOG_LIVE, fogAt } from "@/game/book";
 import { asPile, pileTotal } from "@/game/pile";
 
 const BIOME_FILL: Record<Biome, string> = {
@@ -57,6 +57,191 @@ function sides4(world: World, x: number, y: number) {
     s: tileAt(world, x, y + 1),
     w: tileAt(world, x - 1, y),
   };
+}
+
+type Light = {
+  sky: string;
+  warm: string;
+  grassA: number;
+  stoneA: number;
+  waterA: number;
+  woodA: number;
+  veil: string;
+  veilLive: number;
+  veilMem: number;
+  mem: string;
+  memA: number;
+  dusk: number;
+};
+
+function clamp01(n: number) {
+  return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+
+function lerp(a: number, b: number, u: number) {
+  return a + (b - a) * u;
+}
+
+function lerpRgb(a: string, b: string, u: number) {
+  const A = a.split(",").map(Number);
+  const B = b.split(",").map(Number);
+  return `${Math.round(lerp(A[0] ?? 0, B[0] ?? 0, u))},${Math.round(lerp(A[1] ?? 0, B[1] ?? 0, u))},${Math.round(lerp(A[2] ?? 0, B[2] ?? 0, u))}`;
+}
+
+function lightOf(tick: number): Light {
+  const t = ((tick % TICKS_PER_DAY) + TICKS_PER_DAY) % TICKS_PER_DAY;
+  if (t === 0) {
+    return {
+      sky: "38,22,20",
+      warm: "255,186,140",
+      grassA: 0.08,
+      stoneA: 0.07,
+      waterA: 0.07,
+      woodA: 0.07,
+      veil: "36,42,58",
+      veilLive: 0,
+      veilMem: 0,
+      mem: "72,42,40",
+      memA: 0.4,
+      dusk: 0.85,
+    };
+  }
+  if (t === 3) {
+    return {
+      sky: "40,20,18",
+      warm: "255,158,108",
+      grassA: 0.09,
+      stoneA: 0.08,
+      waterA: 0.06,
+      woodA: 0.08,
+      veil: "40,32,48",
+      veilLive: 0.05,
+      veilMem: 0.08,
+      mem: "70,38,36",
+      memA: 0.42,
+      dusk: 1,
+    };
+  }
+  if (t >= 4) {
+    const late = t === 7 ? 0.72 : 1;
+    return {
+      sky: "22,20,26",
+      warm: "255,200,150",
+      grassA: 0,
+      stoneA: 0,
+      waterA: 0,
+      woodA: 0,
+      veil: t === 7 ? "40,38,52" : "32,38,54",
+      veilLive: 0.16 * late,
+      veilMem: 0.34 * late,
+      mem: t === 7 ? "48,40,48" : "22,24,32",
+      memA: 0.46,
+      dusk: t === 7 ? 0.22 : 0,
+    };
+  }
+  return {
+    sky: "28,22,18",
+    warm: "255,216,140",
+    grassA: 0.07,
+    stoneA: 0.08,
+    waterA: 0.09,
+    woodA: 0.06,
+    veil: "32,38,54",
+    veilLive: 0,
+    veilMem: 0,
+    mem: "28,22,18",
+    memA: 0.5,
+    dusk: 0,
+  };
+}
+
+function mixLight(a: Light, b: Light, u: number): Light {
+  return {
+    sky: lerpRgb(a.sky, b.sky, u),
+    warm: lerpRgb(a.warm, b.warm, u),
+    grassA: lerp(a.grassA, b.grassA, u),
+    stoneA: lerp(a.stoneA, b.stoneA, u),
+    waterA: lerp(a.waterA, b.waterA, u),
+    woodA: lerp(a.woodA, b.woodA, u),
+    veil: lerpRgb(a.veil, b.veil, u),
+    veilLive: lerp(a.veilLive, b.veilLive, u),
+    veilMem: lerp(a.veilMem, b.veilMem, u),
+    mem: lerpRgb(a.mem, b.mem, u),
+    memA: lerp(a.memA, b.memA, u),
+    dusk: lerp(a.dusk, b.dusk, u),
+  };
+}
+
+function currentLight(tickOfDay: number, tickAt: number, now: number): Light {
+  const age = now - (tickAt || now);
+  const u = age > 2500 ? 1 : clamp01(age / 1800);
+  const to = ((tickOfDay % TICKS_PER_DAY) + TICKS_PER_DAY) % TICKS_PER_DAY;
+  const from = (to + TICKS_PER_DAY - 1) % TICKS_PER_DAY;
+  return mixLight(lightOf(from), lightOf(to), u);
+}
+
+function lightKind(tile: Tile): "water" | "stone" | "wood" | "grass" {
+  if (isWater(tile)) return "water";
+  if (isYardPave(tile) || isStreetPave(tile)) return "stone";
+  if (isWooded(tile) || tile.biome === "forest") return "wood";
+  return "grass";
+}
+
+function paintLight(
+  ctx: CanvasRenderingContext2D,
+  world: World,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  L: Light,
+) {
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const fog = fogAt(world, x, y);
+      if (fog === FOG_DARK) continue;
+      const tile = tileAt(world, x, y);
+      if (!tile) continue;
+      const px = x * TILE;
+      const py = y * TILE;
+      if (fog === FOG_LIVE) {
+        const kind = lightKind(tile);
+        const a = kind === "water" ? L.waterA : kind === "stone" ? L.stoneA : kind === "wood" ? L.woodA : L.grassA;
+        if (a > 0.003) {
+          ctx.fillStyle = `rgba(${L.warm},${a})`;
+          ctx.fillRect(px, py, TILE, TILE);
+        }
+        if (L.veilLive > 0.003) {
+          ctx.fillStyle = `rgba(${L.veil},${L.veilLive})`;
+          ctx.fillRect(px, py, TILE, TILE);
+        }
+        if (L.dusk > 0.25) {
+          ctx.fillStyle = `rgba(48,22,28,${0.05 * L.dusk})`;
+          ctx.fillRect(px, py, TILE, TILE);
+        }
+      } else {
+        let a = L.memA;
+        const nearLive =
+          fogAt(world, x, y - 1) === FOG_LIVE ||
+          fogAt(world, x + 1, y) === FOG_LIVE ||
+          fogAt(world, x, y + 1) === FOG_LIVE ||
+          fogAt(world, x - 1, y) === FOG_LIVE;
+        const nearDark =
+          fogAt(world, x, y - 1) === FOG_DARK ||
+          fogAt(world, x + 1, y) === FOG_DARK ||
+          fogAt(world, x, y + 1) === FOG_DARK ||
+          fogAt(world, x - 1, y) === FOG_DARK;
+        if (nearLive) a *= 0.68;
+        else if (nearDark) a = Math.min(0.6, a * 1.08);
+        if (L.veilMem > 0.003) {
+          ctx.fillStyle = `rgba(${L.veil},${L.veilMem})`;
+          ctx.fillRect(px, py, TILE, TILE);
+        }
+        ctx.fillStyle = `rgba(${L.mem},${a})`;
+        ctx.fillRect(px, py, TILE, TILE);
+      }
+    }
+  }
 }
 
 export function BoardCanvas() {
@@ -292,7 +477,9 @@ function draw(
 ) {
   const cssW = canvas.clientWidth;
   const cssH = canvas.clientHeight;
-  ctx.fillStyle = "#1c1612";
+  const now = Date.now();
+  const L = currentLight(g.tickOfDay ?? 0, g.tickAt ?? now, now);
+  ctx.fillStyle = `rgb(${L.sky})`;
   ctx.fillRect(0, 0, cssW, cssH);
 
   ctx.save();
@@ -309,24 +496,21 @@ function draw(
   const x1 = Math.min(g.world.width - 1, Math.ceil(viewR / TILE) + 1);
   const y1 = Math.min(g.world.height - 1, Math.ceil(viewB / TILE) + 1);
 
-  const night = g.phase === "night" ? 0.22 : g.weather === "snow" ? 0.08 : 0;
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
       const fog = fogAt(g.world, x, y);
       if (fog === FOG_DARK) {
-        ctx.fillStyle = "#1c1612";
+        ctx.fillStyle = `rgb(${L.sky})`;
         ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
         continue;
       }
       const tile = tileAt(g.world, x, y);
       if (!tile) continue;
-      paintTile(ctx, tile, night, g.world);
-      if (fog === FOG_MEM) {
-        ctx.fillStyle = "rgba(28, 22, 18, 0.5)";
-        ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
-      }
+      paintTile(ctx, tile, g.world);
     }
   }
+
+  paintLight(ctx, g.world, x0, y0, x1, y1, L);
 
   if (g.plotMark) {
     const hx = g.hover?.x ?? g.plotMark.x;
@@ -452,7 +636,8 @@ function draw(
   ctx.restore();
 
   if (g.weather === "rain" || g.weather === "snow") {
-    ctx.fillStyle = g.weather === "rain" ? "rgba(40,55,62,0.12)" : "rgba(232,223,208,0.14)";
+    const rainA = g.phase === "night" ? 0.06 : 0.12;
+    ctx.fillStyle = g.weather === "rain" ? `rgba(40,55,62,${rainA})` : "rgba(232,223,208,0.14)";
     ctx.fillRect(0, 0, cssW, cssH);
   }
 
@@ -763,7 +948,7 @@ function paintCobbles(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: n
   ctx.restore();
 }
 
-function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, world: World) {
+function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
   const x = tile.x * TILE;
   const y = tile.y * TILE;
   const lushForest = isWooded(tile);
@@ -996,11 +1181,6 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
     ctx.beginPath();
     ctx.ellipse(x + 8, y + 8, 4, 5, 0, 0, Math.PI * 2);
     ctx.fill();
-  }
-
-  if (night) {
-    ctx.fillStyle = `rgba(20,16,14,${night})`;
-    ctx.fillRect(x, y, TILE, TILE);
   }
 }
 
