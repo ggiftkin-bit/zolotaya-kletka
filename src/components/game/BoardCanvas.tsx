@@ -6,7 +6,7 @@ import { FENCE_STR, normRect } from "@/game/fence";
 import { TILE, MEEPLE_COLORS, TICKS_PER_DAY } from "@/game/constants";
 import { cam as viewCam, look } from "@/game/cam";
 import { useGame } from "@/game/store";
-import type { Biome, Tile, World } from "@/game/types";
+import type { Biome, FenceKind, Tile, World } from "@/game/types";
 import { viewPos } from "@/game/view-pos";
 import { tileAt } from "@/game/worldgen";
 import { FOG_DARK, FOG_MEM, FOG_LIVE, fogAt } from "@/game/book";
@@ -703,6 +703,11 @@ function paintRiverGround(
     padS && padE ? BANK : 0,
     padS && padW ? BANK : 0,
   ];
+  const linked = nW || eW || sW || wW;
+  const seW = isWater(tileAt(world, tile.x + 1, tile.y + 1));
+  const neW = isWater(tileAt(world, tile.x + 1, tile.y - 1));
+  const swW = isWater(tileAt(world, tile.x - 1, tile.y + 1));
+  const nwW = isWater(tileAt(world, tile.x - 1, tile.y - 1));
 
   if (anyBank) {
     ctx.save();
@@ -710,6 +715,25 @@ function paintRiverGround(
     ctx.roundRect(ix, iy, iw, ih, radii);
     ctx.strokeStyle = SAND_WET;
     ctx.lineWidth = 5;
+    if (linked) {
+      ctx.beginPath();
+      if (!nW) {
+        ctx.moveTo(ix + (padW ? 4 : 0), iy);
+        ctx.lineTo(ix + iw - (padE ? 4 : 0), iy);
+      }
+      if (!sW) {
+        ctx.moveTo(ix + (padW ? 4 : 0), iy + ih);
+        ctx.lineTo(ix + iw - (padE ? 4 : 0), iy + ih);
+      }
+      if (!wW) {
+        ctx.moveTo(ix, iy + (padN ? 4 : 0));
+        ctx.lineTo(ix, iy + ih - (padS ? 4 : 0));
+      }
+      if (!eW) {
+        ctx.moveTo(ix + iw, iy + (padN ? 4 : 0));
+        ctx.lineTo(ix + iw, iy + ih - (padS ? 4 : 0));
+      }
+    }
     ctx.stroke();
     ctx.restore();
   }
@@ -720,14 +744,12 @@ function paintRiverGround(
   ctx.clip();
   ctx.fillStyle = waterFill;
   ctx.fillRect(x, y, TILE, TILE);
-  if (art) {
+  if (art && !linked) {
     drawAtlas(ctx, art.tiles, 3, 3, biomeIndex(tile.biome, false, true), x - 10, y - 10, TILE + 20, TILE + 20, TILE_ATLAS_PAD);
-    if (ford) {
-      ctx.fillStyle = "rgba(210, 214, 200, 0.2)";
-      ctx.fillRect(x, y, TILE, TILE);
-    }
   }
   if (ford) {
+    ctx.fillStyle = "rgba(210, 214, 200, 0.22)";
+    ctx.fillRect(x, y, TILE, TILE);
     ctx.fillStyle = "rgba(90, 92, 86, 0.72)";
     for (let i = 0; i < 3; i++) {
       const sx = x + 12 + i * 9 + hash01(tile.x, tile.y, 4 + i) * 3;
@@ -736,15 +758,59 @@ function paintRiverGround(
       ctx.ellipse(sx, sy, 3.2, 2.2, 0.2 * i, 0, Math.PI * 2);
       ctx.fill();
     }
+  } else if (linked) {
+    let cx = x + TILE / 2;
+    let cy = y + TILE / 2;
+    if (eW && !wW) cx += 7;
+    if (wW && !eW) cx -= 7;
+    if (sW && !nW) cy += 7;
+    if (nW && !sW) cy -= 7;
+    if (eW && sW && seW) {
+      cx = x + TILE - 6;
+      cy = y + TILE - 6;
+    } else if (wW && sW && swW) {
+      cx = x + 6;
+      cy = y + TILE - 6;
+    } else if (eW && nW && neW) {
+      cx = x + TILE - 6;
+      cy = y + 6;
+    } else if (wW && nW && nwW) {
+      cx = x + 6;
+      cy = y + 6;
+    }
+    ctx.fillStyle = "rgba(32, 52, 62, 0.32)";
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 20, 18, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(120, 150, 150, 0.16)";
+    if (padN) ctx.fillRect(x, y + padN, TILE, 8);
+    if (padS) ctx.fillRect(x, y + TILE - padS - 8, TILE, 8);
+    if (padW) ctx.fillRect(x + padW, y, 8, TILE);
+    if (padE) ctx.fillRect(x + TILE - padE - 8, y, 8, TILE);
   }
   ctx.restore();
 
   if (anyBank) {
     ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(ix, iy, iw, ih, radii);
     ctx.strokeStyle = "rgba(70, 52, 32, 0.38)";
     ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    if (!nW) {
+      ctx.moveTo(ix + radii[0], iy);
+      ctx.lineTo(ix + iw - radii[1], iy);
+    }
+    if (!sW) {
+      ctx.moveTo(ix + radii[3], iy + ih);
+      ctx.lineTo(ix + iw - radii[2], iy + ih);
+    }
+    if (!wW) {
+      ctx.moveTo(ix, iy + radii[0]);
+      ctx.lineTo(ix, iy + ih - radii[3]);
+    }
+    if (!eW) {
+      ctx.moveTo(ix + iw, iy + radii[1]);
+      ctx.lineTo(ix + iw, iy + ih - radii[2]);
+    }
     ctx.stroke();
     ctx.restore();
     if (!nW) paintShoreGrass(ctx, x, y, "n", tile.x, tile.y);
@@ -1316,40 +1382,116 @@ function paintFence(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: num
     ctx.arc(cx, cy, 2.4, Math.PI, 0);
     ctx.stroke();
   };
-  const drawH = (kind: typeof tile.fenceN, yy: number) => {
-    if (kind === "none" || FENCE_STR[kind] <= 0) return;
-    if (kind === "gate") {
-      ctx.fillStyle = "#5a4030";
-      ctx.fillRect(x + 2, yy - 2, 8, 8);
-      ctx.fillRect(x + TILE - 10, yy - 2, 8, 8);
-      if (lockedEdge("n")) padlock(x + TILE / 2, yy - 1);
+  const live = (k: FenceKind | undefined): k is Exclude<FenceKind, "none"> => !!k && k !== "none" && FENCE_STR[k] > 0;
+  const rank = (k: FenceKind | undefined) => (k === "wall" ? 4 : k === "palisade" ? 3 : k === "wood" ? 2 : k === "gate" ? 1 : 0);
+  const stronger = (...ks: Array<FenceKind | undefined>): FenceKind => {
+    let best: FenceKind = "none";
+    for (const k of ks) {
+      if (rank(k) > rank(best)) best = k ?? "none";
+    }
+    return best;
+  };
+  const spec = (kind: FenceKind) => {
+    if (kind === "wall") return { fill: "#5c564e", top: "#8a8478", post: 7, rail: 5.5, pali: false };
+    if (kind === "palisade") return { fill: "#3d3228", top: "#5a4030", post: 6.2, rail: 3.4, pali: true };
+    return { fill: "#6b4a2f", top: "#8a623c", post: 5, rail: 3.2, pali: false };
+  };
+
+  const paintPost = (cx: number, cy: number, kind: FenceKind) => {
+    if (!live(kind)) return;
+    const look = kind === "gate" ? "wood" : kind;
+    const s = spec(look);
+    ctx.fillStyle = s.fill;
+    if (look === "palisade") {
+      ctx.fillRect(cx - 2.5, cy - 9, 5, 16);
+      ctx.beginPath();
+      ctx.moveTo(cx - 2.8, cy - 9);
+      ctx.lineTo(cx, cy - 14);
+      ctx.lineTo(cx + 2.8, cy - 9);
+      ctx.closePath();
+      ctx.fill();
       return;
     }
-    ctx.fillStyle = kind === "wall" ? "#5c564e" : kind === "palisade" ? "#3d3228" : "#6b4a2f";
-    const h = kind === "wall" ? 7 : kind === "palisade" ? 6 : 4;
-    ctx.fillRect(x, yy - h / 2, TILE, h);
-    if (kind !== "wood") {
-      for (let i = 0; i < 4; i++) ctx.fillRect(x + 6 + i * 10, yy - h - 3, 4, 5);
-    }
-  };
-  const drawV = (kind: typeof tile.fenceW, xx: number) => {
-    if (kind === "none" || FENCE_STR[kind] <= 0) return;
-    if (kind === "gate") {
-      ctx.fillStyle = "#5a4030";
-      ctx.fillRect(xx - 2, y + 2, 8, 8);
-      ctx.fillRect(xx - 2, y + TILE - 10, 8, 8);
-      if (lockedEdge("w")) padlock(xx, y + TILE / 2);
+    if (look === "wall") {
+      ctx.fillRect(cx - 3.6, cy - 5, 7.2, 10);
+      ctx.fillStyle = s.top;
+      ctx.fillRect(cx - 3.6, cy - 5, 7.2, 1.6);
       return;
     }
-    ctx.fillStyle = kind === "wall" ? "#5c564e" : kind === "palisade" ? "#3d3228" : "#6b4a2f";
-    const w = kind === "wall" ? 7 : kind === "palisade" ? 6 : 4;
-    ctx.fillRect(xx - w / 2, y, w, TILE);
-    if (kind !== "wood") {
-      for (let i = 0; i < 4; i++) ctx.fillRect(xx - w - 3, y + 6 + i * 10, 5, 4);
+    ctx.fillRect(cx - 2.4, cy - 4.2, 4.8, 8.4);
+    ctx.fillStyle = s.top;
+    ctx.fillRect(cx - 2.4, cy - 4.2, 4.8, 1.4);
+  };
+
+  const paintRailH = (kind: FenceKind, yy: number) => {
+    const s = spec(kind);
+    const inset = s.post * 0.55 + 0.4;
+    ctx.fillStyle = s.fill;
+    ctx.fillRect(x + inset, yy - s.rail / 2, TILE - inset * 2, s.rail);
+    ctx.fillStyle = s.top;
+    ctx.fillRect(x + inset, yy - s.rail / 2, TILE - inset * 2, 1.2);
+    if (!s.pali) return;
+    ctx.fillStyle = s.fill;
+    for (let i = 0; i < 3; i++) {
+      const sx = x + 11 + i * 11;
+      ctx.fillRect(sx - 1.6, yy - 8, 3.2, 12);
+      ctx.beginPath();
+      ctx.moveTo(sx - 1.9, yy - 8);
+      ctx.lineTo(sx, yy - 12);
+      ctx.lineTo(sx + 1.9, yy - 8);
+      ctx.closePath();
+      ctx.fill();
     }
   };
-  drawH(tile.fenceN, y);
-  drawV(tile.fenceW, x);
+
+  const paintRailV = (kind: FenceKind, xx: number) => {
+    const s = spec(kind);
+    const inset = s.post * 0.55 + 0.4;
+    ctx.fillStyle = s.fill;
+    ctx.fillRect(xx - s.rail / 2, y + inset, s.rail, TILE - inset * 2);
+    ctx.fillStyle = s.top;
+    ctx.fillRect(xx - s.rail / 2, y + inset, 1.2, TILE - inset * 2);
+    if (!s.pali) return;
+    ctx.fillStyle = s.fill;
+    for (let i = 0; i < 3; i++) {
+      const sy = y + 11 + i * 11;
+      ctx.fillRect(xx - 1.6, sy - 6, 3.2, 12);
+      ctx.beginPath();
+      ctx.moveTo(xx - 1.9, sy - 6);
+      ctx.lineTo(xx, sy - 10);
+      ctx.lineTo(xx + 1.9, sy - 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+  };
+
+  const nKind = tile.fenceN;
+  const wKind = tile.fenceW;
+  if (live(nKind) && nKind !== "gate") paintRailH(nKind, y);
+  if (live(wKind) && wKind !== "gate") paintRailV(wKind, x);
+  if (nKind === "gate") {
+    ctx.fillStyle = "#5a4030";
+    ctx.fillRect(x + 8, y - 5.2, TILE - 16, 2.6);
+    if (lockedEdge("n")) padlock(x + TILE / 2, y + 3);
+  }
+  if (wKind === "gate") {
+    ctx.fillStyle = "#5a4030";
+    ctx.fillRect(x - 5.2, y + 8, 2.6, TILE - 16);
+    if (lockedEdge("w")) padlock(x + 3, y + TILE / 2);
+  }
+
+  const east = tileAt(world, tile.x + 1, tile.y);
+  const south = tileAt(world, tile.x, tile.y + 1);
+  if (live(nKind) || live(wKind)) {
+    paintPost(x, y, stronger(nKind, wKind));
+  }
+  if (live(nKind)) {
+    paintPost(x + TILE, y, stronger(nKind, east?.fenceW));
+  }
+  if (live(wKind)) {
+    paintPost(x, y + TILE, stronger(wKind, south?.fenceN));
+  }
+
   if (tile.building === "tower") {
     ctx.fillStyle = "#4a3a30";
     ctx.fillRect(x + 12, y + 6, 20, 28);
