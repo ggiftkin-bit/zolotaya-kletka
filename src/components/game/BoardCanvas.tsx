@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { LIFE_INDEX, biomeIndex, drawAtlas, ensureArt, getArt, propIndex } from "@/game/art";
+import { LIFE_INDEX, TILE_ATLAS_PAD, biomeIndex, drawAtlas, ensureArt, getArt, propIndex } from "@/game/art";
 import { isWatered } from "@/game/life";
 import { isWooded } from "@/game/grow";
 import { FENCE_STR, normRect } from "@/game/fence";
@@ -22,6 +22,28 @@ const BIOME_FILL: Record<Biome, string> = {
   river: "#4a6570",
   ford: "#6a8490",
 };
+
+const BANK = 12;
+const SAND = "#d2bc86";
+const SAND_WET = "#b89568";
+
+function isWater(t: Tile | null | undefined): boolean {
+  return !!t && (t.biome === "river" || t.biome === "ford");
+}
+
+function hash01(x: number, y: number, s: number): number {
+  const n = Math.sin(x * 12.9898 + y * 78.233 + s * 45.164) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+function sides4(world: World, x: number, y: number) {
+  return {
+    n: tileAt(world, x, y - 1),
+    e: tileAt(world, x + 1, y),
+    s: tileAt(world, x, y + 1),
+    w: tileAt(world, x - 1, y),
+  };
+}
 
 export function BoardCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -423,6 +445,234 @@ function draw(
   if (cssW >= 720) drawMinimap(ctx, g, cssW, cssH);
 }
 
+function paintBiome(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement | null | undefined,
+  biome: Biome,
+  x: number,
+  y: number,
+  wooded = true,
+) {
+  ctx.fillStyle = BIOME_FILL[biome];
+  ctx.fillRect(x, y, TILE, TILE);
+  if (img) drawAtlas(ctx, img, 3, 3, biomeIndex(biome, false, wooded), x, y, TILE, TILE, TILE_ATLAS_PAD);
+}
+
+function paintRiverGround(
+  ctx: CanvasRenderingContext2D,
+  tile: Tile,
+  world: World,
+  x: number,
+  y: number,
+  art: ReturnType<typeof getArt>,
+) {
+  const n = sides4(world, tile.x, tile.y);
+  const nW = isWater(n.n);
+  const eW = isWater(n.e);
+  const sW = isWater(n.s);
+  const wW = isWater(n.w);
+  const ford = tile.biome === "ford";
+  const anyBank = !nW || !eW || !sW || !wW;
+  const waterFill = ford ? BIOME_FILL.ford : BIOME_FILL.river;
+
+  if (anyBank) {
+    ctx.fillStyle = SAND;
+    ctx.fillRect(x, y, TILE, TILE);
+    ctx.fillStyle = SAND_WET;
+    ctx.globalAlpha = 0.45;
+    ctx.beginPath();
+    ctx.ellipse(x + 12 + hash01(tile.x, tile.y, 1) * 18, y + 14, 7, 4, 0.2, 0, Math.PI * 2);
+    ctx.ellipse(x + 28, y + 30, 6, 3.5, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  } else {
+    ctx.fillStyle = waterFill;
+    ctx.fillRect(x, y, TILE, TILE);
+  }
+
+  const padN = nW ? 0 : BANK;
+  const padE = eW ? 0 : BANK;
+  const padS = sW ? 0 : BANK;
+  const padW = wW ? 0 : BANK;
+  const ix = x + padW;
+  const iy = y + padN;
+  const iw = TILE - padW - padE;
+  const ih = TILE - padN - padS;
+  const radii: [number, number, number, number] = [
+    padN && padW ? BANK : 0,
+    padN && padE ? BANK : 0,
+    padS && padE ? BANK : 0,
+    padS && padW ? BANK : 0,
+  ];
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(ix, iy, iw, ih, radii);
+  ctx.clip();
+  ctx.fillStyle = waterFill;
+  ctx.fillRect(x, y, TILE, TILE);
+  if (art) {
+    drawAtlas(ctx, art.tiles, 3, 3, biomeIndex(tile.biome, false, true), x, y, TILE, TILE, TILE_ATLAS_PAD);
+    if (ford) {
+      ctx.fillStyle = "rgba(210, 214, 200, 0.16)";
+      ctx.fillRect(x, y, TILE, TILE);
+    }
+  }
+  if (ford) {
+    ctx.fillStyle = "rgba(90, 92, 86, 0.72)";
+    for (let i = 0; i < 3; i++) {
+      const sx = x + 12 + i * 9 + hash01(tile.x, tile.y, 4 + i) * 3;
+      const sy = y + 18 + (i % 2) * 8;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, 3.2, 2.2, 0.2 * i, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+
+  if (anyBank) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(ix, iy, iw, ih, radii);
+    ctx.strokeStyle = "rgba(90, 70, 42, 0.5)";
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.restore();
+    if (!nW) paintShoreGrass(ctx, x, y, "n", tile.x, tile.y);
+    if (!eW) paintShoreGrass(ctx, x, y, "e", tile.x, tile.y);
+    if (!sW) paintShoreGrass(ctx, x, y, "s", tile.x, tile.y);
+    if (!wW) paintShoreGrass(ctx, x, y, "w", tile.x, tile.y);
+  }
+}
+
+function paintShoreGrass(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  side: "n" | "e" | "s" | "w",
+  tx: number,
+  ty: number,
+) {
+  const n = 2 + (hash01(tx, ty, side.charCodeAt(0)) > 0.55 ? 1 : 0);
+  ctx.fillStyle = "#5a7a42";
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.35 + hash01(tx, ty, 10 + i) * 0.4) / (n + 0.2);
+    let gx = x + 6;
+    let gy = y + 6;
+    if (side === "n") {
+      gx = x + 6 + t * (TILE - 12);
+      gy = y + 5 + hash01(tx, ty, 20 + i) * 4;
+    } else if (side === "s") {
+      gx = x + 6 + t * (TILE - 12);
+      gy = y + TILE - 7 - hash01(tx, ty, 21 + i) * 4;
+    } else if (side === "w") {
+      gx = x + 5 + hash01(tx, ty, 22 + i) * 4;
+      gy = y + 8 + t * (TILE - 16);
+    } else {
+      gx = x + TILE - 8 - hash01(tx, ty, 23 + i) * 4;
+      gy = y + 8 + t * (TILE - 16);
+    }
+    ctx.beginPath();
+    ctx.moveTo(gx, gy + 3);
+    ctx.lineTo(gx + 1.6, gy - 4);
+    ctx.lineTo(gx + 3.2, gy + 3);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function paintForestGround(
+  ctx: CanvasRenderingContext2D,
+  tile: Tile,
+  world: World,
+  x: number,
+  y: number,
+  art: ReturnType<typeof getArt>,
+) {
+  const n = sides4(world, tile.x, tile.y);
+  const nF = !!n.n && isWooded(n.n);
+  const eF = !!n.e && isWooded(n.e);
+  const sF = !!n.s && isWooded(n.s);
+  const wF = !!n.w && isWooded(n.w);
+  const count = (nF ? 1 : 0) + (eF ? 1 : 0) + (sF ? 1 : 0) + (wF ? 1 : 0);
+  const interior = count >= 4;
+  if (interior || tile.plot || tile.building !== "none") {
+    paintBiome(ctx, art?.tiles, "forest", x, y, true);
+    return;
+  }
+
+  paintBiome(ctx, art?.tiles, "plains", x, y, true);
+
+  let x0 = x + (wF ? -3 : TILE * 0.36);
+  let y0 = y + (nF ? -3 : TILE * 0.36);
+  let x1 = x + TILE + (eF ? 3 : -TILE * 0.36);
+  let y1 = y + TILE + (sF ? 3 : -TILE * 0.36);
+  if (x1 - x0 < 16) {
+    const mid = (x0 + x1) / 2;
+    x0 = mid - 8;
+    x1 = mid + 8;
+  }
+  if (y1 - y0 < 16) {
+    const mid = (y0 + y1) / 2;
+    y0 = mid - 8;
+    y1 = mid + 8;
+  }
+
+  ctx.save();
+  ctx.beginPath();
+  const clipX = x + (wF ? -5 : 1);
+  const clipY = y + (nF ? -5 : 1);
+  const clipW = TILE + (wF ? 5 : -1) + (eF ? 5 : -1);
+  const clipH = TILE + (nF ? 5 : -1) + (sF ? 5 : -1);
+  ctx.rect(clipX, clipY, clipW, clipH);
+  ctx.clip();
+
+  const trees = 3 + Math.floor(hash01(tile.x, tile.y, 2) * 3);
+  for (let i = 0; i < trees; i++) {
+    const u = hash01(tile.x, tile.y, 30 + i);
+    const v = hash01(tile.x, tile.y, 50 + i);
+    let cx = x0 + 6 + u * Math.max(8, x1 - x0 - 12);
+    let cy = y0 + 8 + v * Math.max(8, y1 - y0 - 14);
+    if (tile.road !== "none") {
+      const dx = cx - (x + TILE / 2);
+      const dy = cy - (y + TILE / 2);
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+        cx += dx >= 0 ? 12 : -12;
+        cy += dy >= 0 ? 8 : -8;
+      }
+    }
+    const s = 0.78 + hash01(tile.x, tile.y, 70 + i) * 0.32;
+    paintTree(ctx, cx, cy, s);
+  }
+  ctx.restore();
+}
+
+function paintTree(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number) {
+  ctx.fillStyle = "#3a2a18";
+  ctx.fillRect(cx - 1.3 * s, cy - 1, 2.6 * s, 7.5 * s);
+  ctx.fillStyle = "#2a3d1c";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy - 7 * s, 8.2 * s, 9 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#3d5c28";
+  ctx.beginPath();
+  ctx.ellipse(cx - 2.2 * s, cy - 9 * s, 5 * s, 5.4 * s, -0.3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#4a6b32";
+  ctx.beginPath();
+  ctx.ellipse(cx + 1.4 * s, cy - 8.2 * s, 3.2 * s, 3.4 * s, 0.2, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function paintWaterShade(ctx: CanvasRenderingContext2D, tile: Tile, world: World, x: number, y: number) {
+  const n = sides4(world, tile.x, tile.y);
+  ctx.fillStyle = "rgba(28, 22, 18, 0.2)";
+  if (isWater(n.n)) ctx.fillRect(x, y, TILE, 3);
+  if (isWater(n.s)) ctx.fillRect(x, y + TILE - 3, TILE, 3);
+  if (isWater(n.w)) ctx.fillRect(x, y, 3, TILE);
+  if (isWater(n.e)) ctx.fillRect(x + TILE - 3, y, 3, TILE);
+}
+
 function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, world: World) {
   const x = tile.x * TILE;
   const y = tile.y * TILE;
@@ -434,8 +684,6 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
       : (tile.biome === "fertile" || tile.building === "field") && !crops
         ? "plains"
         : tile.biome;
-  ctx.fillStyle = BIOME_FILL[ground];
-  ctx.fillRect(x, y, TILE, TILE);
   const art = getArt();
   if (tile.commons) {
     ctx.fillStyle = "#c2ad7e";
@@ -445,10 +693,20 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
     ctx.fillRect(x + 8, y + 22, TILE - 16, 5);
     ctx.fillStyle = "rgba(70, 56, 36, 0.18)";
     ctx.fillRect(x + 12, y + 30, 10, 4);
-  } else if (art) {
-    const lush = tile.biome === "forest" ? lushForest : tile.biome === "fertile" ? crops : true;
-    drawAtlas(ctx, art.tiles, 3, 3, biomeIndex(tile.biome, false, lush), x, y, TILE, TILE, 0.14);
+  } else if (isWater(tile)) {
+    paintRiverGround(ctx, tile, world, x, y, art);
+  } else if (lushForest) {
+    paintForestGround(ctx, tile, world, x, y, art);
+  } else {
+    ctx.fillStyle = BIOME_FILL[ground];
+    ctx.fillRect(x, y, TILE, TILE);
+    if (art) {
+      const lush = tile.biome === "fertile" ? crops : true;
+      drawAtlas(ctx, art.tiles, 3, 3, biomeIndex(tile.biome, false, lush), x, y, TILE, TILE, TILE_ATLAS_PAD);
+    }
   }
+
+  if (!isWater(tile)) paintWaterShade(ctx, tile, world, x, y);
 
   paintCut(ctx, tile, x, y);
 
@@ -504,7 +762,14 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, night: number, wor
 
   paintHerb(ctx, tile, x, y);
 
-  if (tile.amount > 0 && tile.resource && tile.resource !== "herb" && tile.building === "none" && !tile.caravan) {
+  if (
+    tile.amount > 0 &&
+    tile.resource &&
+    tile.resource !== "herb" &&
+    tile.building === "none" &&
+    !tile.caravan &&
+    !(lushForest && tile.resource === "wood")
+  ) {
     const n = Math.min(3, Math.max(1, Math.ceil(tile.amount / 3)));
     const col =
       tile.resource === "wood"

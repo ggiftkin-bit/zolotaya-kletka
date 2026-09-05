@@ -92,6 +92,9 @@ export function ensureArt() {
   return pending;
 }
 
+/** Transparent frame of each tiles.png cell (10 / 128). Crop only that — not a visual inset. */
+export const TILE_ATLAS_PAD = 10 / 128;
+
 export function drawAtlas(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
