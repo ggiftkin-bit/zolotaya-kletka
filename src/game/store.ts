@@ -1462,8 +1462,10 @@ function worldTick() {
   const s = useGame.getState();
   if (!s.started) return;
   let { tickOfDay, day, week, year, season, weather, phase, clock, jobs } = s;
-  clock += 1;
-  tickOfDay += 1;
+  if (!s.bookOn) {
+    clock += 1;
+    tickOfDay += 1;
+  }
   let log = s.log;
   let c = { ...s.character };
   const roof = hasRoofAt(s, c.x, c.y);
@@ -1519,49 +1521,61 @@ function worldTick() {
 
   let newDay = false;
   let newWeek = false;
-  if (tickOfDay >= TICKS_PER_DAY) {
-    tickOfDay = 0;
-    day += 1;
-    newDay = true;
-  }
-  phase = tickOfDay >= 4 ? "night" : "day";
-  if (newDay && c.wanted > 0) c.wanted = Math.max(0, c.wanted - 1);
-  if (newDay) {
-    for (const t of s.world.tiles) {
-      if (t.biome === "ford" && t.building === "none") t.takings = 0;
+  if (!s.bookOn) {
+    if (tickOfDay >= TICKS_PER_DAY) {
+      tickOfDay = 0;
+      day += 1;
+      newDay = true;
     }
-  }
-  if (day > DAYS_PER_WEEK) {
-    day = 1;
-    week += 1;
-    newWeek = true;
-  }
-  if (week > WEEKS_PER_SEASON) {
-    week = 1;
-    const next = NEXT_SEASON[season];
-    if (season === "winter") year += 1;
-    season = next;
-    weather = season === "winter" ? "snow" : SEASON_WEATHER[season][0]!;
-    c.seasonSkillGain = 0;
-    log = pushLog(log, `Глава: ${season} ${year}. Колоды и цены сменились.`);
-  }
-
-  if (newDay) {
-    const pool = SEASON_WEATHER[season];
-    weather = pool[day % pool.length]!;
-    log = pushLog(log, `${phase === "night" ? "Ночь" : "День"} ${day}, неделя ${week}.`);
-    for (const t of s.world.tiles) {
-      if (t.building === "shop" && t.owned) {
-        const chest = chestOf(t);
-        const ware = ITEMS.find((k) => chest[k] > 0);
-        if (ware) {
-          chest[ware] -= 1;
-          t.chest = chest;
-          t.takings += seasonPrice(ware, season);
-        }
+    phase = tickOfDay >= 4 ? "night" : "day";
+    if (newDay && c.wanted > 0) c.wanted = Math.max(0, c.wanted - 1);
+    if (newDay) {
+      for (const t of s.world.tiles) {
+        if (t.biome === "ford" && t.building === "none") t.takings = 0;
       }
     }
-    for (const note of tickDayLife(s.world, season)) log = pushLog(log, note);
+    if (day > DAYS_PER_WEEK) {
+      day = 1;
+      week += 1;
+      newWeek = true;
+    }
+    if (week > WEEKS_PER_SEASON) {
+      week = 1;
+      const next = NEXT_SEASON[season];
+      if (season === "winter") year += 1;
+      season = next;
+      weather = season === "winter" ? "snow" : SEASON_WEATHER[season][0]!;
+      c.seasonSkillGain = 0;
+      log = pushLog(log, `Глава: ${season} ${year}. Колоды и цены сменились.`);
+    }
+
+    if (newDay) {
+      const pool = SEASON_WEATHER[season];
+      weather = pool[day % pool.length]!;
+      log = pushLog(log, `${phase === "night" ? "Ночь" : "День"} ${day}, неделя ${week}.`);
+      for (const t of s.world.tiles) {
+        if (t.building === "shop" && t.owned) {
+          const chest = chestOf(t);
+          const ware = ITEMS.find((k) => chest[k] > 0);
+          if (ware) {
+            chest[ware] -= 1;
+            t.chest = chest;
+            t.takings += seasonPrice(ware, season);
+          }
+        }
+      }
+      for (const note of tickDayLife(s.world, season)) log = pushLog(log, note);
+    }
+  }
+
+  if (s.bookOn) {
+    useGame.setState({
+      character: c,
+      log,
+      world: { ...s.world, tiles: s.world.tiles },
+    });
+    if (dumped) sealHarm("pile", [dumped]);
+    return;
   }
 
   if (newWeek) {

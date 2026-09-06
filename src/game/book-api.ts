@@ -3,7 +3,9 @@ import { z } from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql, type Sql } from "@/lib/db";
 import { MAP_H, MAP_W } from "./constants";
-import { slimTile, type SlimTile } from "./save";
+import { slimTile, fatTile, type SlimTile } from "./save";
+import { GROW_CATCHUP_TICKS, GROW_WRITE_BATCH, TICK_MS, stepWorldClock, tickGrow } from "./grow";
+import type { Season, Tile } from "./types";
 import { generateWorld } from "./worldgen";
 import {
   FOG_FETCH,
@@ -58,6 +60,7 @@ type WorldRow = {
   phase: string;
   weather: string;
   clock: number;
+  clock_at?: string | Date;
 };
 
 type TileRow = {
@@ -86,6 +89,7 @@ type OtherDb = {
 };
 
 let birthLock: Promise<void> | null = null;
+let growLock: Promise<void> | null = null;
 
 function asClock(row: WorldRow): WorldClock {
   return {
@@ -228,7 +232,7 @@ async function mergeFightIntoPawnBody(sql: Sql, userId: string, body: PawnBody):
 
 async function readWorld(sql: Sql): Promise<WorldRow> {
   const rows = await sql.query<WorldRow>(
-    "select seed, season, year, week, day, tick_of_day, phase, weather, clock from world where id = $1",
+    "select seed, season, year, week, day, tick_of_day, phase, weather, clock, clock_at from world where id = $1",
     [WORLD_ID],
   );
   return (
@@ -244,6 +248,136 @@ async function readWorld(sql: Sql): Promise<WorldRow> {
       clock: 0,
     }
   );
+}
+
+function clockAtMs(raw: string | Date | undefined): number {
+  if (!raw) return Date.now();
+  if (raw instanceof Date) {
+    const n = raw.getTime();
+    return Number.isFinite(n) ? n : Date.now();
+  }
+  const n = Date.parse(String(raw));
+  return Number.isFinite(n) ? n : Date.now();
+}
+
+async function writeGrownTiles(
+  sql: Sql,
+  grown: { x: number; y: number; slim: SlimTile; ver: number }[],
+  userId: string,
+) {
+  for (let i = 0; i < grown.length; i += GROW_WRITE_BATCH) {
+    const chunk = grown.slice(i, i + GROW_WRITE_BATCH);
+    await sql.query(
+      `update tile t
+       set slim = e->'slim', ver = t.ver + 1, updated_at = now(), updated_by = $3
+       from jsonb_array_elements($2::jsonb) e
+       where t.world_id = $1
+         and t.x = (e->>'x')::int
+         and t.y = (e->>'y')::int
+         and t.ver = (e->>'ver')::int`,
+      [WORLD_ID, JSON.stringify(chunk), userId],
+    );
+  }
+}
+
+async function growWeeks(sql: Sql, seasons: Season[], userId: string) {
+  if (!seasons.length) return 0;
+  const rows = await sql.query<TileRow>(
+    `select x, y, slim, ver, updated_at::text as updated_at from tile where world_id = $1`,
+    [WORLD_ID],
+  );
+  if (!rows.length) return 0;
+  const tiles: Tile[] = new Array(MAP_W * MAP_H);
+  const vers: number[] = new Array(MAP_W * MAP_H).fill(1);
+  const before: (string | null)[] = new Array(MAP_W * MAP_H).fill(null);
+  for (const r of rows) {
+    if (r.x < 0 || r.y < 0 || r.x >= MAP_W || r.y >= MAP_H) continue;
+    const i = r.y * MAP_W + r.x;
+    const slim = asSlim(r.slim);
+    tiles[i] = fatTile(slim, r.x, r.y);
+    vers[i] = r.ver;
+    before[i] = JSON.stringify(slim);
+  }
+  for (let i = 0; i < tiles.length; i++) {
+    if (tiles[i]) continue;
+    const x = i % MAP_W;
+    const y = (i / MAP_W) | 0;
+    tiles[i] = fatTile({ b: "plains" }, x, y);
+  }
+  const world = { seed: WORLD_SEED, width: MAP_W, height: MAP_H, tiles };
+  for (const season of seasons) tickGrow(world, season, true);
+  const grown: { x: number; y: number; slim: SlimTile; ver: number }[] = [];
+  for (let i = 0; i < tiles.length; i++) {
+    const t = tiles[i];
+    if (!t || before[i] == null) continue;
+    const slim = slimTile(t);
+    if (JSON.stringify(slim) === before[i]) continue;
+    grown.push({ x: t.x, y: t.y, slim, ver: vers[i] ?? 1 });
+  }
+  if (grown.length) {
+    await writeGrownTiles(sql, grown, userId);
+    const origin = grown[0]!;
+    await sql.query(
+      `insert into deed (world_id, user_id, kind, x, y, payload)
+       values ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [WORLD_ID, userId, "выросло", origin.x, origin.y, JSON.stringify({ n: grown.length, weeks: seasons.length })],
+    );
+  }
+  return grown.length;
+}
+
+/** Book owns the calendar. Client clock is not written here. */
+async function advanceWorldClock(sql: Sql, userId: string): Promise<WorldClock> {
+  if (growLock) {
+    await growLock;
+    return asClock(await readWorld(sql));
+  }
+  let result: WorldClock | null = null;
+  growLock = (async () => {
+    const row = await readWorld(sql);
+    let clock = asClock(row);
+    const atMs = clockAtMs(row.clock_at);
+    const now = Date.now();
+    const due = Math.max(0, Math.floor((now - atMs) / TICK_MS));
+    if (due <= 0) {
+      result = clock;
+      return;
+    }
+    const ticks = Math.min(due, GROW_CATCHUP_TICKS);
+    const seasons: Season[] = [];
+    for (let i = 0; i < ticks; i++) {
+      const stepped = stepWorldClock(clock);
+      clock = stepped.clock;
+      if (stepped.newWeek) seasons.push(clock.season);
+    }
+    if (seasons.length) {
+      await growWeeks(sql, seasons, userId);
+    }
+    const nextAt = due > GROW_CATCHUP_TICKS ? new Date(now) : new Date(atMs + ticks * TICK_MS);
+    await sql.query(
+      `update world set
+         season = $2, year = $3, week = $4, day = $5, tick_of_day = $6,
+         phase = $7, weather = $8, clock = $9, clock_at = $10::timestamptz, updated_at = now()
+       where id = $1`,
+      [
+        WORLD_ID,
+        clock.season,
+        clock.year,
+        clock.week,
+        clock.day,
+        clock.tickOfDay,
+        clock.phase,
+        clock.weather,
+        clock.clock,
+        nextAt.toISOString(),
+      ],
+    );
+    result = clock;
+  })().finally(() => {
+    growLock = null;
+  });
+  await growLock;
+  return result ?? asClock(await readWorld(sql));
 }
 
 async function tileCount(sql: Sql): Promise<number> {
@@ -375,17 +509,17 @@ export const openWorldBook = createServerFn({ method: "POST" })
   .handler(async ({ context, data }): Promise<BookSnapshot> => {
     const sql = await getSql();
     const born = await birthIfEmpty(sql);
+    const clock = await advanceWorldClock(sql, context.userId);
     const pawn = await readPawn(sql, context.userId);
     const px = pawn?.x ?? data.x ?? 48;
     const py = pawn?.y ?? data.y ?? 48;
-    const world = await readWorld(sql);
     const spot = await loadSpot(sql, px, py, context.userId);
     await imprintSpot(sql, context.userId, px, py);
     const fight = await loadOpenFight(sql, context.userId);
     return {
       ok: true,
       born,
-      clock: asClock(world),
+      clock,
       pawn: pawn
         ? {
             name: pawn.name,
@@ -445,25 +579,6 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
           updatedAt: cur[0].updated_at,
         });
       }
-    }
-    if (data.clock) {
-      await sql.query(
-        `update world set
-           season = $2, year = $3, week = $4, day = $5, tick_of_day = $6,
-           phase = $7, weather = $8, clock = $9, clock_at = now(), updated_at = now()
-         where id = $1`,
-        [
-          WORLD_ID,
-          data.clock.season,
-          data.clock.year,
-          data.clock.week,
-          data.clock.day,
-          data.clock.tickOfDay,
-          data.clock.phase,
-          data.clock.weather,
-          data.clock.clock,
-        ],
-      );
     }
     const origin = data.tiles[0];
     const x = origin?.x ?? data.pawn.x;
@@ -689,25 +804,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
         [WORLD_ID, context.userId, data.x, data.y],
       );
     }
-    if (data.clock) {
-      await sql.query(
-        `update world set
-           season = $2, year = $3, week = $4, day = $5, tick_of_day = $6,
-           phase = $7, weather = $8, clock = $9, clock_at = now(), updated_at = now()
-         where id = $1`,
-        [
-          WORLD_ID,
-          data.clock.season,
-          data.clock.year,
-          data.clock.week,
-          data.clock.day,
-          data.clock.tickOfDay,
-          data.clock.phase,
-          data.clock.weather,
-          data.clock.clock,
-        ],
-      );
-    }
+    const clock = await advanceWorldClock(sql, context.userId);
     const liveRows = await sql.query<TileRow>(
       `select x, y, slim, ver, updated_at::text as updated_at
        from tile
@@ -747,11 +844,10 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
     );
     const others: OtherPawn[] = otherRows.map(pawnAsOther);
     await imprintSpot(sql, context.userId, data.x, data.y);
-    const world = await readWorld(sql);
     const fight = await loadOpenFight(sql, context.userId);
     return {
       ok: true as const,
-      clock: asClock(world),
+      clock,
       live,
       fill,
       others: withFightOther(others, fight, context.userId),

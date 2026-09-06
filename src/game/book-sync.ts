@@ -18,6 +18,8 @@ import {
 } from "./book";
 import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, strikeBookFight, writeHarmDeed, writeWorldDeed } from "./book-api";
 import { rememberLiveFoe } from "./fight";
+import { makeJobs, makeTrader } from "./economy";
+import { TICKS_PER_DAY } from "./constants";
 import { loadGame, saveGame, type SlimTile } from "./save";
 import type { Character, GameState, OtherPawn } from "./types";
 import { spawnPoint } from "./worldgen";
@@ -93,21 +95,8 @@ function rememberLive(state: GameState) {
   }
 }
 
-function clockOf(s: GameState): WorldClock {
-  return {
-    season: s.season,
-    year: s.year,
-    week: s.week,
-    day: s.day,
-    tickOfDay: s.tickOfDay,
-    phase: s.phase,
-    weather: s.weather,
-    clock: s.clock,
-  };
-}
-
-function applyClock(clock: WorldClock): Partial<GameState> {
-  return {
+function applyClock(clock: WorldClock, prev?: GameState): Partial<GameState> {
+  const patch: Partial<GameState> = {
     season: clock.season,
     year: clock.year,
     week: clock.week,
@@ -117,6 +106,26 @@ function applyClock(clock: WorldClock): Partial<GameState> {
     weather: clock.weather,
     clock: clock.clock,
   };
+  if (prev && (prev.tickOfDay !== clock.tickOfDay || prev.phase !== clock.phase)) {
+    patch.tickAt = Date.now();
+  }
+  if (prev && prev.week !== clock.week) {
+    patch.jobs = makeJobs(clock.week);
+    patch.trader = makeTrader(clock.week);
+  }
+  if (prev) {
+    const days = Math.floor(clock.clock / TICKS_PER_DAY) - Math.floor(prev.clock / TICKS_PER_DAY);
+    if (days > 0) {
+      const live = store?.get().character ?? prev.character;
+      if (live.wanted > 0) {
+        patch.character = {
+          ...live,
+          wanted: Math.max(0, live.wanted - days),
+        };
+      }
+    }
+  }
+  return patch;
 }
 
 function pawnPayload(c: Character) {
@@ -154,16 +163,23 @@ export async function openBookFromServer(): Promise<boolean> {
     world = applyLive(world, localizePackets(shot.live));
     const at = shot.pawn ? { x: shot.pawn.x, y: shot.pawn.y } : { x: pocket?.character?.x ?? spawn.x, y: pocket?.character?.y ?? spawn.y };
     world = maskLiveFog(world, at.x, at.y);
+    const prev = store.get();
     const patch: Partial<GameState> = {
       world,
       bookOn: true,
       bookStatus: "ready",
       bookAt: shot.since,
       others: shot.others,
-      ...applyClock(shot.clock),
+      jobs: makeJobs(shot.clock.week),
+      trader: makeTrader(shot.clock.week),
+      ...applyClock(shot.clock, prev),
     };
     if (shot.pawn) {
-      const character = unpackPawn(shot.pawn);
+      let character = unpackPawn(shot.pawn);
+      const days = Math.floor(shot.clock.clock / TICKS_PER_DAY) - Math.floor(prev.clock / TICKS_PER_DAY);
+      if (days > 0 && character.wanted > 0) {
+        character = { ...character, wanted: Math.max(0, character.wanted - days) };
+      }
       patch.character = character;
       patch.started = true;
     } else if (pocket?.started && pocket.character) {
@@ -219,7 +235,6 @@ export async function flushBook() {
         kind,
         tiles: tiles.map(({ x, y, slim, ver }) => ({ x, y, slim, ver })),
         pawn: pawnPayload(s.character),
-        clock: clockOf(s),
       },
     });
     if (!res) return;
@@ -329,7 +344,6 @@ export async function beatBook(_force = false) {
         y: cur.character.y,
         since: cur.bookAt || "1970-01-01T00:00:00.000Z",
         pawn: cur.started ? pawnPayload(cur.character) : undefined,
-        clock: cur.started ? clockOf(cur) : undefined,
       },
     });
     if (!res?.ok) return;
@@ -338,11 +352,12 @@ export async function beatBook(_force = false) {
     if (newcomers.length) world = applyLive(world, newcomers);
     if (res.live.length) world = applyLive(world, localizePackets(res.live));
     world = maskLiveFog(world, store.get().character.x, store.get().character.y);
+    const live = store.get();
     store.set({
       world,
       others: res.others,
       bookAt: res.since,
-      ...applyClock(res.clock),
+      ...applyClock(res.clock, live),
     });
     rememberLive(store.get());
     if (res.fight) applyIncomingFight(res.fight, store.get().selfId);
