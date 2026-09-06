@@ -683,7 +683,7 @@ function paintBiome(
 }
 
 const OUTER = BANK + 4;
-const INNER = 6;
+const INNER = 2;
 
 function paintRiverGround(
   ctx: CanvasRenderingContext2D,
