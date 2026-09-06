@@ -19,7 +19,7 @@ export const BUSY_LABEL: Record<BusyKind, string> = {
   fish: "ловлю рыбу",
   chop: "рублю",
   mine: "долблю",
-  forage: "сбираю",
+  forage: "собираю",
   build: "ставлю",
   craft: "делаю",
   dig: "копаю",

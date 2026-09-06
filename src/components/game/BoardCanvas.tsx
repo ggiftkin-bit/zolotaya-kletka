@@ -682,7 +682,7 @@ function paintBiome(
   if (img) drawAtlas(ctx, img, 3, 3, biomeIndex(biome, false, wooded), x, y, TILE, TILE, TILE_ATLAS_PAD);
 }
 
-const INNER = 4;
+const INNER = BANK + 4;
 
 function paintRiverGround(
   ctx: CanvasRenderingContext2D,
@@ -726,10 +726,10 @@ function paintRiverGround(
   const iw = TILE - padW - padE;
   const ih = TILE - padN - padS;
   const radii: [number, number, number, number] = [
-    padN && padW ? BANK + 4 : 0,
-    padN && padE ? BANK + 4 : 0,
-    padS && padE ? BANK + 4 : 0,
-    padS && padW ? BANK + 4 : 0,
+    padN && padW ? INNER : 0,
+    padN && padE ? INNER : 0,
+    padS && padE ? INNER : 0,
+    padS && padW ? INNER : 0,
   ];
 
   ctx.save();
@@ -763,12 +763,10 @@ function paintRiverGround(
     ctx.closePath();
     ctx.fill();
   };
-  if (anyBank) {
-    if (nW && eW && !neW) punch(x + TILE, y, Math.PI, Math.PI / 2);
-    if (nW && wW && !nwW) punch(x, y, Math.PI / 2, 0);
-    if (sW && eW && !seW) punch(x + TILE, y + TILE, (Math.PI * 3) / 2, Math.PI);
-    if (sW && wW && !swW) punch(x, y + TILE, 0, (Math.PI * 3) / 2);
-  }
+  if (nW && eW && !neW) punch(x + TILE, y, Math.PI, Math.PI / 2);
+  if (nW && wW && !nwW) punch(x, y, Math.PI / 2, 0);
+  if (sW && eW && !seW) punch(x + TILE, y + TILE, (Math.PI * 3) / 2, Math.PI);
+  if (sW && wW && !swW) punch(x, y + TILE, 0, (Math.PI * 3) / 2);
 
   if (anyBank) {
     ctx.save();

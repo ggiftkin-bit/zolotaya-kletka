@@ -3,7 +3,7 @@ import { BAG_CELLS, CAPACITY, GAME_VERSION, ITEM_LABEL, ITEM_WEIGHT, ITEMS, TICK
 import { BUILDING_LABEL, CART_GOLD, CART_WOOD, goldTxt } from "@/game/economy";
 import { EAT_ORDER, EAT_SAT } from "@/game/craft";
 import { nextGoal } from "@/game/goal";
-import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, SKIP_GOLD, deathFee, formatWait, nextEnergyIn, regenPaused } from "@/game/pace";
+import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, HIRE_GOLD, SKIP_GOLD, deathFee, formatWait, nextEnergyIn, regenPaused } from "@/game/pace";
 import { isHeld, isJailed, isStill, isYours } from "@/game/crime";
 import { TOOL_ITEMS } from "@/game/life";
 import { BUSY_LABEL, isRoof, isWearId, remainingWear, type WearId } from "@/game/work";
@@ -95,6 +95,9 @@ export function Hud() {
   const still = isStill(g.character, now);
   const wait = nextEnergyIn(g.character, now, isRoof(here) || (g.character.profession === "hireling" && g.character.resting), !!g.travel);
   const busy = !held && g.character.busy && g.character.busy.until > now ? g.character.busy : null;
+  const walkLeft = g.travel
+    ? Math.ceil(g.travel.path.slice(g.travel.index).reduce((a, l) => a + l.cost, 0) - g.travel.elapsed)
+    : 0;
   const paused = regenPaused(g.character, now, !!g.travel);
   const wounded = g.character.hp < 40;
   const ownChest =
@@ -254,7 +257,7 @@ export function Hud() {
             залог {goldTxt(BAIL_GOLD)}
           </button>
         )}
-        {(jailed || down || dead || still || ((goal || g.hint) && !busy && !g.travel)) && (
+        {(jailed || down || dead || still || busy || g.travel || ((goal || g.hint) && !busy && !g.travel)) && (
           <p className="pointer-events-none mx-auto mt-1 max-w-lg line-clamp-2 rounded-xl bg-table/75 px-2 py-1 text-center text-xs leading-snug text-panel">
           {dead
             ? `Погиб. Выйдешь дома через ${formatWait(Math.max(0, g.character.deadUntil - now))}`
@@ -266,6 +269,10 @@ export function Hud() {
             ? `Яма${g.character.jailWhy ? ` · ${g.character.jailWhy}` : ""}. Залог ${goldTxt(BAIL_GOLD)}. Ещё ${formatWait(g.character.jailedUntil - now)}`
             : still
               ? `Сутки без хода · ${formatWait(g.character.stillUntil - now)}`
+              : busy
+                ? `${BUSY_LABEL[busy.kind]} ещё ${formatWait(busy.until - now)}`
+                : g.travel
+                  ? `идёшь ${walkLeft} с`
               : g.hint
                 ? g.hint.text
               : goal}
@@ -331,28 +338,25 @@ export function Hud() {
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 p-2 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
           <div className="pointer-events-auto mx-auto max-w-lg">
             {busy && !bag && !help && !food && (
-              <div className="mb-1.5 flex min-w-0 gap-1">
-                <p className="flex h-11 min-w-0 flex-1 items-center truncate rounded-[16px] border border-border bg-panel px-3 text-[13px] shadow-panel">
-                  <span className="min-w-0 truncate">{BUSY_LABEL[busy.kind]} {formatWait(busy.until - now)}</span>
-                </p>
+              <div className="mb-1.5 grid grid-cols-3 gap-1">
                 <button
                   type="button"
                   onClick={() => g.skipBusy()}
-                  className="h-11 shrink-0 rounded-[16px] border border-border bg-panel px-3 text-[13px] font-display shadow-panel"
+                  className="h-11 min-w-0 rounded-[16px] border border-border bg-panel px-1.5 text-[12px] font-display leading-tight shadow-panel"
                 >
                   ускорить {goldTxt(SKIP_GOLD)}
                 </button>
                 <button
                   type="button"
                   onClick={() => g.hireBusy()}
-                  className="h-11 shrink-0 rounded-[16px] border border-border bg-panel px-3 text-[13px] shadow-panel"
+                  className="h-11 min-w-0 rounded-[16px] border border-border bg-panel px-1.5 text-[12px] leading-tight shadow-panel"
                 >
-                  руки
+                  руки {goldTxt(HIRE_GOLD)}
                 </button>
                 <button
                   type="button"
                   onClick={() => g.cancelBusy()}
-                  className="h-11 shrink-0 rounded-[16px] border border-border bg-panel px-3 text-[13px] shadow-panel"
+                  className="h-11 min-w-0 rounded-[16px] border border-border bg-panel px-1.5 text-[12px] leading-tight shadow-panel"
                 >
                   бросить
                 </button>
@@ -362,16 +366,9 @@ export function Hud() {
               <button
                 type="button"
                 onClick={() => g.skipTravel()}
-                className="mb-1.5 flex h-11 w-full items-center justify-between rounded-[16px] border border-border bg-panel px-3 text-[13px] shadow-panel"
+                className="mb-1.5 flex h-11 w-full items-center justify-center rounded-[16px] border border-border bg-panel px-3 text-[13px] font-display shadow-panel"
               >
-                <span>
-                  идёшь{" "}
-                  {Math.ceil(
-                    g.travel.path.slice(g.travel.index).reduce((a, l) => a + l.cost, 0) - g.travel.elapsed,
-                  )}{" "}
-                  с
-                </span>
-                <span className="font-display">ускорить {goldTxt(SKIP_GOLD)}</span>
+                ускорить {goldTxt(SKIP_GOLD)}
               </button>
             )}
             {!bag &&
