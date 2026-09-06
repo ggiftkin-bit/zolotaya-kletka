@@ -3,7 +3,7 @@ import { LIFE_INDEX, TILE_ATLAS_PAD, biomeIndex, drawAtlas, ensureArt, getArt, p
 import { isWatered } from "@/game/life";
 import { isWooded } from "@/game/grow";
 import { FENCE_STR, normRect } from "@/game/fence";
-import { TILE, MEEPLE_COLORS, TICKS_PER_DAY } from "@/game/constants";
+import { TILE, MEEPLE_COLORS, FILL_TEX, TICKS_PER_DAY } from "@/game/constants";
 import { cam as viewCam, look } from "@/game/cam";
 import { useGame } from "@/game/store";
 import type { Biome, FenceKind, Tile, World } from "@/game/types";
@@ -28,6 +28,45 @@ const SAND = "#d2bc86";
 const SAND_WET = "#b89568";
 const YARD_STONE = "#7a7064";
 const STREET_STONE = "#a3947c";
+
+type FillKind = "water" | "meadow" | "moss" | "stone" | "sand";
+const FILL_SCALE = 0.42;
+let fillPatterns: Partial<Record<FillKind, CanvasPattern>> | null = null;
+
+function makeFillPattern(ctx: CanvasRenderingContext2D, img: HTMLImageElement) {
+  const w = Math.max(32, Math.round(img.width * FILL_SCALE));
+  const h = Math.max(32, Math.round(img.height * FILL_SCALE));
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const g = c.getContext("2d");
+  if (!g) return ctx.createPattern(img, "repeat");
+  g.drawImage(img, 0, 0, w, h);
+  return ctx.createPattern(c, "repeat");
+}
+
+function ensureFillPatterns(ctx: CanvasRenderingContext2D) {
+  if (!FILL_TEX || fillPatterns) return;
+  const a = getArt();
+  if (!a?.fillWater || !a.fillMeadow || !a.fillMoss || !a.fillStone || !a.fillSand) return;
+  fillPatterns = {};
+  const bind = (kind: FillKind, img: HTMLImageElement | null) => {
+    if (!img) return;
+    const p = makeFillPattern(ctx, img);
+    if (p) fillPatterns![kind] = p;
+  };
+  bind("water", a.fillWater);
+  bind("meadow", a.fillMeadow);
+  bind("moss", a.fillMoss);
+  bind("stone", a.fillStone);
+  bind("sand", a.fillSand);
+}
+
+function useFill(ctx: CanvasRenderingContext2D, kind: FillKind, fallback: string) {
+  ensureFillPatterns(ctx);
+  const p = FILL_TEX ? fillPatterns?.[kind] : undefined;
+  ctx.fillStyle = p ?? fallback;
+}
 
 function isWater(t: Tile | null | undefined): boolean {
   return !!t && (t.biome === "river" || t.biome === "ford");
@@ -660,9 +699,11 @@ function paintMeadow(
   fertile: boolean,
 ) {
   const tint = hash01(tile.x, tile.y, 1);
-  ctx.fillStyle = fertile
-    ? tint > 0.55 ? "#a4b068" : "#9eaa66"
-    : tint > 0.55 ? "#8fa85c" : "#86a056";
+  useFill(
+    ctx,
+    "meadow",
+    fertile ? (tint > 0.55 ? "#a4b068" : "#9eaa66") : tint > 0.55 ? "#8fa85c" : "#86a056",
+  );
   ctx.fillRect(x, y, TILE, TILE);
   ctx.fillStyle = fertile ? "rgba(92, 118, 48, 0.16)" : "rgba(72, 102, 40, 0.14)";
   for (let i = 0; i < 4; i++) {
@@ -686,6 +727,11 @@ function paintBiome(
   y: number,
   wooded = true,
 ) {
+  if (FILL_TEX && (biome === "mountain" || biome === "ore")) {
+    useFill(ctx, "stone", BIOME_FILL[biome]);
+    ctx.fillRect(x, y, TILE, TILE);
+    return;
+  }
   ctx.fillStyle = BIOME_FILL[biome];
   ctx.fillRect(x, y, TILE, TILE);
   if (img) drawAtlas(ctx, img, 3, 3, biomeIndex(biome, false, wooded), x, y, TILE, TILE, TILE_ATLAS_PAD);
@@ -717,9 +763,9 @@ function paintRiverGround(
   const nwW = isWater(tileAt(world, tile.x - 1, tile.y - 1));
 
   if (waterN >= 2) {
-    ctx.fillStyle = waterFill;
+    useFill(ctx, "water", waterFill);
     ctx.fillRect(x, y, TILE, TILE);
-    ctx.fillStyle = SAND;
+    useFill(ctx, "sand", SAND);
     if (!nW) ctx.fillRect(x, y, TILE, BANK);
     if (!sW) ctx.fillRect(x, y + TILE - BANK, TILE, BANK);
     if (!wW) ctx.fillRect(x, y, BANK, TILE);
@@ -729,14 +775,14 @@ function paintRiverGround(
     if (!sW && !eW) ctx.fillRect(x + TILE - BANK - OUTER, y + TILE - BANK - OUTER, BANK + OUTER, BANK + OUTER);
     if (!sW && !wW) ctx.fillRect(x, y + TILE - BANK - OUTER, BANK + OUTER, BANK + OUTER);
   } else if (anyBank) {
-    ctx.fillStyle = SAND;
+    useFill(ctx, "sand", SAND);
     ctx.fillRect(x, y, TILE, TILE);
     ctx.fillStyle = SAND_WET;
     ctx.globalAlpha = 0.35;
     ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
     ctx.globalAlpha = 1;
   } else {
-    ctx.fillStyle = waterFill;
+    useFill(ctx, "water", waterFill);
     ctx.fillRect(x, y, TILE, TILE);
   }
 
@@ -759,7 +805,7 @@ function paintRiverGround(
   ctx.beginPath();
   ctx.roundRect(ix, iy, iw, ih, radii);
   ctx.clip();
-  ctx.fillStyle = waterFill;
+  useFill(ctx, "water", waterFill);
   ctx.fillRect(x, y, TILE, TILE);
   if (ford) {
     ctx.fillStyle = "rgba(210, 214, 200, 0.22)";
@@ -779,7 +825,7 @@ function paintRiverGround(
   ctx.restore();
 
   const punch = (cx: number, cy: number, a0: number, a1: number) => {
-    ctx.fillStyle = SAND;
+    useFill(ctx, "sand", SAND);
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, INNER, a0, a1, true);
@@ -878,7 +924,7 @@ function paintForestGround(
     return;
   }
   if (interior || tile.plot || tile.building !== "none") {
-    ctx.fillStyle = "#5c6a42";
+    useFill(ctx, "moss", "#5c6a42");
     ctx.fillRect(x, y, TILE, TILE);
     ctx.fillStyle = "rgba(42, 56, 28, 0.28)";
     ctx.beginPath();

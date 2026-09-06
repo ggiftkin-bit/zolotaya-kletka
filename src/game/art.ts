@@ -6,6 +6,11 @@ export type ArtPack = {
   meeple: HTMLImageElement;
   tokens: HTMLImageElement;
   life: HTMLImageElement;
+  fillWater: HTMLImageElement | null;
+  fillMeadow: HTMLImageElement | null;
+  fillMoss: HTMLImageElement | null;
+  fillStone: HTMLImageElement | null;
+  fillSand: HTMLImageElement | null;
 };
 
 const TILE_INDEX: Record<Biome, number> = {
@@ -85,8 +90,13 @@ export function ensureArt() {
     loadImage("/game/meeple.png"),
     loadImage("/game/tokens.png"),
     loadImage("/game/life.png"),
-  ]).then(([tiles, props, meeple, tokens, life]) => {
-    pack = { tiles, props, meeple, tokens, life };
+    loadImage("/game/fill-water.jpg").catch(() => null),
+    loadImage("/game/fill-meadow.jpg").catch(() => null),
+    loadImage("/game/fill-moss.jpg").catch(() => null),
+    loadImage("/game/fill-stone.jpg").catch(() => null),
+    loadImage("/game/fill-sand.jpg").catch(() => null),
+  ]).then(([tiles, props, meeple, tokens, life, fillWater, fillMeadow, fillMoss, fillStone, fillSand]) => {
+    pack = { tiles, props, meeple, tokens, life, fillWater, fillMeadow, fillMoss, fillStone, fillSand };
     return pack;
   });
   return pending;
