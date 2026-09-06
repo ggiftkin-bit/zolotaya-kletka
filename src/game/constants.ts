@@ -91,7 +91,7 @@ export const BIOME_LABEL: Record<Biome, string> = {
   mountain: "горы",
   river: "река",
   swamp: "болото",
-  fertile: "пашня",
+  fertile: "поле",
   ore: "жила",
   ford: "брод",
 };

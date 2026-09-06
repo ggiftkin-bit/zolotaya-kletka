@@ -504,6 +504,10 @@ export function migrateStations(world: World) {
 
 export function stampMeadowHerb(tiles: Tile[]) {
   for (const t of tiles) {
+    if (t.building === "field") {
+      if (t.resource === "herb") t.resource = "food";
+      continue;
+    }
     const blocked =
       t.commons ||
       t.plot ||
@@ -524,7 +528,7 @@ export function stampMeadowHerb(tiles: Tile[]) {
       continue;
     }
     if (blocked) {
-      if (t.resource === "herb" && (t.road !== "none" || t.plot || t.building === "field" || t.biome === "river" || t.biome === "ford")) {
+      if (t.resource === "herb" && (t.road !== "none" || t.plot || t.biome === "river" || t.biome === "ford")) {
         t.resource = null;
         t.amount = 0;
         t.scarred = false;

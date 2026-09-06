@@ -1368,9 +1368,24 @@ function paintWaterShade(ctx: CanvasRenderingContext2D, tile: Tile, world: World
   if (isWater(n.e)) ctx.fillRect(x + TILE - 3, y, 3, TILE);
 }
 
-function paintFieldEarth(ctx: CanvasRenderingContext2D, x: number, y: number) {
+function paintFieldEarth(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number) {
   useFill(ctx, "field", "#8a623c");
   ctx.fillRect(x, y, TILE, TILE);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, TILE, TILE);
+  ctx.clip();
+  ctx.strokeStyle = "rgba(58, 40, 24, 0.38)";
+  ctx.lineWidth = 1.4;
+  const tilt = (hash01(tile.x, tile.y, 2) - 0.5) * 0.08;
+  for (let i = 0; i < 7; i++) {
+    const yy = y + 5 + i * 5.6;
+    ctx.beginPath();
+    ctx.moveTo(x - 1, yy);
+    ctx.lineTo(x + TILE + 1, yy + tilt * TILE);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function paintCobbles(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number, street: boolean) {
@@ -1446,10 +1461,10 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
   if (isWater(tile)) {
     paintRiverGround(ctx, tile, world, x, y, art);
     if (paintedPropsOn() && tile.biome === "ford") paintFordStones(ctx, tile, x, y);
+  } else if (tile.building === "field") {
+    paintFieldEarth(ctx, tile, x, y);
   } else if (isYardPave(tile)) {
     paintCobbles(ctx, tile, x, y, false);
-  } else if (tile.building === "field") {
-    paintFieldEarth(ctx, x, y);
   } else if (floorOf(tile)) {
     paintSoftFloor(ctx, tile, world, x, y);
   } else {
