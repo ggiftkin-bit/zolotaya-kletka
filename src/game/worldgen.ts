@@ -504,6 +504,16 @@ export function migrateStations(world: World) {
 
 export function stampMeadowHerb(tiles: Tile[]) {
   for (const t of tiles) {
+    const blocked =
+      t.commons ||
+      t.plot ||
+      t.caravan ||
+      t.pit ||
+      t.bank ||
+      t.road !== "none" ||
+      t.building !== "none" ||
+      t.biome === "river" ||
+      t.biome === "ford";
     if (t.commons) {
       if (t.resource === "herb" && t.building === "none" && !t.caravan && !t.plot) {
         t.resource = null;
@@ -513,11 +523,37 @@ export function stampMeadowHerb(tiles: Tile[]) {
       }
       continue;
     }
-    if (t.biome !== "plains") continue;
-    if (t.caravan || t.building !== "none" || t.pit || t.bank || t.plot) continue;
-    if (t.resource === "herb" && t.amount <= 0 && !t.scarred) {
-      t.amount = 2;
-      t.regen = 0;
+    if (blocked) {
+      if (t.resource === "herb" && (t.road !== "none" || t.plot || t.building === "field" || t.biome === "river" || t.biome === "ford")) {
+        t.resource = null;
+        t.amount = 0;
+        t.scarred = false;
+        t.regen = 0;
+      }
+      continue;
+    }
+    if (t.biome === "plains") {
+      if (t.resource === "herb" && t.amount <= 0 && !t.scarred) {
+        t.amount = 2;
+        t.regen = 0;
+      }
+      continue;
+    }
+    if (t.biome === "fertile") {
+      if (t.resource === "food") {
+        t.resource = "herb";
+        if (t.amount > 0) t.amount = Math.max(2, Math.min(4, t.amount));
+        t.scarred = t.amount <= 0;
+      } else if (!t.resource) {
+        const n = Math.sin(t.x * 12.9898 + t.y * 78.233 + 9.1) * 43758.5453;
+        const h = n - Math.floor(n);
+        if (h < 0.28) {
+          t.resource = "herb";
+          t.amount = 2;
+          t.scarred = false;
+          t.regen = 0;
+        }
+      }
     }
   }
 }

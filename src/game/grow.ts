@@ -54,6 +54,12 @@ function growTile(world: World, t: Tile, season: Season) {
     return;
   }
   if (!t.resource) return;
+  if (
+    t.resource === "herb" &&
+    (t.road !== "none" || t.plot || t.commons || t.biome === "river" || t.biome === "ford")
+  ) {
+    return;
+  }
   const cap = REGROW_CAP[t.resource] ?? 4;
   const winterStop = season === "winter" && (t.resource === "wood" || t.resource === "food" || t.resource === "herb");
   if (winterStop) return;

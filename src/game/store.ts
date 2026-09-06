@@ -1663,7 +1663,9 @@ function gatherHere() {
       ? `Рублю · ${Math.ceil(ms / 1000)} с. Топор быстрее.`
       : kind === "mine"
         ? `Долблю · ${Math.ceil(ms / 1000)} с. Кирка быстрее.`
-        : `Сбираю · ${Math.ceil(ms / 1000)} с.`,
+        : item === "herb"
+          ? `Нарву траву · ${Math.ceil(ms / 1000)} с.`
+          : `Сбираю · ${Math.ceil(ms / 1000)} с.`,
     here.x,
     here.y,
     BUSY_LABEL[kind],
@@ -2972,7 +2974,7 @@ function resolveGather(s: GameState, c0: Character, tile: NonNullable<ReturnType
   const extra = given.piled ? ` Лишнее (${given.piled}) на клетке.` : "";
   const phrase =
     res === "herb"
-      ? `Сорвал траву ×${got}.${extra} Отрастёт.`
+      ? `Нарвал траву ×${got}.${extra} Отрастёт.`
       : `Собрал ${got} ${ITEM_LABEL[res]}. Ноша ${cargoWeight(given.inv).toFixed(1)} кг.${extra}`;
   useGame.setState({
     character: c,

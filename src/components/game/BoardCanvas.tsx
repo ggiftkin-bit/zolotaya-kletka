@@ -139,7 +139,7 @@ function isWater(t: Tile | null | undefined): boolean {
 }
 
 function isFieldFloor(t: Tile): boolean {
-  return t.building === "field" || (t.biome === "fertile" && (t.amount > 0 || t.plot));
+  return t.building === "field";
 }
 
 function isYardPave(t: Tile): boolean {
@@ -771,8 +771,8 @@ function paintBiome(
   y: number,
   wooded = true,
 ) {
-  if (FILL_TEX && (biome === "fertile")) {
-    useFill(ctx, "field", BIOME_FILL.fertile);
+  if (FILL_TEX && biome === "fertile") {
+    useFill(ctx, "meadow", BIOME_FILL.fertile);
     ctx.fillRect(x, y, TILE, TILE);
     return;
   }
@@ -805,7 +805,7 @@ type SoftFloor = "meadow" | "moss" | "field" | "swamp";
 
 function floorOf(t: Tile | null | undefined): SoftFloor | null {
   if (!t || isWater(t) || t.pit || isYardPave(t)) return null;
-  if (t.building === "field" || (t.biome === "fertile" && (t.amount > 0 || t.plot))) return "field";
+  if (t.building === "field") return "field";
   if (isWooded(t)) return "moss";
   if (t.biome === "swamp") return "swamp";
   if (t.biome === "mountain" || t.biome === "ore") return null;
@@ -823,15 +823,16 @@ function paintSoftFloor(ctx: CanvasRenderingContext2D, tile: Tile, world: World,
   const kind = floorOf(tile);
   if (!kind) return;
   const st = floorPaint(kind);
+  if (kind === "field") {
+    useFill(ctx, st.fill, st.color);
+    ctx.fillRect(x, y, TILE, TILE);
+    return;
+  }
   const n = sides4(world, tile.x, tile.y);
   const sameN = floorOf(n.n) === kind;
   const sameE = floorOf(n.e) === kind;
   const sameS = floorOf(n.s) === kind;
   const sameW = floorOf(n.w) === kind;
-  const waterN = isWater(n.n);
-  const waterE = isWater(n.e);
-  const waterS = isWater(n.s);
-  const waterW = isWater(n.w);
   const r = LAND_OUTER;
   const radii: [number, number, number, number] = [
     !sameN && !sameW ? r : 0,
@@ -839,28 +840,28 @@ function paintSoftFloor(ctx: CanvasRenderingContext2D, tile: Tile, world: World,
     !sameS && !sameE ? r : 0,
     !sameS && !sameW ? r : 0,
   ];
-  const anyRound = radii[0] + radii[1] + radii[2] + radii[3] > 0;
-
-  useFill(ctx, st.fill, st.color);
-  ctx.fillRect(x, y, TILE, TILE);
-  if (!anyRound) return;
-
-  if (radii[0] && (waterN || waterW)) {
-    useFill(ctx, "sand", SAND);
-    ctx.fillRect(x, y, r, r);
-  }
-  if (radii[1] && (waterN || waterE)) {
-    useFill(ctx, "sand", SAND);
-    ctx.fillRect(x + TILE - r, y, r, r);
-  }
-  if (radii[2] && (waterS || waterE)) {
-    useFill(ctx, "sand", SAND);
-    ctx.fillRect(x + TILE - r, y + TILE - r, r, r);
-  }
-  if (radii[3] && (waterS || waterW)) {
-    useFill(ctx, "sand", SAND);
-    ctx.fillRect(x, y + TILE - r, r, r);
-  }
+  const paintCorner = (
+    ox: number,
+    oy: number,
+    a: Tile | null | undefined,
+    b: Tile | null | undefined,
+  ) => {
+    const other = floorOf(a) !== kind ? a : b;
+    if (isWater(other)) useFill(ctx, "sand", SAND);
+    else if (other && isYardPave(other)) useFill(ctx, "cobble", YARD_STONE);
+    else {
+      const fk = floorOf(other);
+      if (fk) {
+        const p = floorPaint(fk);
+        useFill(ctx, p.fill, p.color);
+      } else useFill(ctx, st.fill, st.color);
+    }
+    ctx.fillRect(ox, oy, r, r);
+  };
+  if (radii[0]) paintCorner(x, y, n.n, n.w);
+  if (radii[1]) paintCorner(x + TILE - r, y, n.n, n.e);
+  if (radii[2]) paintCorner(x + TILE - r, y + TILE - r, n.s, n.e);
+  if (radii[3]) paintCorner(x, y + TILE - r, n.s, n.w);
 
   ctx.save();
   ctx.beginPath();
@@ -869,23 +870,6 @@ function paintSoftFloor(ctx: CanvasRenderingContext2D, tile: Tile, world: World,
   useFill(ctx, st.fill, st.color);
   ctx.fillRect(x, y, TILE, TILE);
   ctx.restore();
-
-  const punch = (cx: number, cy: number, a0: number, a1: number) => {
-    useFill(ctx, "sand", SAND);
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, LAND_INNER, a0, a1, true);
-    ctx.closePath();
-    ctx.fill();
-  };
-  const ne = tileAt(world, tile.x + 1, tile.y - 1);
-  const nw = tileAt(world, tile.x - 1, tile.y - 1);
-  const se = tileAt(world, tile.x + 1, tile.y + 1);
-  const sw = tileAt(world, tile.x - 1, tile.y + 1);
-  if (sameN && sameE && isWater(ne)) punch(x + TILE, y, Math.PI, Math.PI / 2);
-  if (sameN && sameW && isWater(nw)) punch(x, y, Math.PI / 2, 0);
-  if (sameS && sameE && isWater(se)) punch(x + TILE, y + TILE, (Math.PI * 3) / 2, Math.PI);
-  if (sameS && sameW && isWater(sw)) punch(x, y + TILE, 0, (Math.PI * 3) / 2);
 }
 
 function paintRiverGround(
@@ -1154,10 +1138,23 @@ function collectPaintedProps(
       push(key, fx, fy, TILE * (1.2 + salt(15) * 0.15));
     }
   } else if (tile.biome === "swamp") {
-    push("reeds", x + 10 + salt(2) * 24, y + TILE - 6, 18 + salt(3) * 8);
-    if (salt(4) > 0.35) {
-      push("birch", x + TILE / 2 + (salt(5) - 0.5) * 16, y + TILE - 8, TILE * (1.15 + salt(6) * 0.2));
+    if (tile.resource === "herb" && tile.amount > 0) {
+      push("reeds", x + 10 + salt(2) * 24, y + TILE - 6, 18 + salt(3) * 8);
+      if (tile.amount > 2) push("reeds", x + 26 + salt(4) * 10, y + TILE - 8, 14 + salt(5) * 6);
     }
+  }
+
+  if (
+    tile.resource === "herb" &&
+    tile.amount > 0 &&
+    tile.road === "none" &&
+    !tile.plot &&
+    tile.building === "none" &&
+    tile.biome !== "swamp" &&
+    !isWooded(tile)
+  ) {
+    const key: keyof typeof SPR_TREE = salt(40) > 0.55 ? "bush" : "flowers";
+    push(key, x + TILE / 2 + (salt(41) - 0.5) * 14, y + TILE - 8, 16 + salt(42) * 8);
   }
 
   for (const s of spots) {
@@ -1371,6 +1368,11 @@ function paintWaterShade(ctx: CanvasRenderingContext2D, tile: Tile, world: World
   if (isWater(n.e)) ctx.fillRect(x + TILE - 3, y, 3, TILE);
 }
 
+function paintFieldEarth(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  useFill(ctx, "field", "#8a623c");
+  ctx.fillRect(x, y, TILE, TILE);
+}
+
 function paintCobbles(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number, street: boolean) {
   ensureFillPatterns(ctx);
   if (hasFill("cobble")) {
@@ -1446,6 +1448,8 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
     if (paintedPropsOn() && tile.biome === "ford") paintFordStones(ctx, tile, x, y);
   } else if (isYardPave(tile)) {
     paintCobbles(ctx, tile, x, y, false);
+  } else if (tile.building === "field") {
+    paintFieldEarth(ctx, x, y);
   } else if (floorOf(tile)) {
     paintSoftFloor(ctx, tile, world, x, y);
   } else {
@@ -2027,16 +2031,10 @@ function paintPit(ctx: CanvasRenderingContext2D, tile: Tile, world: World, x: nu
 }
 
 function paintHerb(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number) {
-  if (tile.building !== "none" || tile.caravan || tile.commons || tile.plot) return;
+  if (paintedPropsOn()) return;
+  if (tile.building !== "none" || tile.caravan || tile.commons || tile.plot || tile.road !== "none") return;
   const has = tile.resource === "herb" && tile.amount > 0;
-  const meadow = tile.biome === "plains" && !tile.commons;
-  if (!has) {
-    if (meadow && tile.resource === "herb" && tile.scarred) {
-      ctx.fillStyle = "rgba(120, 108, 72, 0.28)";
-      ctx.fillRect(x + 6, y + 16, TILE - 12, 14);
-    }
-    return;
-  }
+  if (!has) return;
   const n = Math.min(5, Math.max(1, tile.amount));
   const tufts: Array<[number, number]> = [
     [8, 30],
@@ -2089,7 +2087,7 @@ function paintCut(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: numbe
     }
     return;
   }
-  if ((tile.building === "field" || tile.biome === "fertile") && tile.amount <= 0) {
+  if ((tile.building === "field") && tile.amount <= 0) {
     ctx.fillStyle = "rgba(122, 96, 58, 0.55)";
     ctx.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
     ctx.strokeStyle = "rgba(72, 54, 32, 0.7)";

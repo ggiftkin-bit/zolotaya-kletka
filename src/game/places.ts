@@ -39,7 +39,7 @@ export function lootOn(tile: Tile): Loot[] {
       kind: "resource",
       item: tile.resource,
       n: tile.amount,
-      label: tile.resource === "herb" ? `Трава ×${tile.amount} · сорвать` : `${ITEM_LABEL[tile.resource]} ×${tile.amount}`,
+      label: tile.resource === "herb" ? `Трава ×${tile.amount} · нарвать` : `${ITEM_LABEL[tile.resource]} ×${tile.amount}`,
     });
   }
   return out;

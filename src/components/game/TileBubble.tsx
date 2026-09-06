@@ -392,7 +392,7 @@ function PickPane({
               : loot[0]!.kind === "pile"
                 ? "Поднять"
                 : loot[0]!.item === "herb"
-                  ? "Сорвать траву"
+                  ? "Нарвать траву"
                   : `Собрать ${ITEM_LABEL[loot[0]!.item]}`
           }
           sub={loot[0]!.label}
