@@ -682,7 +682,7 @@ function paintBiome(
   if (img) drawAtlas(ctx, img, 3, 3, biomeIndex(biome, false, wooded), x, y, TILE, TILE, TILE_ATLAS_PAD);
 }
 
-const OUTER = BANK + 4;
+const OUTER = 6;
 const INNER = 2;
 
 function paintRiverGround(
@@ -699,14 +699,23 @@ function paintRiverGround(
   const sW = isWater(n.s);
   const wW = isWater(n.w);
   const ford = tile.biome === "ford";
-  const anyBank = !nW || !eW || !sW || !wW;
+  const waterN = (nW ? 1 : 0) + (eW ? 1 : 0) + (sW ? 1 : 0) + (wW ? 1 : 0);
+  const anyBank = waterN < 4;
   const waterFill = ford ? BIOME_FILL.ford : BIOME_FILL.river;
   const seW = isWater(tileAt(world, tile.x + 1, tile.y + 1));
   const neW = isWater(tileAt(world, tile.x + 1, tile.y - 1));
   const swW = isWater(tileAt(world, tile.x - 1, tile.y + 1));
   const nwW = isWater(tileAt(world, tile.x - 1, tile.y - 1));
 
-  if (anyBank) {
+  if (waterN >= 2) {
+    ctx.fillStyle = waterFill;
+    ctx.fillRect(x, y, TILE, TILE);
+    ctx.fillStyle = SAND;
+    if (!nW) ctx.fillRect(x, y, TILE, BANK);
+    if (!sW) ctx.fillRect(x, y + TILE - BANK, TILE, BANK);
+    if (!wW) ctx.fillRect(x, y, BANK, TILE);
+    if (!eW) ctx.fillRect(x + TILE - BANK, y, BANK, TILE);
+  } else if (anyBank) {
     ctx.fillStyle = SAND;
     ctx.fillRect(x, y, TILE, TILE);
     ctx.fillStyle = SAND_WET;
@@ -726,11 +735,12 @@ function paintRiverGround(
   const iy = y + padN;
   const iw = TILE - padW - padE;
   const ih = TILE - padN - padS;
+  const cap = waterN >= 2 ? 0 : OUTER;
   const radii: [number, number, number, number] = [
-    padN && padW ? OUTER : 0,
-    padN && padE ? OUTER : 0,
-    padS && padE ? OUTER : 0,
-    padS && padW ? OUTER : 0,
+    padN && padW ? cap : 0,
+    padN && padE ? cap : 0,
+    padS && padE ? cap : 0,
+    padS && padW ? cap : 0,
   ];
 
   ctx.save();
