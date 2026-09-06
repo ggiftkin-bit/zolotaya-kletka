@@ -90,7 +90,7 @@ import type {
   Trader,
   Weather,
 } from "./types";
-import { chebyshev, dummyHome, foeById, gearSlot, leaveChance, makeHamletDummies, occupantAt, strikeDmg, talkChance, youFighter } from "./fight";
+import { chebyshev, dummyHome, foeById, gearSlot, leaveChance, makeHamletDummies, occupantAt, rememberLiveFoe, strikeDmg, talkChance, youFighter } from "./fight";
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
@@ -344,15 +344,10 @@ function meetBlock(): boolean {
 
 let meetIgnore = "";
 
-function maybeMeetHere(x: number, y: number) {
-  const s = useGame.getState();
-  if (s.meet) return;
-  const d = occupantAt(s.dummies ?? [], s.others ?? [], x, y);
-  if (!d || d.life !== "alive") return;
-  if (meetIgnore === `${x},${y},${d.id}`) return;
-  if (meetWhy(s, d)) return;
-  startMeet(d.id);
+export function meetIsIgnored(x: number, y: number, id: string) {
+  return meetIgnore === `${x},${y},${id}`;
 }
+
 
 function busyBlock(): boolean {
   const s = useGame.getState();
@@ -533,6 +528,7 @@ type Actions = {
   buyFromShop: (item: ItemId, qty: number) => void;
   sellToShop: (item: ItemId, qty: number) => void;
   startMeet: (foeId: string) => void;
+  meetPass: (foeId?: string) => void;
   meetHit: () => void;
   meetLeave: () => void;
   meetDrop: () => void;
@@ -1195,6 +1191,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   buyFromShop: (item, qty) => buyFromShop(item, qty),
   sellToShop: (item, qty) => sellToShop(item, qty),
   startMeet: (foeId) => startMeet(foeId),
+  meetPass: (foeId) => meetPass(foeId),
   meetHit: () => meetHit(),
   meetLeave: () => meetLeave(),
   meetDrop: () => meetDrop(),
@@ -1346,7 +1343,6 @@ function catchUpSim(dt: number) {
     const [ix, iy] = meetIgnore.split(",");
     if (`${here.character.x}` !== ix || `${here.character.y}` !== iy) meetIgnore = "";
   }
-  if (!here.meet) maybeMeetHere(here.character.x, here.character.y);
 }
 
 function advanceTravel(now: number) {
@@ -1415,11 +1411,14 @@ function advanceTravel(now: number) {
       ].slice(-10),
     });
     void pullSpot();
-    queueMicrotask(() => maybeMeetHere(x, y));
+    const landed = occupantAt(useGame.getState().dummies ?? [], useGame.getState().others ?? [], x, y);
+    if (landed && landed.life === "alive" && meetIgnore !== `${x},${y},${landed.id}`) {
+      useGame.setState({ inspect: { x, y }, selected: { x, y } });
+    }
     return;
   }
   const occ = occupantAt(s.dummies ?? [], s.others ?? [], x, y);
-  if (stepped && occ && occ.life === "alive") {
+  if (stepped && occ && occ.life === "alive" && meetIgnore !== `${x},${y},${occ.id}`) {
     viewPos.x = x;
     viewPos.y = y;
     const c = useGame.getState().character;
@@ -1429,10 +1428,9 @@ function advanceTravel(now: number) {
       travel: null,
       preview: null,
       selected: { x, y },
-      inspect: null,
+      inspect: { x, y },
     });
     void pullSpot();
-    queueMicrotask(() => maybeMeetHere(x, y));
     return;
   }
   const cur = travel.path[index]!;
@@ -2469,7 +2467,10 @@ function skipTravel() {
     log: pushLog(s.log, `Подорожная −${goldTxt(SKIP_GOLD)}. Пришёл сразу.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: last.x, y: last.y, text: "сразу", tone: "gold" as const }].slice(-10),
   });
-  queueMicrotask(() => maybeMeetHere(last.x, last.y));
+  const landed = occupantAt(useGame.getState().dummies ?? [], useGame.getState().others ?? [], last.x, last.y);
+  if (landed && landed.life === "alive") {
+    useGame.setState({ inspect: { x: last.x, y: last.y } });
+  }
 }
 
 function bailOut() {
@@ -4454,7 +4455,35 @@ function fillPitHere() {
 
 function foeOf(s: GameState) {
   if (!s.meet) return null;
-  return foeById(s.dummies ?? [], s.others ?? [], s.meet.foeId);
+  const base = foeById(s.dummies ?? [], s.others ?? [], s.meet.foeId);
+  if (!base) return null;
+  const hp = s.meet.foeHp ?? base.hp;
+  return {
+    ...base,
+    hp,
+    hand: s.meet.foeHand !== undefined ? s.meet.foeHand : base.hand,
+    body: s.meet.foeBody !== undefined ? s.meet.foeBody : base.body,
+    shield: s.meet.foeShield !== undefined ? s.meet.foeShield : base.shield,
+    helm: s.meet.foeHelm !== undefined ? s.meet.foeHelm : base.helm,
+    life: hp <= 0 ? ("down" as const) : base.life,
+  };
+}
+
+function snapMeet(foe: Dummy, extra: Partial<Meet> = {}): Meet {
+  return {
+    foeId: foe.id,
+    turn: "you",
+    steps: 0,
+    spoke: false,
+    firstDone: false,
+    live: !foe.dummy,
+    foeHp: foe.hp,
+    foeHand: foe.hand,
+    foeBody: foe.body,
+    foeShield: foe.shield,
+    foeHelm: foe.helm,
+    ...extra,
+  };
 }
 
 function meetWhy(s: GameState, foe: Dummy): string | null {
@@ -4504,15 +4533,51 @@ function startMeet(foeId: string) {
     return;
   }
   cancelNotice("walk");
+  if (!foe.dummy) {
+    rememberLiveFoe(foe.id, {
+      hp: foe.hp,
+      hand: foe.hand,
+      body: foe.body,
+      shield: foe.shield,
+      helm: foe.helm,
+      life: foe.life,
+    });
+  }
   useGame.setState({
-    meet: { foeId, turn: "you", steps: 0, spoke: false, firstDone: false, live: !foe.dummy },
+    meet: snapMeet(foe),
     inspect: null,
     travel: null,
     preview: null,
     log: pushLog(s.log, `Встреча с ${foe.name}. Один шаг — один выбор.`),
-    hint: { text: `Встреча: ${foe.name}. Удар, отойти, сдаться.`, tone: "ok" },
+    hint: { text: `Встреча: ${foe.name}. Удар, пройти мимо, сдаться.`, tone: "ok" },
   });
   useGame.getState().persist();
+}
+
+function meetPass(foeId?: string) {
+  const s = useGame.getState();
+  const foe = foeId
+    ? foeById(s.dummies ?? [], s.others ?? [], foeId)
+    : foeOf(s);
+  if (s.meet && !s.meet.live && foe && s.phase === "night" && s.meet.turn === "you") {
+    if (Math.random() > leaveChance(true, s.character.skills.stealth ?? 0)) {
+      useGame.setState({
+        meet: { ...s.meet, turn: "foe", steps: s.meet.steps + 1, firstDone: true },
+        inspect: null,
+        log: pushLog(s.log, "Не оторвался. Ночь держит."),
+        hint: { text: "Не оторвался.", tone: "bad" },
+      });
+      useGame.getState().persist();
+      window.setTimeout(() => dummyAnswer(), 400);
+      return;
+    }
+  }
+  if (foe) meetIgnore = `${s.character.x},${s.character.y},${foe.id}`;
+  closeMeet({
+    inspect: null,
+    log: pushLog(s.log, "Прошёл мимо."),
+    hint: { text: "Прошёл мимо.", tone: "ok" },
+  });
 }
 
 function closeMeet(extra?: Partial<GameState>) {
@@ -4571,19 +4636,31 @@ function meetHit() {
     c = { ...c, pacts: { ...c.pacts, [foe.id]: "feud" } };
   }
   const live = !!(s.meet.live || !foe.dummy);
-  if (live) {
-    useGame.setState({
-      character: c,
-      meet: { ...s.meet, firstDone: true, steps: s.meet.steps + 1, live: true },
-      log: pushLog(s.log, `Ударил ${foe.name}. Ждёт его шага. Можно отойти.`),
-      hint: { text: `Удар. ${foe.name} стоит.`, tone: "ok" },
-      floaters: [...s.floaters, { id: ++floaterSeq, x: foe.x, y: foe.y, text: "удар", tone: "ok" as const }].slice(-10),
+  if (!foe.dummy) {
+    rememberLiveFoe(foe.id, {
+      hp: nextFoe.hp,
+      hand: nextFoe.hand,
+      body: nextFoe.body,
+      shield: nextFoe.shield,
+      helm: nextFoe.helm,
+      life: nextFoe.hp <= 0 ? "down" : "alive",
     });
-    useGame.getState().persist();
-    return;
   }
+  const meetNext: Meet = {
+    ...s.meet,
+    firstDone: true,
+    steps: s.meet.steps + 1,
+    live,
+    foeHp: nextFoe.hp,
+    foeHand: nextFoe.hand,
+    foeBody: nextFoe.body,
+    foeShield: nextFoe.shield,
+    foeHelm: nextFoe.helm,
+  };
+  const bits = [`удар ${hit.dmg}`];
+  if (hit.sneak) bits.unshift("сбоку");
   const tile = tileAt(s.world, foe.x, foe.y);
-  const lawNow = tile ? hasLaw(s.world, tile) && isForeignYard(tile) : false;
+  const lawNow = !live && tile ? hasLaw(s.world, tile) && isForeignYard(tile) : false;
   let jailed = false;
   if (lawNow) {
     const p = stealChance(s.world, tile!, c, s.phase === "night");
@@ -4599,8 +4676,6 @@ function meetHit() {
       }
     }
   }
-  const bits = [`удар ${hit.dmg}`];
-  if (hit.sneak) bits.unshift("сбоку");
   if (nextFoe.hp <= 0) {
     nextFoe = { ...nextFoe, hp: 0, life: "down", downAt: Date.now() };
     if (tile) {
@@ -4610,10 +4685,10 @@ function meetHit() {
     }
     useGame.setState({
       character: c,
-      dummies: applyDummy(s.dummies, nextFoe),
+      dummies: live ? s.dummies : applyDummy(s.dummies, nextFoe),
       meet: null,
       world: { ...s.world, tiles: s.world.tiles },
-      log: pushLog(s.log, `${foe.name} упал. Ноша на клетке. Не добивать.`),
+      log: pushLog(s.log, `Ударил ${foe.name}: −${hit.dmg}. ${foe.name} упал. Ноша на клетке. Не добивать.`),
       hint: { text: `${foe.name} упал.`, tone: "ok" },
       floaters: [...s.floaters, { id: ++floaterSeq, x: foe.x, y: foe.y, text: bits.join(" · "), tone: "ok" as const }].slice(-10),
     });
@@ -4637,13 +4712,13 @@ function meetHit() {
   }
   useGame.setState({
     character: c,
-    dummies: applyDummy(s.dummies, nextFoe),
-    meet: { ...s.meet, turn: "foe", steps: s.meet.steps + 1, firstDone: true },
+    dummies: live ? s.dummies : applyDummy(s.dummies, nextFoe),
+    meet: { ...meetNext, turn: "foe" },
     log: pushLog(s.log, `Ударил ${foe.name}: −${hit.dmg} ран. Ждёт ответа.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: foe.x, y: foe.y, text: bits.join(" · "), tone: "ok" as const }].slice(-10),
   });
   useGame.getState().persist();
-  window.setTimeout(() => dummyAnswer(), 420);
+  if (!live) window.setTimeout(() => dummyAnswer(), 400);
 }
 
 function dummyAnswer() {
@@ -4903,6 +4978,8 @@ function meetTalk() {
   });
   useGame.getState().persist();
 }
+
+
 
 
 

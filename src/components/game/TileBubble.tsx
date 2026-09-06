@@ -10,7 +10,7 @@ import { occupantAt } from "@/game/fight";
 import { canFoundVillage, clusterHint, hamletTitle, hasOwnYard } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
 import { canDigReason, fillPay } from "@/game/pit";
-import { useGame } from "@/game/store";
+import { useGame, meetIsIgnored } from "@/game/store";
 import type { BuildingKind, ItemId, Tile } from "@/game/types";
 import { burnableFence, CLAD_STONE, isRoof, MATTER_LABEL, stoneFence } from "@/game/work";
 import { isWalkable, tileAt } from "@/game/worldgen";
@@ -430,24 +430,29 @@ function PickPane({
           }}
         />
       ))}
-      {dummy && (
-        <Sticker
-          title={dummy.life !== "alive" ? `${dummy.name} лежит` : `Встреча · ${dummy.name}`}
-          sub={
-            dummy.life !== "alive"
-              ? "не добивать"
-              : here
-                ? dummy.dummy
-                  ? "ударить, отойти, сдаться"
-                  : "лист: отойти или говорить"
-                : near
-                  ? "встань на его клетку"
-                  : "иди на его клетку"
-          }
-          ico={<Ico i={ICO.stake} className="size-11 overflow-hidden rounded-[12px]" />}
-          onClick={() => g.startMeet(dummy.id)}
-          dim={!here || dummy.life !== "alive" || down || locked}
-        />
+      {dummy && dummy.life !== "alive" && (
+        <p className="text-[13px] text-muted-foreground">{dummy.name} лежит. Не добивать.</p>
+      )}
+      {dummy && dummy.life === "alive" && here && !down && !locked && !meetIsIgnored(tile.x, tile.y, dummy.id) && (
+        <>
+          <Sticker
+            title="Встретиться"
+            sub={dummy.dummy ? `${dummy.name} · манекен хутора` : `${dummy.name} · человек`}
+            ico={<Ico i={ICO.stake} className="size-11 overflow-hidden rounded-[12px]" />}
+            onClick={() => g.startMeet(dummy.id)}
+          />
+          <Sticker
+            title="Пройти мимо"
+            sub="лист не откроется"
+            ico={<Ico i={ICO.boots} className="size-11 overflow-hidden rounded-[12px]" />}
+            onClick={() => g.meetPass(dummy.id)}
+          />
+        </>
+      )}
+      {dummy && dummy.life === "alive" && !here && (
+        <p className="text-[13px] text-muted-foreground">
+          {dummy.name} здесь. Встань на его клетку. С соседней бой не начать.
+        </p>
       )}
       {here && !tile.pit && canDigReason(g.world, tile, g.character.hand) == null && (
         <Sticker

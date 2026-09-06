@@ -7,7 +7,7 @@
 | файл | куда |
 |---|---|
 | `/game/v3-ravnina.jpg` | равнина, commons, луг |
-| `/game/v3-trakt.jpg` | грунтовый тракт, только лента ~0.42 TILE |
+| `/game/v3-trakt.jpg` | грунтовый тракт, только лента ~0.32 TILE |
 | `/game/v3-bruschatka.jpg` | двор plot и каменный тракт, масштаб 0.10 |
 | `/game/v3-boloto.jpg` | болото |
 | `/game/v3-melkovode.jpg` | только брод, не вся река |

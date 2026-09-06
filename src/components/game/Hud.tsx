@@ -818,62 +818,74 @@ function MeetSheet() {
   if (!foe) return null;
   const you = g.character;
   const mine = meet.turn === "you";
-  const live = !!(meet.live || !foe.dummy);
+  const foeHp = meet.foeHp ?? foe.hp;
+  const foeHand = meet.foeHand !== undefined ? meet.foeHand : foe.hand;
   const friend = you.pacts[foe.id] === "friend";
   const canTalk = !meet.spoke && ((you.skills.speech ?? 0) >= 3 || friend);
+  const [more, setMore] = useState(false);
   return (
     <div className="pointer-events-none absolute inset-0 z-[42]">
       <div
-        className="pointer-events-auto absolute inset-x-0 bottom-[var(--hud-dock)] mx-auto max-w-lg overflow-y-auto rounded-t-[24px] border border-border bg-panel px-4 pb-4 pt-3 shadow-panel"
-        style={{ maxHeight: "min(62vh, 28rem)" }}
+        className="pointer-events-auto absolute inset-x-0 bottom-[var(--hud-dock)] mx-auto max-w-lg overflow-y-auto rounded-t-[24px] border border-border bg-panel px-3 pb-3 pt-2 shadow-panel"
+        style={{ maxHeight: "min(42vh, 18rem)" }}
       >
-        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" />
-        <p className="font-display text-2xl leading-none">Встреча</p>
-        <p className="mt-1 text-[13px] text-muted-foreground">
-          {foe.name}
-          {friend ? " · друг" : you.pacts[foe.id] === "feud" ? " · вражда" : ""}
-          {live ? " · человек" : foe.dummy ? " · манекен хутора" : ""}
-        </p>
-        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-          <p>
-            Ты · раны <span className="font-display text-lg tabular-nums">{Math.round(you.hp)}</span>
-          </p>
-          <p>
-            {foe.name} · <span className="font-display text-lg tabular-nums">{Math.round(foe.hp)}</span>
-          </p>
+        <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-border" />
+        <div className="flex items-end justify-between gap-3">
+          <p className="font-display text-[22px] leading-none">{you.name || "ты"}</p>
+          <p className="text-[13px] font-medium text-muted-foreground">{mine ? "твой шаг" : "ждёт ответа"}</p>
+          <p className="font-display text-[22px] leading-none">{foe.name}</p>
         </div>
-        <p className="mt-1 text-[12px] text-muted-foreground">
-          {mine ? (live && meet.firstDone ? "Удар прошёл. Ждёт его шага." : "Твой шаг.") : "Ждёт ответа."} Сила {Math.floor(you.energy)} · в руке{" "}
-          {you.hand ? ITEM_LABEL[you.hand] : "пусто"}
-          {you.body ? ` · ${ITEM_LABEL[you.body]}` : ""}
-          {you.shield ? ` · ${ITEM_LABEL[you.shield]}` : ""}
-          {you.helm ? ` · ${ITEM_LABEL[you.helm]}` : ""}
-          {foe.hand ? ` · у него ${ITEM_LABEL[foe.hand]}` : " · у него пусто"}
-          {foe.shield ? `+${ITEM_LABEL[foe.shield]}` : ""}
-          {foe.body ? `+${ITEM_LABEL[foe.body]}` : ""}
+        <div className="mt-2 grid grid-cols-2 gap-3">
+          <div>
+            <div className="h-2.5 overflow-hidden rounded-full bg-raised">
+              <div className="h-full rounded-full bg-[#6b3a2a]" style={{ width: `${Math.max(0, Math.min(100, you.hp))}%` }} />
+            </div>
+            <p className="mt-0.5 font-display text-lg tabular-nums leading-none">{Math.round(you.hp)}</p>
+          </div>
+          <div className="text-right">
+            <div className="h-2.5 overflow-hidden rounded-full bg-raised">
+              <div className="ml-auto h-full rounded-full bg-[#6b3a2a]" style={{ width: `${Math.max(0, Math.min(100, foeHp))}%` }} />
+            </div>
+            <p className="mt-0.5 font-display text-lg tabular-nums leading-none">{Math.round(foeHp)}</p>
+          </div>
+        </div>
+        <p className="mt-2 text-[13px] leading-snug text-foreground">
+          сила {Math.floor(you.energy)} · в руке {you.hand ? ITEM_LABEL[you.hand] : "пусто"}
+          {foeHand ? ` · у него ${ITEM_LABEL[foeHand]}` : " · у него пусто"}
         </p>
-        <div className="mt-3 space-y-2">
-          <Button className="h-12 w-full" disabled={!mine} onClick={() => g.meetHit()}>
+        {!mine && <p className="mt-1 text-[14px] font-medium">Ждёт ответа</p>}
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <Button className="h-11" disabled={!mine} onClick={() => g.meetHit()}>
             Ударить · −2 силы
           </Button>
-          <Button className="h-12 w-full" variant="secondary" disabled={!mine} onClick={() => g.meetLeave()}>
-            Отойти
+          <Button className="h-11" variant="secondary" onClick={() => g.meetPass()}>
+            Пройти мимо
           </Button>
-          <Button className="h-12 w-full" variant="secondary" disabled={!mine} onClick={() => g.meetDrop()}>
-            Кинуть ношу
-          </Button>
-          <Button className="h-12 w-full" variant="secondary" disabled={!mine} onClick={() => g.meetYield()}>
+          <Button className="h-11 col-span-2" variant="secondary" disabled={!mine} onClick={() => g.meetYield()}>
             Сдаться
           </Button>
-          {canTalk && (
-            <Button className="h-12 w-full" variant="secondary" disabled={!mine} onClick={() => g.meetTalk()}>
-              Говорить · ноша без удара
-            </Button>
-          )}
         </div>
-        <p className="mt-3 text-[12px] leading-snug text-muted-foreground">
-          Упал — не погиб. Закон после удара, не вместо. Добивать лежачего нельзя.
-        </p>
+        <button
+          type="button"
+          className="mt-2 text-[12px] text-muted-foreground underline-offset-2 hover:underline"
+          onClick={() => setMore((v) => !v)}
+        >
+          {more ? "скрыть" : "ещё"}
+        </button>
+        {more && (
+          <div className="mt-1 grid grid-cols-2 gap-2">
+            <Button className="h-10" variant="secondary" disabled={!mine} onClick={() => g.meetDrop()}>
+              Кинуть ношу
+            </Button>
+            {canTalk ? (
+              <Button className="h-10" variant="secondary" disabled={!mine} onClick={() => g.meetTalk()}>
+                Говорить
+              </Button>
+            ) : (
+              <span />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

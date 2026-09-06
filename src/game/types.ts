@@ -319,6 +319,11 @@ export type Meet = {
   firstDone: boolean;
   /** Живой человек, не манекен. Пока нет его шага по сети — не бьёт в ответ. */
   live?: boolean;
+  foeHp?: number;
+  foeHand?: ItemId | null;
+  foeBody?: ItemId | null;
+  foeShield?: ItemId | null;
+  foeHelm?: ItemId | null;
 };
 
 export type Dummy = {

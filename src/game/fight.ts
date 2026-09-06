@@ -159,26 +159,55 @@ export function dummyAt(dummies: Dummy[], x: number, y: number): Dummy | null {
   return dummies.find((d) => d.x === x && d.y === y) ?? null;
 }
 
-/** Живого на клетке рисуем тем же листом, что манекена. Здоровье книги не трогаем. */
+/** Снимок живого на этом клиенте: hp/снасть после удара, не вечные 100. */
+const liveSnap: Record<
+  string,
+  {
+    hp: number;
+    hand: ItemId | null;
+    body: ItemId | null;
+    shield: ItemId | null;
+    helm: ItemId | null;
+    life: "alive" | "down";
+  }
+> = {};
+
+export function rememberLiveFoe(
+  id: string,
+  patch: Partial<(typeof liveSnap)[string]>,
+) {
+  const prev = liveSnap[id] ?? {
+    hp: 100,
+    hand: null as ItemId | null,
+    body: null as ItemId | null,
+    shield: null as ItemId | null,
+    helm: null as ItemId | null,
+    life: "alive" as const,
+  };
+  liveSnap[id] = { ...prev, ...patch };
+}
+
+/** Живого на клетке рисуем тем же листом, что манекена. */
 export function liveAsDummy(o: OtherPawn): Dummy {
+  const snap = liveSnap[o.id];
   return {
     id: o.id,
     name: o.name || "чужой",
     color: o.color || MEEPLE_COLORS[0]!,
     x: o.x,
     y: o.y,
-    hp: 100,
+    hp: snap?.hp ?? 100,
     energy: ENERGY_MAX,
     satiety: 80,
     warmth: 80,
     water: 80,
-    hand: null,
-    body: null,
-    shield: null,
-    helm: null,
+    hand: snap?.hand ?? null,
+    body: snap?.body ?? null,
+    shield: snap?.shield ?? null,
+    helm: snap?.helm ?? null,
     profession: "wanderer",
     skills: zSkills(0, 0, 0),
-    life: "alive",
+    life: snap?.life ?? "alive",
     dummy: false,
     downAt: 0,
     inventory: {},
