@@ -42,7 +42,7 @@ const FILL_SCALE: Record<FillKind, number> = {
   plank: 0.35,
   needle: 0.52,
   rings: 0.22,
-  field: 0.08,
+  field: 0.14,
   ford: 0.16,
   mountain: 0.12,
   ore: 0.12,
@@ -50,7 +50,7 @@ const FILL_SCALE: Record<FillKind, number> = {
   moatWet: 0.4,
 };
 let fillPatterns: Partial<Record<FillKind, CanvasPattern>> | null = null;
-const FILL_CACHE = "v6";
+const FILL_CACHE = "v7";
 let fillCacheKey = "";
 
 function makeFillPattern(ctx: CanvasRenderingContext2D, img: HTMLImageElement, scale: number) {
@@ -772,7 +772,7 @@ function paintBiome(
   wooded = true,
 ) {
   if (FILL_TEX && biome === "fertile") {
-    useFill(ctx, "meadow", BIOME_FILL.fertile);
+    useFill(ctx, "field", "#8a623c");
     ctx.fillRect(x, y, TILE, TILE);
     return;
   }
@@ -806,6 +806,7 @@ type SoftFloor = "meadow" | "moss" | "field" | "swamp";
 function floorOf(t: Tile | null | undefined): SoftFloor | null {
   if (!t || isWater(t) || t.pit || isYardPave(t)) return null;
   if (t.building === "field") return "field";
+  if (t.biome === "fertile") return "field";
   if (isWooded(t)) return "moss";
   if (t.biome === "swamp") return "swamp";
   if (t.biome === "mountain" || t.biome === "ore") return null;
