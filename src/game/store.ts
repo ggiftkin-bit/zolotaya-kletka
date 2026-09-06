@@ -90,11 +90,11 @@ import type {
   Trader,
   Weather,
 } from "./types";
-import { chebyshev, dummyHome, foeById, gearSlot, leaveChance, makeHamletDummies, occupantAt, rememberLiveFoe, strikeDmg, talkChance, youFighter } from "./fight";
+import { chebyshev, dummyHome, foeById, gearSlot, ghostLiveFoe, leaveChance, makeHamletDummies, occupantAt, rememberLiveFoe, strikeDmg, talkChance, youFighter } from "./fight";
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
-import { bindBookStore, flushBook, noteDeed, openBookFromServer, pullSpot, resetBookPawn } from "./book-sync";
+import { bindBookStore, flushBook, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
 
 let worldAcc = 0;
 
@@ -587,6 +587,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   others: [],
   meet: null,
   dummies: [],
+  selfId: "",
 
   boot: () => {
     const saved = loadGame();
@@ -676,6 +677,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         others: [],
         meet: saved.meet ?? null,
         dummies: makeHamletDummies(world, saved.dummies),
+        selfId: get().selfId,
       });
       queueMicrotask(() => useGame.getState().catchUp());
     }
@@ -4455,8 +4457,16 @@ function fillPitHere() {
 
 function foeOf(s: GameState) {
   if (!s.meet) return null;
-  const base = foeById(s.dummies ?? [], s.others ?? [], s.meet.foeId);
-  if (!base) return null;
+  const found = foeById(s.dummies ?? [], s.others ?? [], s.meet.foeId);
+  const base =
+    found ??
+    ghostLiveFoe(s.meet.foeId, { x: s.character.x, y: s.character.y }, {
+      hp: s.meet.foeHp,
+      hand: s.meet.foeHand,
+      body: s.meet.foeBody,
+      shield: s.meet.foeShield,
+      helm: s.meet.foeHelm,
+    });
   const hp = s.meet.foeHp ?? base.hp;
   return {
     ...base,
@@ -4493,6 +4503,10 @@ function meetWhy(s: GameState, foe: Dummy): string | null {
   if (hold) return hold;
   if (isBusy(c) && !c.busy?.hired) return `Занят: ${BUSY_LABEL[c.busy!.kind]}.`;
   if (foe.life !== "alive") return "Лежит. Не добивать.";
+  if (s.meet?.live && s.meet.foeId === foe.id) {
+    if (chebyshev(c.x, c.y, foe.x, foe.y) > 1) return "Он ушёл.";
+    return null;
+  }
   if (c.x !== foe.x || c.y !== foe.y) return "Встань на его клетку.";
   const tile = tileAt(s.world, c.x, c.y);
   if (tile && (tile.biome === "river" || tile.building === "moat") && tile.road !== "bridge") return "Река или ров. Нужен мост.";
@@ -4552,6 +4566,18 @@ function startMeet(foeId: string) {
     hint: { text: `Встреча: ${foe.name}. Удар, пройти мимо, сдаться.`, tone: "ok" },
   });
   useGame.getState().persist();
+  if (!foe.dummy && s.bookOn) {
+    const c = s.character;
+    void postOpenFight(foe.id, c.x, c.y, {
+      name: c.name,
+      color: c.color,
+      hp: c.hp,
+      hand: c.hand,
+      body: c.body ?? null,
+      shield: c.shield ?? null,
+      helm: c.helm ?? null,
+    });
+  }
 }
 
 function meetPass(foeId?: string) {
@@ -4581,9 +4607,11 @@ function meetPass(foeId?: string) {
 }
 
 function closeMeet(extra?: Partial<GameState>) {
+  const live = !!useGame.getState().meet?.live;
   noteMeetClosed();
   useGame.setState({ meet: null, ...extra });
   useGame.getState().persist();
+  if (live) void postCloseFight();
 }
 
 function noteMeetClosed() {
@@ -4693,6 +4721,7 @@ function meetHit() {
       floaters: [...s.floaters, { id: ++floaterSeq, x: foe.x, y: foe.y, text: bits.join(" · "), tone: "ok" as const }].slice(-10),
     });
     useGame.getState().persist();
+    if (live) void postStrikeFight(hit.dmg);
     return;
   }
   if (jailed) {
@@ -4718,6 +4747,7 @@ function meetHit() {
     floaters: [...s.floaters, { id: ++floaterSeq, x: foe.x, y: foe.y, text: bits.join(" · "), tone: "ok" as const }].slice(-10),
   });
   useGame.getState().persist();
+  if (live) void postStrikeFight(hit.dmg);
   if (!live) window.setTimeout(() => dummyAnswer(), 400);
 }
 
@@ -4919,6 +4949,7 @@ function meetYield() {
     hint: { text: "Сдался. Не упал.", tone: "ok" },
   });
   useGame.getState().persist();
+  if (s.meet.live) void postCloseFight();
 }
 
 function meetTalk() {

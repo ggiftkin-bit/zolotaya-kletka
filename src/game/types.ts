@@ -309,6 +309,12 @@ export type OtherPawn = {
   color: string;
   x: number;
   y: number;
+  hp?: number;
+  life?: "alive" | "down";
+  hand?: ItemId | null;
+  body?: ItemId | null;
+  shield?: ItemId | null;
+  helm?: ItemId | null;
 };
 
 export type Meet = {
@@ -317,8 +323,10 @@ export type Meet = {
   steps: number;
   spoke: boolean;
   firstDone: boolean;
-  /** Живой человек, не манекен. Пока нет его шага по сети — не бьёт в ответ. */
+  /** Живой человек, не манекен. */
   live?: boolean;
+  /** Лист открылся потому что напали, не ты ткнул. */
+  incoming?: boolean;
   foeHp?: number;
   foeHand?: ItemId | null;
   foeBody?: ItemId | null;
@@ -385,6 +393,8 @@ export type GameState = {
   others: OtherPawn[];
   /** Встреча двух фишек. Нет — листа боя нет. */
   meet: Meet | null;
-  /** Манекены хуторов. Пока нет второго человека. */
+  /** Манекены хуторов. */
   dummies: Dummy[];
+  /** Кто вошёл. Двор в книге пишется этим id, на столе это «ты». */
+  selfId: string;
 };

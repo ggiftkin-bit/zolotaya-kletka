@@ -9,6 +9,7 @@ import { tileAt } from "@/game/worldgen";
 import { fogAt } from "@/game/book";
 import { pullSpot } from "@/game/book-sync";
 import { pileAdd } from "@/game/pile";
+import { useCurrentUser } from "@/lib/auth/use-current-user";
 import { BoardCanvas } from "./BoardCanvas";
 import { Hud } from "./Hud";
 import { StartScreen } from "./StartScreen";
@@ -50,9 +51,12 @@ export function GameApp() {
   const openBook = useGame((s) => s.openBook);
   const persist = useGame((s) => s.persist);
   const bookStatus = useGame((s) => s.bookStatus);
+  const user = useCurrentUser();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!user?.id) return;
+    useGame.setState({ selfId: user.id });
     void ensureArt();
     let live = true;
     void (async () => {
@@ -70,14 +74,14 @@ export function GameApp() {
     return () => {
       live = false;
     };
-  }, [boot, openBook]);
+  }, [user?.id, boot, openBook]);
 
   useEffect(() => {
     if (!started) return;
     const beat = () => {
       void pullSpot();
     };
-    const id = window.setInterval(beat, 4000);
+    const id = window.setInterval(beat, 800);
     const onVis = () => {
       if (document.visibilityState === "hidden") return;
       useGame.getState().catchUp();

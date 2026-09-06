@@ -17,6 +17,49 @@ export const FOG_DARK = 0;
 export const FOG_MEM = 1;
 export const FOG_LIVE = 2;
 
+export type FightSnap = {
+  name: string;
+  color: string;
+  hp: number;
+  hand: Character["hand"];
+  body: Character["body"];
+  shield: Character["shield"];
+  helm: Character["helm"];
+};
+
+export type BookFight = {
+  id: string;
+  x: number;
+  y: number;
+  aId: string;
+  bId: string;
+  turnId: string;
+  aHp: number;
+  bHp: number;
+  aSnap: FightSnap;
+  bSnap: FightSnap;
+  lastHit: { by: string; dmg: number } | null;
+  status: "open" | "done";
+};
+
+export function fightPairId(a: string, b: string) {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+/** В книге двор — user_id. На столе свой двор всегда «you». */
+export function localizeOwner(owner: string | undefined, selfId: string): string {
+  if (!owner) return "";
+  if (selfId && owner === selfId) return "you";
+  if (owner === "you") return "";
+  return owner;
+}
+
+export function publishOwner(owner: string | undefined, selfId: string): string {
+  if (!owner) return "";
+  if (owner === "you") return selfId || "you";
+  return owner;
+}
+
 export type TilePacket = {
   x: number;
   y: number;
@@ -97,6 +140,7 @@ export type BookSnapshot = {
   live: TilePacket[];
   memory: MemoryPacket[];
   others: OtherPawn[];
+  fight: BookFight | null;
   since: string;
 };
 

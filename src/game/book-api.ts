@@ -9,7 +9,10 @@ import {
   FOG_FETCH,
   WORLD_ID,
   WORLD_SEED,
+  fightPairId,
+  type BookFight,
   type BookSnapshot,
+  type FightSnap,
   type MemoryPacket,
   type OtherPawn,
   type PawnBody,
@@ -79,6 +82,7 @@ type OtherDb = {
   color: string;
   x: number;
   y: number;
+  body: PawnBody | null;
 };
 
 let birthLock: Promise<void> | null = null;
@@ -99,6 +103,127 @@ function asClock(row: WorldRow): WorldClock {
 function asSlim(raw: unknown): SlimTile {
   if (!raw || typeof raw !== "object") return { b: "plains" };
   return raw as SlimTile;
+}
+
+function pawnAsOther(r: OtherDb): OtherPawn {
+  const body = r.body && typeof r.body === "object" ? r.body : null;
+  return {
+    id: r.user_id,
+    name: r.name,
+    color: r.color,
+    x: r.x,
+    y: r.y,
+    hp: typeof body?.hp === "number" ? body.hp : 100,
+    life: body?.life === "down" ? "down" : "alive",
+    hand: body?.hand ?? null,
+    body: body?.body ?? null,
+    shield: body?.shield ?? null,
+    helm: body?.helm ?? null,
+  };
+}
+
+function asSnap(raw: unknown, fallback: FightSnap): FightSnap {
+  if (!raw || typeof raw !== "object") return fallback;
+  const o = raw as Partial<FightSnap>;
+  return {
+    name: o.name || fallback.name,
+    color: o.color || fallback.color,
+    hp: typeof o.hp === "number" ? o.hp : fallback.hp,
+    hand: o.hand ?? fallback.hand,
+    body: o.body ?? fallback.body,
+    shield: o.shield ?? fallback.shield,
+    helm: o.helm ?? fallback.helm,
+  };
+}
+
+function emptySnap(): FightSnap {
+  return { name: "чужой", color: "#6b3a2a", hp: 100, hand: null, body: null, shield: null, helm: null };
+}
+
+type FightRow = {
+  id: string;
+  x: number;
+  y: number;
+  a_id: string;
+  b_id: string;
+  turn_id: string;
+  a_hp: number;
+  b_hp: number;
+  a_snap: unknown;
+  b_snap: unknown;
+  last_hit: unknown;
+  status: string;
+};
+
+function asFight(row: FightRow): BookFight {
+  const last = row.last_hit && typeof row.last_hit === "object" ? (row.last_hit as { by?: string; dmg?: number }) : null;
+  return {
+    id: row.id,
+    x: row.x,
+    y: row.y,
+    aId: row.a_id,
+    bId: row.b_id,
+    turnId: row.turn_id,
+    aHp: row.a_hp,
+    bHp: row.b_hp,
+    aSnap: asSnap(row.a_snap, emptySnap()),
+    bSnap: asSnap(row.b_snap, emptySnap()),
+    lastHit: last && last.by && typeof last.dmg === "number" ? { by: last.by, dmg: last.dmg } : null,
+    status: row.status === "done" ? "done" : "open",
+  };
+}
+
+function withFightOther(others: OtherPawn[], fight: BookFight | null, selfId: string): OtherPawn[] {
+  if (!fight) return others;
+  const foeId = fight.aId === selfId ? fight.bId : fight.aId;
+  const snap = fight.aId === foeId ? fight.aSnap : fight.bSnap;
+  const hp = fight.aId === foeId ? fight.aHp : fight.bHp;
+  const ghost: OtherPawn = {
+    id: foeId,
+    name: snap.name,
+    color: snap.color,
+    x: fight.x,
+    y: fight.y,
+    hp,
+    life: hp <= 0 ? "down" : "alive",
+    hand: snap.hand,
+    body: snap.body,
+    shield: snap.shield,
+    helm: snap.helm,
+  };
+  if (others.some((o) => o.id === foeId)) {
+    return others.map((o) => (o.id === foeId ? { ...o, hp: ghost.hp, life: ghost.life, hand: ghost.hand, body: ghost.body, shield: ghost.shield, helm: ghost.helm } : o));
+  }
+  return [...others, ghost];
+}
+
+async function loadOpenFight(sql: Sql, userId: string): Promise<BookFight | null> {
+  const rows = await sql.query<FightRow>(
+    `select id, x, y, a_id, b_id, turn_id, a_hp, b_hp, a_snap, b_snap, last_hit, status
+     from fight
+     where world_id = $1 and status = 'open' and (a_id = $2 or b_id = $2)
+     order by updated_at desc
+     limit 1`,
+    [WORLD_ID, userId],
+  );
+  return rows[0] ? asFight(rows[0]) : null;
+}
+
+async function writePawnHp(sql: Sql, userId: string, hp: number, life: "alive" | "down") {
+  await sql.query(
+    `update pawn
+     set body = jsonb_set(jsonb_set(coalesce(body, '{}'::jsonb), '{hp}', to_jsonb($3::int), true), '{life}', to_jsonb($4::text), true),
+         updated_at = now()
+     where world_id = $1 and user_id = $2`,
+    [WORLD_ID, userId, hp, life],
+  );
+}
+
+async function mergeFightIntoPawnBody(sql: Sql, userId: string, body: PawnBody): Promise<PawnBody> {
+  const fight = await loadOpenFight(sql, userId);
+  if (!fight) return body;
+  const hp = fight.aId === userId ? fight.aHp : fight.bHp;
+  return { ...body, hp, life: hp <= 0 ? "down" : body.life === "down" ? "down" : "alive" };
 }
 
 async function readWorld(sql: Sql): Promise<WorldRow> {
@@ -202,19 +327,13 @@ async function loadSpot(
     slim: asSlim(r.slim),
   }));
   const otherRows = await sql.query<OtherDb>(
-    `select user_id, name, color, x, y from pawn
+    `select user_id, name, color, x, y, body from pawn
      where world_id = $1 and user_id <> $2
        and greatest(abs(x - $3), abs(y - $4)) <= $5
        and seen_at > now() - interval '2 minutes'`,
     [WORLD_ID, userId, px, py, FOG_FETCH],
   );
-  const others: OtherPawn[] = otherRows.map((r) => ({
-    id: r.user_id,
-    name: r.name,
-    color: r.color,
-    x: r.x,
-    y: r.y,
-  }));
+  const others: OtherPawn[] = otherRows.map(pawnAsOther);
   return { live, memory, others };
 }
 
@@ -262,6 +381,7 @@ export const openWorldBook = createServerFn({ method: "POST" })
     const world = await readWorld(sql);
     const spot = await loadSpot(sql, px, py, context.userId);
     await imprintSpot(sql, context.userId, px, py);
+    const fight = await loadOpenFight(sql, context.userId);
     return {
       ok: true,
       born,
@@ -277,7 +397,8 @@ export const openWorldBook = createServerFn({ method: "POST" })
         : null,
       live: spot.live,
       memory: spot.memory,
-      others: spot.others,
+      others: withFightOther(spot.others, fight, context.userId),
+      fight,
       since: nowIso(),
     };
   });
@@ -359,6 +480,7 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
         JSON.stringify({ n: data.tiles.length, written: written.length }),
       ],
     );
+    const body = await mergeFightIntoPawnBody(sql, context.userId, data.pawn.body);
     await sql.query(
       `insert into pawn (world_id, user_id, name, color, x, y, body, seen_at, updated_at)
        values ($1, $2, $3, $4, $5, $6, $7::jsonb, now(), now())
@@ -377,7 +499,7 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
         data.pawn.color,
         data.pawn.x,
         data.pawn.y,
-        JSON.stringify(data.pawn.body),
+        JSON.stringify(body),
       ],
     );
     await imprintSpot(sql, context.userId, data.pawn.x, data.pawn.y);
@@ -408,6 +530,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     if (data.pawn) {
+      const body = await mergeFightIntoPawnBody(sql, context.userId, data.pawn.body);
       await sql.query(
         `insert into pawn (world_id, user_id, name, color, x, y, body, seen_at, updated_at)
          values ($1, $2, $3, $4, $5, $6, $7::jsonb, now(), now())
@@ -426,7 +549,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
           data.pawn.color,
           data.pawn.x,
           data.pawn.y,
-          JSON.stringify(data.pawn.body),
+          JSON.stringify(body),
         ],
       );
     } else {
@@ -486,27 +609,23 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       updatedAt: r.updated_at,
     }));
     const otherRows = await sql.query<OtherDb>(
-      `select user_id, name, color, x, y from pawn
+      `select user_id, name, color, x, y, body from pawn
        where world_id = $1 and user_id <> $2
          and greatest(abs(x - $3), abs(y - $4)) <= $5
          and seen_at > now() - interval '2 minutes'`,
       [WORLD_ID, context.userId, data.x, data.y, FOG_FETCH],
     );
-    const others: OtherPawn[] = otherRows.map((r) => ({
-      id: r.user_id,
-      name: r.name,
-      color: r.color,
-      x: r.x,
-      y: r.y,
-    }));
+    const others: OtherPawn[] = otherRows.map(pawnAsOther);
     await imprintSpot(sql, context.userId, data.x, data.y);
     const world = await readWorld(sql);
+    const fight = await loadOpenFight(sql, context.userId);
     return {
       ok: true as const,
       clock: asClock(world),
       live,
       fill,
-      others,
+      others: withFightOther(others, fight, context.userId),
+      fight,
       since: nowIso(),
     };
   });
@@ -530,3 +649,153 @@ export const listWorldDeeds = createServerFn({ method: "GET" })
     );
     return rows;
   });
+
+const snapSchema = z.object({
+  name: z.string(),
+  color: z.string(),
+  hp: z.number(),
+  hand: z.string().nullable(),
+  body: z.string().nullable(),
+  shield: z.string().nullable(),
+  helm: z.string().nullable(),
+});
+
+function snapFromPawn(p: PawnDb | null, guess: FightSnap): FightSnap {
+  const body = p?.body && typeof p.body === "object" ? p.body : null;
+  return {
+    name: p?.name || guess.name,
+    color: p?.color || guess.color,
+    hp: typeof body?.hp === "number" ? body.hp : guess.hp,
+    hand: body?.hand ?? guess.hand,
+    body: body?.body ?? guess.body,
+    shield: body?.shield ?? guess.shield,
+    helm: body?.helm ?? guess.helm,
+  };
+}
+
+export const openBookFight = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: unknown) =>
+    z
+      .object({
+        foeId: z.string(),
+        x: z.number(),
+        y: z.number(),
+        you: snapSchema,
+      })
+      .parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    if (data.foeId === context.userId) return { ok: false as const, hint: "сам с собой" };
+    const me = await readPawn(sql, context.userId);
+    const foe = await readPawn(sql, data.foeId);
+    if (!foe) return { ok: false as const, hint: "его нет на поляне" };
+    const mx = me?.x ?? data.x;
+    const my = me?.y ?? data.y;
+    if (Math.max(Math.abs(mx - foe.x), Math.abs(my - foe.y)) > 1) {
+      return { ok: false as const, hint: "не на его клетке" };
+    }
+    const existing = await loadOpenFight(sql, context.userId);
+    if (existing && (existing.aId === data.foeId || existing.bId === data.foeId)) {
+      return { ok: true as const, fight: existing };
+    }
+    const youSnap = snapFromPawn(me, data.you as FightSnap);
+    const foeSnap = snapFromPawn(foe, emptySnap());
+    const id = fightPairId(context.userId, data.foeId);
+    const aId = context.userId;
+    const bId = data.foeId;
+    await sql.query(
+      `insert into fight (world_id, id, x, y, a_id, b_id, turn_id, a_hp, b_hp, a_snap, b_snap, last_hit, status, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $5, $7, $8, $9::jsonb, $10::jsonb, null, 'open', now())
+       on conflict (world_id, id) do update set
+         x = excluded.x,
+         y = excluded.y,
+         a_id = excluded.a_id,
+         b_id = excluded.b_id,
+         turn_id = excluded.a_id,
+         a_hp = excluded.a_hp,
+         b_hp = excluded.b_hp,
+         a_snap = excluded.a_snap,
+         b_snap = excluded.b_snap,
+         last_hit = null,
+         status = 'open',
+         updated_at = now()`,
+      [
+        WORLD_ID,
+        id,
+        foe.x,
+        foe.y,
+        aId,
+        bId,
+        youSnap.hp,
+        foeSnap.hp,
+        JSON.stringify(youSnap),
+        JSON.stringify(foeSnap),
+      ],
+    );
+    const fight = await loadOpenFight(sql, context.userId);
+    return fight ? { ok: true as const, fight } : { ok: false as const, hint: "встреча не встала" };
+  });
+
+export const strikeBookFight = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: unknown) => z.object({ dmg: z.number() }).parse(d))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const fight = await loadOpenFight(sql, context.userId);
+    if (!fight) return { ok: false as const, hint: "встречи нет" };
+    if (fight.turnId !== context.userId) return { ok: false as const, hint: "не твой шаг", fight };
+    const dmg = Math.max(1, Math.min(12, Math.round(data.dmg)));
+    const iAmA = fight.aId === context.userId;
+    const foeId = iAmA ? fight.bId : fight.aId;
+    const foeHp = Math.max(0, (iAmA ? fight.bHp : fight.aHp) - dmg);
+    const myHp = iAmA ? fight.aHp : fight.bHp;
+    const done = foeHp <= 0;
+    const nextTurn = done ? context.userId : foeId;
+    const aHp = iAmA ? myHp : foeHp;
+    const bHp = iAmA ? foeHp : myHp;
+    await sql.query(
+      `update fight
+       set a_hp = $3, b_hp = $4, turn_id = $5, last_hit = $6::jsonb, status = $7, updated_at = now()
+       where world_id = $1 and id = $2 and turn_id = $8 and status = 'open'`,
+      [
+        WORLD_ID,
+        fight.id,
+        aHp,
+        bHp,
+        nextTurn,
+        JSON.stringify({ by: context.userId, dmg }),
+        done ? "done" : "open",
+        context.userId,
+      ],
+    );
+    await writePawnHp(sql, foeId, foeHp, foeHp <= 0 ? "down" : "alive");
+    const next = done
+      ? {
+          ...fight,
+          aHp,
+          bHp,
+          turnId: nextTurn,
+          lastHit: { by: context.userId, dmg },
+          status: "done" as const,
+        }
+      : ((await loadOpenFight(sql, context.userId)) ?? fight);
+    return { ok: true as const, fight: next };
+  });
+
+export const closeBookFight = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: unknown) => z.object({ why: z.string().optional() }).parse(d ?? {}))
+  .handler(async ({ context }) => {
+    const sql = await getSql();
+    const fight = await loadOpenFight(sql, context.userId);
+    if (!fight) return { ok: true as const, fight: null };
+    await sql.query(
+      `update fight set status = 'done', updated_at = now()
+       where world_id = $1 and id = $2 and status = 'open'`,
+      [WORLD_ID, fight.id],
+    );
+    return { ok: true as const, fight: { ...fight, status: "done" as const } };
+  });
+

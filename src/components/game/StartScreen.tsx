@@ -45,7 +45,7 @@ export function StartScreen({ error, onStart }: Props) {
         </h1>
         <p className="mt-1 text-[11px] font-medium tracking-wide text-panel/70">версия {GAME_VERSION}</p>
         <p className="mt-3 max-w-sm text-sm leading-relaxed text-panel/80">
-          Клетка пишется в книгу мира. Пока ты один — та же поляна, на которую потом выйдут другие.
+          Фишка, сумка и двор пишутся на этот вход. С другого устройства — тот же стол.
         </p>
         <div className="mt-4 flex gap-2">
           {[ICO.gold, ICO.wood, ICO.food, ICO.stake, ICO.house, ICO.bag].map((i) => (

@@ -196,22 +196,52 @@ export function liveAsDummy(o: OtherPawn): Dummy {
     color: o.color || MEEPLE_COLORS[0]!,
     x: o.x,
     y: o.y,
-    hp: snap?.hp ?? 100,
+    hp: snap?.hp ?? o.hp ?? 100,
     energy: ENERGY_MAX,
     satiety: 80,
     warmth: 80,
     water: 80,
-    hand: snap?.hand ?? null,
-    body: snap?.body ?? null,
-    shield: snap?.shield ?? null,
-    helm: snap?.helm ?? null,
+    hand: snap?.hand ?? o.hand ?? null,
+    body: snap?.body ?? o.body ?? null,
+    shield: snap?.shield ?? o.shield ?? null,
+    helm: snap?.helm ?? o.helm ?? null,
     profession: "wanderer",
     skills: zSkills(0, 0, 0),
-    life: snap?.life ?? "alive",
+    life: snap?.life ?? o.life ?? "alive",
     dummy: false,
     downAt: 0,
     inventory: {},
   };
+}
+
+/** Лист боя не зависит от того, пришёл ли чужой в `others` в этот удар сердца. */
+export function ghostLiveFoe(
+  id: string,
+  pos: { x: number; y: number },
+  patch: {
+    name?: string;
+    color?: string;
+    hp?: number;
+    hand?: ItemId | null;
+    body?: ItemId | null;
+    shield?: ItemId | null;
+    helm?: ItemId | null;
+    life?: "alive" | "down";
+  } = {},
+): Dummy {
+  return liveAsDummy({
+    id,
+    name: patch.name || "чужой",
+    color: patch.color || MEEPLE_COLORS[0]!,
+    x: pos.x,
+    y: pos.y,
+    hp: patch.hp ?? 100,
+    life: patch.life ?? ((patch.hp ?? 100) <= 0 ? "down" : "alive"),
+    hand: patch.hand ?? null,
+    body: patch.body ?? null,
+    shield: patch.shield ?? null,
+    helm: patch.helm ?? null,
+  });
 }
 
 export function occupantAt(dummies: Dummy[], others: OtherPawn[], x: number, y: number): Dummy | null {

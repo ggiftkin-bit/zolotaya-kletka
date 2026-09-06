@@ -10,7 +10,7 @@ import { BUSY_LABEL, isRoof, isWearId, remainingWear, type WearId } from "@/game
 import { useGame } from "@/game/store";
 import { pawnKg } from "@/game/travel";
 import { asPile, pileEmpty, pileLabel } from "@/game/pile";
-import { foeById, gearSlot } from "@/game/fight";
+import { foeById, gearSlot, ghostLiveFoe } from "@/game/fight";
 import type { BuildingKind, ItemId, ToolMode, Weather } from "@/game/types";
 import { tileAt } from "@/game/worldgen";
 import { Button } from "@/components/ui/button";
@@ -814,8 +814,16 @@ function MeetSheet() {
   const g = useGame();
   const meet = g.meet;
   if (!meet) return null;
-  const foe = foeById(g.dummies ?? [], g.others ?? [], meet.foeId);
-  if (!foe) return null;
+  const found = foeById(g.dummies ?? [], g.others ?? [], meet.foeId);
+  const foe =
+    found ??
+    ghostLiveFoe(meet.foeId, { x: g.character.x, y: g.character.y }, {
+      hp: meet.foeHp,
+      hand: meet.foeHand,
+      body: meet.foeBody,
+      shield: meet.foeShield,
+      helm: meet.foeHelm,
+    });
   const you = g.character;
   const mine = meet.turn === "you";
   const foeHp = meet.foeHp ?? foe.hp;
@@ -832,7 +840,9 @@ function MeetSheet() {
         <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-border" />
         <div className="flex items-end justify-between gap-3">
           <p className="font-display text-[22px] leading-none">{you.name || "ты"}</p>
-          <p className="text-[13px] font-medium text-muted-foreground">{mine ? "твой шаг" : "ждёт ответа"}</p>
+          <p className="text-[13px] font-medium text-muted-foreground">
+            {mine ? "твой шаг" : meet.incoming && !meet.firstDone ? "на тебя напали" : "ждёт ответа"}
+          </p>
           <p className="font-display text-[22px] leading-none">{foe.name}</p>
         </div>
         <div className="mt-2 grid grid-cols-2 gap-3">
@@ -841,19 +851,25 @@ function MeetSheet() {
               <div className="h-full rounded-full bg-[#6b3a2a]" style={{ width: `${Math.max(0, Math.min(100, you.hp))}%` }} />
             </div>
             <p className="mt-0.5 font-display text-lg tabular-nums leading-none">{Math.round(you.hp)}</p>
+            <p className="text-[11px] text-muted-foreground">твои раны</p>
           </div>
           <div className="text-right">
             <div className="h-2.5 overflow-hidden rounded-full bg-raised">
               <div className="ml-auto h-full rounded-full bg-[#6b3a2a]" style={{ width: `${Math.max(0, Math.min(100, foeHp))}%` }} />
             </div>
             <p className="mt-0.5 font-display text-lg tabular-nums leading-none">{Math.round(foeHp)}</p>
+            <p className="text-[11px] text-muted-foreground">его раны</p>
           </div>
         </div>
         <p className="mt-2 text-[13px] leading-snug text-foreground">
           сила {Math.floor(you.energy)} · в руке {you.hand ? ITEM_LABEL[you.hand] : "пусто"}
           {foeHand ? ` · у него ${ITEM_LABEL[foeHand]}` : " · у него пусто"}
         </p>
-        {!mine && <p className="mt-1 text-[14px] font-medium">Ждёт ответа</p>}
+        {!mine && (
+          <p className="mt-1 text-[14px] font-medium">
+            {meet.incoming && !meet.firstDone ? "Напали. Жди удара — потом твой шаг." : "Ждёт ответа"}
+          </p>
+        )}
         <div className="mt-2 grid grid-cols-2 gap-2">
           <Button className="h-11" disabled={!mine} onClick={() => g.meetHit()}>
             Ударить · −2 силы
