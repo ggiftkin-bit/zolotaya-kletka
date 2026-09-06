@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
-import { LIFE_INDEX, TILE_ATLAS_PAD, biomeIndex, drawAtlas, ensureArt, getArt, propIndex } from "@/game/art";
+import { LIFE_INDEX, SPR_FENCE, SPR_TREE, TILE_ATLAS_PAD, biomeIndex, drawAtlas, ensureArt, getArt, propIndex, type SprRect } from "@/game/art";
 import { isWatered } from "@/game/life";
 import { isWooded } from "@/game/grow";
 import { FENCE_STR, normRect } from "@/game/fence";
-import { TILE, MEEPLE_COLORS, FILL_TEX, TICKS_PER_DAY } from "@/game/constants";
+import { TILE, MEEPLE_COLORS, FILL_TEX, PAINTED_PROPS, TICKS_PER_DAY } from "@/game/constants";
 import { cam as viewCam, look } from "@/game/cam";
 import { useGame } from "@/game/store";
 import type { Biome, FenceKind, Tile, World } from "@/game/types";
@@ -29,11 +29,11 @@ const SAND_WET = "#b89568";
 const YARD_STONE = "#7a7064";
 const STREET_STONE = "#a3947c";
 
-type FillKind = "water" | "meadow" | "moss" | "stone" | "sand" | "cobble" | "dirt" | "swamp" | "plank" | "needle" | "rings";
+type FillKind = "water" | "meadow" | "moss" | "stone" | "sand" | "cobble" | "dirt" | "swamp" | "plank" | "needle" | "rings" | "field";
 const FILL_SCALE: Record<FillKind, number> = {
   water: 0.2,
-  meadow: 0.42,
-  moss: 0.42,
+  meadow: 0.38,
+  moss: 0.38,
   stone: 0.42,
   sand: 0.42,
   cobble: 0.1,
@@ -42,9 +42,10 @@ const FILL_SCALE: Record<FillKind, number> = {
   plank: 0.35,
   needle: 0.52,
   rings: 0.22,
+  field: 0.36,
 };
 let fillPatterns: Partial<Record<FillKind, CanvasPattern>> | null = null;
-const FILL_CACHE = "v2-scale";
+const FILL_CACHE = "v3-props";
 let fillCacheKey = "";
 
 function makeFillPattern(ctx: CanvasRenderingContext2D, img: HTMLImageElement, scale: number) {
@@ -72,8 +73,8 @@ function ensureFillPatterns(ctx: CanvasRenderingContext2D) {
     if (p) fillPatterns![kind] = p;
   };
   bind("water", a.fillWater);
-  bind("meadow", a.fillMeadow);
-  bind("moss", a.fillMoss);
+  bind("meadow", a.fillLug ?? a.fillMeadow);
+  bind("moss", a.fillLesPol ?? a.fillMoss);
   bind("stone", a.fillStone);
   bind("sand", a.fillSand);
   bind("cobble", a.fillCobble);
@@ -82,6 +83,7 @@ function ensureFillPatterns(ctx: CanvasRenderingContext2D) {
   bind("plank", a.fillPlank);
   bind("needle", a.fillNeedle);
   bind("rings", a.fillRings);
+  bind("field", a.fillPashnya);
 }
 
 function hasFill(kind: FillKind) {
@@ -92,6 +94,34 @@ function useFill(ctx: CanvasRenderingContext2D, kind: FillKind, fallback: string
   ensureFillPatterns(ctx);
   const p = FILL_TEX ? fillPatterns?.[kind] : undefined;
   ctx.fillStyle = p ?? fallback;
+}
+
+function drawSpr(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  r: SprRect,
+  dx: number,
+  dy: number,
+  dw: number,
+  dh: number,
+) {
+  ctx.drawImage(img, r[0], r[1], r[2], r[3], dx, dy, dw, dh);
+}
+
+function drawSprFoot(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  r: SprRect,
+  footX: number,
+  footY: number,
+  height: number,
+) {
+  const dw = height * (r[2] / r[3]);
+  drawSpr(ctx, img, r, footX - dw / 2, footY - height, dw, height);
+}
+
+function paintedPropsOn() {
+  return PAINTED_PROPS && !!getArt()?.sprTrees;
 }
 
 function isWater(t: Tile | null | undefined): boolean {
@@ -579,7 +609,8 @@ function draw(
       if (fogAt(g.world, x, y) === FOG_DARK) continue;
       const tile = tileAt(g.world, x, y);
       if (!tile) continue;
-      paintForestCrowns(ctx, tile, g.world);
+      if (paintedPropsOn()) paintPaintedProps(ctx, tile, g.world);
+      else paintForestCrowns(ctx, tile, g.world);
     }
   }
 
@@ -753,6 +784,11 @@ function paintBiome(
   y: number,
   wooded = true,
 ) {
+  if (FILL_TEX && (biome === "fertile")) {
+    useFill(ctx, "field", BIOME_FILL.fertile);
+    ctx.fillRect(x, y, TILE, TILE);
+    return;
+  }
   if (FILL_TEX && biome === "swamp") {
     useFill(ctx, "swamp", BIOME_FILL.swamp);
     ctx.fillRect(x, y, TILE, TILE);
@@ -838,7 +874,7 @@ function paintRiverGround(
   ctx.clip();
   useFill(ctx, "water", waterFill);
   ctx.fillRect(x, y, TILE, TILE);
-  if (ford) {
+  if (ford && !PAINTED_PROPS) {
     ctx.fillStyle = "rgba(210, 214, 200, 0.22)";
     ctx.fillRect(x, y, TILE, TILE);
     ctx.fillStyle = "rgba(90, 92, 86, 0.72)";
@@ -932,6 +968,167 @@ function paintShoreGrass(
 
 function isOpenLand(t: Tile | null | undefined): boolean {
   return !!t && !isWater(t) && !isWooded(t);
+}
+
+function paintFordStones(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number) {
+  const img = getArt()?.sprTrees;
+  if (!img) return;
+  const keys: Array<keyof typeof SPR_TREE> = ["rock2", "rock1", "rock2"];
+  const n = 2 + (hash01(tile.x, tile.y, 1) > 0.55 ? 1 : 0);
+  for (let i = 0; i < n; i++) {
+    const r = SPR_TREE[keys[i]!]!;
+    const h = 7 + hash01(tile.x, tile.y, 8 + i) * 5;
+    const fx = x + 10 + i * 11 + hash01(tile.x, tile.y, 12 + i) * 4;
+    const fy = y + 22 + (i % 2) * 8;
+    drawSprFoot(ctx, img, r, fx, fy, h);
+  }
+}
+
+function paintPaintedProps(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
+  const img = getArt()?.sprTrees;
+  if (!img) return;
+  if (tile.plot || tile.building !== "none") return;
+  const x = tile.x * TILE;
+  const y = tile.y * TILE;
+  const salt = (s: number) => hash01(tile.x * 13 + tile.y * 7, tile.y * 3 + tile.x, s);
+  const inLane = (cx: number, cy: number) => {
+    if (tile.road === "none") return false;
+    const half = 10;
+    const mx = x + TILE / 2;
+    const my = y + TILE / 2;
+    const rn = hasRoad(world, tile.x, tile.y - 1);
+    const rs = hasRoad(world, tile.x, tile.y + 1);
+    const rw = hasRoad(world, tile.x - 1, tile.y);
+    const re = hasRoad(world, tile.x + 1, tile.y);
+    const ns = rn || rs || (!rw && !re);
+    const ew = rw || re;
+    if (ns && Math.abs(cx - mx) < half) return true;
+    if (ew && Math.abs(cy - my) < half) return true;
+    return false;
+  };
+  const spots: Array<{ key: keyof typeof SPR_TREE; fx: number; fy: number; h: number }> = [];
+  const push = (key: keyof typeof SPR_TREE, fx: number, fy: number, h: number) => {
+    if (inLane(fx, fy)) return;
+    spots.push({ key, fx, fy, h });
+  };
+
+  if (tile.road === "bridge") return;
+
+  if (tile.biome === "forest" && !isWooded(tile)) {
+    if (tile.commons || tile.road !== "none" || tile.pit) return;
+    const key: keyof typeof SPR_TREE = salt(2) > 0.5 ? "stump1" : "stump0";
+    push(key, x + 16 + salt(3) * 12, y + 30 + salt(4) * 8, 16 + salt(5) * 6);
+  } else if (isWooded(tile)) {
+    const nb = sides4(world, tile.x, tile.y);
+    const nF = !!nb.n && isWooded(nb.n);
+    const eF = !!nb.e && isWooded(nb.e);
+    const sF = !!nb.s && isWooded(nb.s);
+    const wF = !!nb.w && isWooded(nb.w);
+    const woodN = (nF ? 1 : 0) + (eF ? 1 : 0) + (sF ? 1 : 0) + (wF ? 1 : 0);
+    const fieldOpen = isOpenLand(nb.n) || isOpenLand(nb.e) || isOpenLand(nb.s) || isOpenLand(nb.w);
+    const interior = woodN >= 4 || (woodN >= 3 && !fieldOpen);
+    const firs: Array<keyof typeof SPR_TREE> = ["fir0", "fir1", "fir2", "fir3", "fir4", "fir5"];
+    const mixed: Array<keyof typeof SPR_TREE> = ["oak", "birch", "fir1", "fir5"];
+    if (tile.road !== "none") {
+      if (salt(0) > 0.4) {
+        const left = salt(5) > 0.5;
+        const key = firs[Math.floor(salt(6) * firs.length) % firs.length]!;
+        push(key, left ? x + 6 : x + TILE - 6, y + 32 + salt(7) * 8, TILE * (1.15 + salt(8) * 0.2));
+      }
+    } else if (interior) {
+      const n = 2 + (salt(0) > 0.35 ? 1 : 0);
+      for (let i = 0; i < n; i++) {
+        const key = firs[Math.floor(salt(10 + i) * firs.length) % firs.length]!;
+        const fx = x + 8 + salt(20 + i) * 28;
+        const fy = y + 28 + salt(30 + i) * 16;
+        const h = TILE * (1.3 + salt(40 + i) * 0.5);
+        push(key, fx, fy, h);
+      }
+    } else {
+      const key = mixed[Math.floor(salt(11) * mixed.length) % mixed.length]!;
+      const pullX = eF && !wF ? 6 : wF && !eF ? -6 : 0;
+      push(key, x + TILE / 2 + pullX + (salt(12) - 0.5) * 10, y + 34 + salt(13) * 8, TILE * (1.25 + salt(14) * 0.35));
+    }
+  } else if (tile.biome === "swamp") {
+    push("reeds", x + 12 + salt(2) * 20, y + 34, 22 + salt(3) * 10);
+    if (salt(4) > 0.55) push("reeds", x + 26 + salt(5) * 10, y + 38, 18 + salt(6) * 8);
+  } else if (tile.biome === "plains" && !tile.commons && tile.road === "none" && salt(0) > 0.84) {
+    const key: keyof typeof SPR_TREE = salt(1) > 0.5 ? "flowers" : "bush";
+    push(key, x + 14 + salt(2) * 16, y + 32, 14 + salt(3) * 8);
+  }
+
+  spots.sort((a, b) => a.fy - b.fy);
+  for (const s of spots) drawSprFoot(ctx, img, SPR_TREE[s.key], s.fx, s.fy, s.h);
+}
+
+function paintPaintedFence(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number, world: World) {
+  const img = getArt()?.sprFence;
+  if (!img) {
+    paintFence(ctx, tile, x, y, world);
+    return;
+  }
+  const live = (k: FenceKind | undefined): k is Exclude<FenceKind, "none"> => !!k && k !== "none" && FENCE_STR[k] > 0;
+  const nKind = tile.fenceN;
+  const wKind = tile.fenceW;
+  const lockedEdge = (side: "n" | "w") => {
+    const inner = side === "n" ? tileAt(world, tile.x, tile.y - 1) : tileAt(world, tile.x - 1, tile.y);
+    return !!(tile.gateLock || inner?.gateLock);
+  };
+
+  if (nKind === "wall" || wKind === "wall") {
+    paintFence(ctx, tile, x, y, world);
+    return;
+  }
+
+  if (live(nKind) && nKind !== "gate") {
+    if (nKind === "palisade") {
+      drawSpr(ctx, img, SPR_FENCE.panel, x - 1, y - 16, TILE + 2, 22);
+    } else {
+      drawSpr(ctx, img, SPR_FENCE.rail, x - 1, y - 10, TILE + 2, 16);
+    }
+  }
+  if (live(wKind) && wKind !== "gate") {
+    if (wKind === "palisade") {
+      drawSpr(ctx, img, SPR_FENCE.panel, x - 8, y - 2, 16, TILE + 4);
+    } else {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-Math.PI / 2);
+      drawSpr(ctx, img, SPR_FENCE.rail, -TILE - 1, -8, TILE + 2, 14);
+      ctx.restore();
+    }
+  }
+  if (nKind === "gate") {
+    drawSpr(ctx, img, SPR_FENCE.gate, x + 10, y - 16, 24, 24);
+    if (lockedEdge("n")) {
+      ctx.fillStyle = "#2e241c";
+      ctx.fillRect(x + TILE / 2 - 3, y + 2, 6, 5);
+    }
+  }
+  if (wKind === "gate") {
+    ctx.save();
+    ctx.translate(x, y + TILE / 2);
+    ctx.rotate(-Math.PI / 2);
+    drawSpr(ctx, img, SPR_FENCE.gate, -12, -16, 24, 24);
+    ctx.restore();
+    if (lockedEdge("w")) {
+      ctx.fillStyle = "#2e241c";
+      ctx.fillRect(x + 2, y + TILE / 2 - 3, 5, 6);
+    }
+  }
+
+  const east = tileAt(world, tile.x + 1, tile.y);
+  const south = tileAt(world, tile.x, tile.y + 1);
+  const postH = 18;
+  if (live(nKind) && live(wKind)) {
+    drawSpr(ctx, img, SPR_FENCE.corner, x - 10, y - 16, 22, 22);
+  } else if (live(nKind) || live(wKind)) {
+    drawSprFoot(ctx, img, SPR_FENCE.post, x, y + 4, postH);
+  }
+  if (live(nKind)) drawSprFoot(ctx, img, SPR_FENCE.post, x + TILE, y + 4, postH);
+  if (live(wKind)) drawSprFoot(ctx, img, SPR_FENCE.post, x, y + TILE + 2, postH);
+  void east;
+  void south;
 }
 
 function paintForestGround(
@@ -1094,6 +1291,12 @@ function paintWaterShade(ctx: CanvasRenderingContext2D, tile: Tile, world: World
 }
 
 function paintFieldEarth(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  ensureFillPatterns(ctx);
+  if (hasFill("field")) {
+    useFill(ctx, "field", "#8a623c");
+    ctx.fillRect(x, y, TILE, TILE);
+    return;
+  }
   ctx.fillStyle = "#8a623c";
   ctx.fillRect(x, y, TILE, TILE);
   ctx.fillStyle = "#9a7048";
@@ -1178,6 +1381,7 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
   const art = getArt();
   if (isWater(tile)) {
     paintRiverGround(ctx, tile, world, x, y, art);
+    if (paintedPropsOn() && tile.biome === "ford") paintFordStones(ctx, tile, x, y);
   } else if (isYardPave(tile)) {
     paintCobbles(ctx, tile, x, y, false);
   } else if (isPackedStreet(tile)) {
@@ -1243,7 +1447,8 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
     ctx.fillRect(x + TILE - 10, y + 6, 3, 20);
   }
 
-  paintFence(ctx, tile, x, y, world);
+  if (PAINTED_PROPS && getArt()?.sprFence) paintPaintedFence(ctx, tile, x, y, world);
+  else paintFence(ctx, tile, x, y, world);
 
   if (!isWater(tile)) paintHerb(ctx, tile, x, y);
 
@@ -1796,6 +2001,7 @@ function paintHerb(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: numb
 
 function paintCut(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number) {
   if (tile.biome === "forest" && tile.amount < 4) {
+    if (paintedPropsOn()) return;
     if (tile.plot || tile.commons || tile.road !== "none" || tile.building !== "none" || tile.pit) return;
     const stumps = 1;
     for (let i = 0; i < stumps; i++) {

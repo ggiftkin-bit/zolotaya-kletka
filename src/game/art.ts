@@ -17,7 +17,50 @@ export type ArtPack = {
   fillPlank: HTMLImageElement | null;
   fillNeedle: HTMLImageElement | null;
   fillRings: HTMLImageElement | null;
+  fillLug: HTMLImageElement | null;
+  fillLesPol: HTMLImageElement | null;
+  fillPashnya: HTMLImageElement | null;
+  sprTrees: HTMLImageElement | null;
+  sprFence: HTMLImageElement | null;
 };
+
+export type SprRect = readonly [number, number, number, number];
+
+export const SPR_TREE = {
+  fir0: [82, 13, 130, 176],
+  fir1: [305, 29, 109, 159],
+  fir2: [517, 27, 114, 162],
+  fir3: [735, 64, 111, 126],
+  fir4: [943, 56, 86, 133],
+  oak: [43, 200, 199, 194],
+  birch: [291, 199, 152, 193],
+  apple: [493, 206, 185, 188],
+  fir5: [740, 211, 126, 182],
+  sapling: [949, 262, 92, 130],
+  stump0: [59, 430, 139, 110],
+  stump1: [258, 435, 127, 103],
+  bush: [449, 425, 149, 113],
+  flowers: [664, 427, 163, 113],
+  reeds: [915, 416, 96, 139],
+  rock0: [34, 587, 153, 127],
+  rock1: [217, 621, 119, 90],
+  rock2: [362, 648, 72, 60],
+  rocks: [471, 576, 195, 149],
+} as const satisfies Record<string, SprRect>;
+
+export const SPR_FENCE = {
+  panel: [62, 45, 236, 205],
+  post: [401, 47, 33, 203],
+  gate: [582, 57, 182, 193],
+  corner: [860, 52, 227, 198],
+  rail: [225, 365, 697, 134],
+  log: [50, 564, 248, 130],
+  stone0: [332, 593, 130, 85],
+  stone1: [480, 595, 129, 87],
+  stone2: [628, 596, 128, 87],
+  boulder: [785, 561, 170, 138],
+  postRound: [1021, 522, 60, 180],
+} as const satisfies Record<string, SprRect>;
 
 const TILE_INDEX: Record<Biome, number> = {
   plains: 0,
@@ -107,15 +150,22 @@ export function ensureArt() {
     loadImage("/game/fill-plank.jpg").catch(() => null),
     loadImage("/game/fill-needle.jpg").catch(() => null),
     loadImage("/game/fill-rings.jpg").catch(() => null),
+    loadImage("/game/v2-lug.jpg").catch(() => null),
+    loadImage("/game/v2-les-pol.jpg").catch(() => null),
+    loadImage("/game/v2-pashnya.jpg").catch(() => null),
+    loadImage("/game/v2-derevya-mult.png").catch(() => null),
+    loadImage("/game/v2-tyn-vertikal.png").catch(() => null),
   ]).then(([
     tiles, props, meeple, tokens, life,
     fillWater, fillMeadow, fillMoss, fillStone, fillSand,
     fillCobble, fillDirt, fillSwamp, fillPlank, fillNeedle, fillRings,
+    fillLug, fillLesPol, fillPashnya, sprTrees, sprFence,
   ]) => {
     pack = {
       tiles, props, meeple, tokens, life,
       fillWater, fillMeadow, fillMoss, fillStone, fillSand,
       fillCobble, fillDirt, fillSwamp, fillPlank, fillNeedle, fillRings,
+      fillLug, fillLesPol, fillPashnya, sprTrees, sprFence,
     };
     return pack;
   });

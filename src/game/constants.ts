@@ -6,6 +6,9 @@ export const GAME_VERSION = "0.8.8";
 /** Заливка паттерном (вода, луг, мох, камень, песок). false — плоские BIOME_FILL. */
 export const FILL_TEX = true;
 
+/** Спрайты деревьев и тына поверх заливки. false — эллипсы и старый тын. */
+export const PAINTED_PROPS = true;
+
 export const MAP_W = 96;
 export const MAP_H = 96;
 export const TILE = 44;
