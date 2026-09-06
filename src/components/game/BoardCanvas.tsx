@@ -682,7 +682,8 @@ function paintBiome(
   if (img) drawAtlas(ctx, img, 3, 3, biomeIndex(biome, false, wooded), x, y, TILE, TILE, TILE_ATLAS_PAD);
 }
 
-const INNER = BANK + 4;
+const OUTER = BANK + 4;
+const INNER = 2;
 
 function paintRiverGround(
   ctx: CanvasRenderingContext2D,
@@ -726,10 +727,10 @@ function paintRiverGround(
   const iw = TILE - padW - padE;
   const ih = TILE - padN - padS;
   const radii: [number, number, number, number] = [
-    padN && padW ? INNER : 0,
-    padN && padE ? INNER : 0,
-    padS && padE ? INNER : 0,
-    padS && padW ? INNER : 0,
+    padN && padW ? OUTER : 0,
+    padN && padE ? OUTER : 0,
+    padS && padE ? OUTER : 0,
+    padS && padW ? OUTER : 0,
   ];
 
   ctx.save();
