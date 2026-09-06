@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { LIFE_INDEX, SPR_FENCE, SPR_TREE, TILE_ATLAS_PAD, biomeIndex, drawAtlas, ensureArt, getArt, propIndex, type SprRect } from "@/game/art";
+import { LIFE_INDEX, SPR_FENCE, SPR_TREE, SPR_YAMA, TILE_ATLAS_PAD, biomeIndex, drawAtlas, ensureArt, getArt, propIndex, type SprRect } from "@/game/art";
 import { isWatered } from "@/game/life";
 import { isWooded } from "@/game/grow";
 import { FENCE_STR, normRect } from "@/game/fence";
@@ -29,23 +29,28 @@ const SAND_WET = "#b89568";
 const YARD_STONE = "#7a7064";
 const STREET_STONE = "#a3947c";
 
-type FillKind = "water" | "meadow" | "moss" | "stone" | "sand" | "cobble" | "dirt" | "swamp" | "plank" | "needle" | "rings" | "field";
+type FillKind = "water" | "meadow" | "moss" | "stone" | "sand" | "cobble" | "dirt" | "swamp" | "plank" | "needle" | "rings" | "field" | "ford" | "mountain" | "ore" | "moatDry" | "moatWet";
 const FILL_SCALE: Record<FillKind, number> = {
   water: 0.2,
-  meadow: 0.38,
+  meadow: 0.34,
   moss: 0.38,
   stone: 0.42,
   sand: 0.42,
   cobble: 0.1,
-  dirt: 0.4,
-  swamp: 0.42,
+  dirt: 0.36,
+  swamp: 0.36,
   plank: 0.35,
   needle: 0.52,
   rings: 0.22,
   field: 0.36,
+  ford: 0.28,
+  mountain: 0.22,
+  ore: 0.22,
+  moatDry: 0.4,
+  moatWet: 0.4,
 };
 let fillPatterns: Partial<Record<FillKind, CanvasPattern>> | null = null;
-const FILL_CACHE = "v3-props";
+const FILL_CACHE = "v4";
 let fillCacheKey = "";
 
 function makeFillPattern(ctx: CanvasRenderingContext2D, img: HTMLImageElement, scale: number) {
@@ -73,17 +78,22 @@ function ensureFillPatterns(ctx: CanvasRenderingContext2D) {
     if (p) fillPatterns![kind] = p;
   };
   bind("water", a.fillWater);
-  bind("meadow", a.fillLug ?? a.fillMeadow);
+  bind("meadow", a.fillRavnina ?? a.fillLug ?? a.fillMeadow);
   bind("moss", a.fillLesPol ?? a.fillMoss);
   bind("stone", a.fillStone);
   bind("sand", a.fillSand);
-  bind("cobble", a.fillCobble);
-  bind("dirt", a.fillDirt);
-  bind("swamp", a.fillSwamp);
+  bind("cobble", a.fillBruschatka ?? a.fillCobble);
+  bind("dirt", a.fillTrakt ?? a.fillDirt);
+  bind("swamp", a.fillBoloto ?? a.fillSwamp);
   bind("plank", a.fillPlank);
   bind("needle", a.fillNeedle);
   bind("rings", a.fillRings);
   bind("field", a.fillPashnya);
+  bind("ford", a.fillMelkovode);
+  bind("mountain", a.fillGory);
+  bind("ore", a.fillRuda);
+  bind("moatDry", a.fillMoatDry);
+  bind("moatWet", a.fillMoatWet);
 }
 
 function hasFill(kind: FillKind) {
@@ -794,8 +804,13 @@ function paintBiome(
     ctx.fillRect(x, y, TILE, TILE);
     return;
   }
-  if (FILL_TEX && (biome === "mountain" || biome === "ore")) {
-    useFill(ctx, "stone", BIOME_FILL[biome]);
+  if (FILL_TEX && biome === "mountain") {
+    useFill(ctx, "mountain", BIOME_FILL.mountain);
+    ctx.fillRect(x, y, TILE, TILE);
+    return;
+  }
+  if (FILL_TEX && biome === "ore") {
+    useFill(ctx, "ore", BIOME_FILL.ore);
     ctx.fillRect(x, y, TILE, TILE);
     return;
   }
@@ -849,7 +864,7 @@ function paintRiverGround(
     ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
     ctx.globalAlpha = 1;
   } else {
-    useFill(ctx, "water", waterFill);
+    useFill(ctx, ford ? "ford" : "water", waterFill);
     ctx.fillRect(x, y, TILE, TILE);
   }
 
@@ -872,7 +887,7 @@ function paintRiverGround(
   ctx.beginPath();
   ctx.roundRect(ix, iy, iw, ih, radii);
   ctx.clip();
-  useFill(ctx, "water", waterFill);
+  useFill(ctx, ford ? "ford" : "water", waterFill);
   ctx.fillRect(x, y, TILE, TILE);
   if (ford && !PAINTED_PROPS) {
     ctx.fillStyle = "rgba(210, 214, 200, 0.22)";
@@ -1499,12 +1514,21 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
   }
 
   if (tile.building === "moat") {
-    ctx.fillStyle = "#3a5560";
-    ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
-    ctx.fillStyle = "rgba(70, 110, 120, 0.55)";
+    const nb = sides4(world, tile.x, tile.y);
+    const wet = isWater(nb.n) || isWater(nb.e) || isWater(nb.s) || isWater(nb.w);
+    ctx.save();
     ctx.beginPath();
-    ctx.ellipse(x + TILE * 0.5, y + TILE * 0.55, 14, 8, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.roundRect(x + 2, y + 2, TILE - 4, TILE - 4, 8);
+    ctx.clip();
+    useFill(ctx, wet ? "moatWet" : "moatDry", wet ? "#3a5560" : "#5a4634");
+    ctx.fillRect(x, y, TILE, TILE);
+    ctx.restore();
+    if (wet) {
+      ctx.fillStyle = "rgba(40, 70, 80, 0.28)";
+      ctx.beginPath();
+      ctx.ellipse(x + TILE * 0.5, y + TILE * 0.55, 12, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   if (tile.building === "stakes") {
     ctx.fillStyle = "#4a3224";
@@ -1934,26 +1958,34 @@ function paintBank(ctx: CanvasRenderingContext2D, x: number, y: number) {
 }
 
 function paintPit(ctx: CanvasRenderingContext2D, tile: Tile, world: World, x: number, y: number) {
+  const img = getArt()?.sprYama;
   const n = tileAt(world, tile.x, tile.y - 1)?.pit;
   const s = tileAt(world, tile.x, tile.y + 1)?.pit;
   const w = tileAt(world, tile.x - 1, tile.y)?.pit;
   const e = tileAt(world, tile.x + 1, tile.y)?.pit;
-  const padN = n ? 0 : 7;
-  const padS = s ? 0 : 7;
-  const padW = w ? 0 : 7;
-  const padE = e ? 0 : 7;
-  const rx = x + padW;
-  const ry = y + padN;
-  const rw = TILE - padW - padE;
-  const rh = TILE - padN - padS;
-  ctx.fillStyle = "rgba(28, 22, 18, 0.82)";
-  ctx.beginPath();
-  ctx.roundRect(rx, ry, rw, rh, n || s || w || e ? 4 : 12);
-  ctx.fill();
-  ctx.fillStyle = "rgba(58, 48, 36, 0.9)";
-  ctx.beginPath();
-  ctx.ellipse(x + TILE / 2, y + TILE / 2 + 2, rw * 0.28, rh * 0.22, 0, 0, Math.PI * 2);
-  ctx.fill();
+  const linked = !!(n || s || w || e);
+  if (img) {
+    const r = SPR_YAMA[linked ? "big" : "small"];
+    const size = linked ? 36 : 30;
+    drawSpr(ctx, img, r, x + (TILE - size) / 2, y + (TILE - size) / 2 + 1, size, size);
+  } else {
+    const padN = n ? 0 : 7;
+    const padS = s ? 0 : 7;
+    const padW = w ? 0 : 7;
+    const padE = e ? 0 : 7;
+    const rx = x + padW;
+    const ry = y + padN;
+    const rw = TILE - padW - padE;
+    const rh = TILE - padN - padS;
+    ctx.fillStyle = "rgba(28, 22, 18, 0.82)";
+    ctx.beginPath();
+    ctx.roundRect(rx, ry, rw, rh, linked ? 4 : 12);
+    ctx.fill();
+    ctx.fillStyle = "rgba(58, 48, 36, 0.9)";
+    ctx.beginPath();
+    ctx.ellipse(x + TILE / 2, y + TILE / 2 + 2, rw * 0.28, rh * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
   if (tile.resource === "ore" && tile.amount > 0) {
     ctx.fillStyle = "#6b4a2f";
     ctx.beginPath();

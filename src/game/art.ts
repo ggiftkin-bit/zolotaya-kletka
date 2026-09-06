@@ -22,6 +22,16 @@ export type ArtPack = {
   fillPashnya: HTMLImageElement | null;
   sprTrees: HTMLImageElement | null;
   sprFence: HTMLImageElement | null;
+  fillRavnina: HTMLImageElement | null;
+  fillTrakt: HTMLImageElement | null;
+  fillBruschatka: HTMLImageElement | null;
+  fillBoloto: HTMLImageElement | null;
+  fillMelkovode: HTMLImageElement | null;
+  fillGory: HTMLImageElement | null;
+  fillRuda: HTMLImageElement | null;
+  fillMoatDry: HTMLImageElement | null;
+  fillMoatWet: HTMLImageElement | null;
+  sprYama: HTMLImageElement | null;
 };
 
 export type SprRect = readonly [number, number, number, number];
@@ -60,6 +70,11 @@ export const SPR_FENCE = {
   stone2: [628, 596, 128, 87],
   boulder: [785, 561, 170, 138],
   postRound: [1021, 522, 60, 180],
+} as const satisfies Record<string, SprRect>;
+
+export const SPR_YAMA = {
+  small: [196, 64, 248, 280],
+  big: [553, 272, 402, 439],
 } as const satisfies Record<string, SprRect>;
 
 const TILE_INDEX: Record<Biome, number> = {
@@ -155,17 +170,31 @@ export function ensureArt() {
     loadImage("/game/v2-pashnya.jpg").catch(() => null),
     loadImage("/game/v2-derevya-mult.png").catch(() => null),
     loadImage("/game/v2-tyn-vertikal.png").catch(() => null),
+    loadImage("/game/v3-ravnina.jpg").catch(() => null),
+    loadImage("/game/v3-trakt.jpg").catch(() => null),
+    loadImage("/game/v3-bruschatka.jpg").catch(() => null),
+    loadImage("/game/v3-boloto.jpg").catch(() => null),
+    loadImage("/game/v3-melkovode.jpg").catch(() => null),
+    loadImage("/game/v3-gory.jpg").catch(() => null),
+    loadImage("/game/v3-ruda.jpg").catch(() => null),
+    loadImage("/game/v3-rov-suh.jpg").catch(() => null),
+    loadImage("/game/v3-rov-mok.jpg").catch(() => null),
+    loadImage("/game/v3-yama.png").catch(() => null),
   ]).then(([
     tiles, props, meeple, tokens, life,
     fillWater, fillMeadow, fillMoss, fillStone, fillSand,
     fillCobble, fillDirt, fillSwamp, fillPlank, fillNeedle, fillRings,
     fillLug, fillLesPol, fillPashnya, sprTrees, sprFence,
+    fillRavnina, fillTrakt, fillBruschatka, fillBoloto, fillMelkovode,
+    fillGory, fillRuda, fillMoatDry, fillMoatWet, sprYama,
   ]) => {
     pack = {
       tiles, props, meeple, tokens, life,
       fillWater, fillMeadow, fillMoss, fillStone, fillSand,
       fillCobble, fillDirt, fillSwamp, fillPlank, fillNeedle, fillRings,
       fillLug, fillLesPol, fillPashnya, sprTrees, sprFence,
+      fillRavnina, fillTrakt, fillBruschatka, fillBoloto, fillMelkovode,
+      fillGory, fillRuda, fillMoatDry, fillMoatWet, sprYama,
     };
     return pack;
   });
