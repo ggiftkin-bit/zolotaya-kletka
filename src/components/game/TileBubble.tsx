@@ -107,6 +107,16 @@ function Sheet({ tile }: { tile: Tile }) {
                   ? "Лавка"
                   : tile.building !== "none"
                     ? BUILDING_LABEL[tile.building]
+                    : tile.road !== "none"
+                      ? `${tile.road === "bridge" ? "мост" : "тракт"} · ${
+                          tile.biome === "forest"
+                            ? "лес"
+                            : tile.biome === "river" || tile.biome === "ford"
+                              ? "река"
+                              : tile.biome === "plains" || tile.biome === "fertile"
+                                ? "поле"
+                                : BIOME_LABEL[tile.biome]
+                        }`
                     : tile.commons
                       ? "поляна"
                       : BIOME_LABEL[tile.biome];
@@ -130,7 +140,7 @@ function Sheet({ tile }: { tile: Tile }) {
         ) : (
           <BiomePic
             biome={tile.biome}
-            commons={tile.commons}
+            commons={tile.commons && tile.road === "none"}
             className="size-16 overflow-hidden rounded-[16px] shadow-sm"
           />
         )}
