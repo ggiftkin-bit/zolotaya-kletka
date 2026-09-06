@@ -23,7 +23,7 @@ const BIOME_FILL: Record<Biome, string> = {
   ford: "#6a8490",
 };
 
-const BANK = 6;
+const BANK = 4;
 const SAND = "#d2bc86";
 const SAND_WET = "#b89568";
 const YARD_STONE = "#7a7064";
@@ -682,7 +682,7 @@ function paintBiome(
   if (img) drawAtlas(ctx, img, 3, 3, biomeIndex(biome, false, wooded), x, y, TILE, TILE, TILE_ATLAS_PAD);
 }
 
-const INNER = 8;
+const INNER = 4;
 
 function paintRiverGround(
   ctx: CanvasRenderingContext2D,
