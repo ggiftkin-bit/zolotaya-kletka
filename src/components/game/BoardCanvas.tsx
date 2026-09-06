@@ -614,14 +614,19 @@ function draw(
       paintTile(ctx, tile, g.world);
     }
   }
+  const propDraws: Array<{ fy: number; draw: () => void }> = [];
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
       if (fogAt(g.world, x, y) === FOG_DARK) continue;
       const tile = tileAt(g.world, x, y);
       if (!tile) continue;
-      if (paintedPropsOn()) paintPaintedProps(ctx, tile, g.world);
+      if (paintedPropsOn()) collectPaintedProps(ctx, tile, g.world, propDraws);
       else paintForestCrowns(ctx, tile, g.world);
     }
+  }
+  if (paintedPropsOn()) {
+    propDraws.sort((a, b) => a.fy - b.fy);
+    for (const p of propDraws) p.draw();
   }
 
   paintLight(ctx, g.world, x0, y0, x1, y1, L);
@@ -999,7 +1004,12 @@ function paintFordStones(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y
   }
 }
 
-function paintPaintedProps(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
+function collectPaintedProps(
+  ctx: CanvasRenderingContext2D,
+  tile: Tile,
+  world: World,
+  out: Array<{ fy: number; draw: () => void }>,
+) {
   const img = getArt()?.sprTrees;
   if (!img) return;
   if (tile.plot || tile.building !== "none") return;
@@ -1024,6 +1034,11 @@ function paintPaintedProps(ctx: CanvasRenderingContext2D, tile: Tile, world: Wor
   const spots: Array<{ key: keyof typeof SPR_TREE; fx: number; fy: number; h: number }> = [];
   const push = (key: keyof typeof SPR_TREE, fx: number, fy: number, h: number) => {
     if (inLane(fx, fy)) return;
+    for (const p of spots) {
+      const dx = p.fx - fx;
+      const dy = p.fy - fy;
+      if (dx * dx + dy * dy < 90) return;
+    }
     spots.push({ key, fx, fy, h });
   };
 
@@ -1032,33 +1047,70 @@ function paintPaintedProps(ctx: CanvasRenderingContext2D, tile: Tile, world: Wor
   if (tile.biome === "forest" && !isWooded(tile)) {
     if (tile.commons || tile.road !== "none" || tile.pit) return;
     const key: keyof typeof SPR_TREE = salt(2) > 0.5 ? "stump1" : "stump0";
-    push(key, x + TILE / 2, y + TILE - 8, 14 + salt(5) * 4);
+    push(key, x + TILE / 2 + (salt(3) - 0.5) * 10, y + TILE - 8, 14 + salt(5) * 4);
   } else if (isWooded(tile)) {
     const nb = sides4(world, tile.x, tile.y);
+    const nF = !!nb.n && isWooded(nb.n);
+    const eF = !!nb.e && isWooded(nb.e);
+    const sF = !!nb.s && isWooded(nb.s);
+    const wF = !!nb.w && isWooded(nb.w);
+    const woodN = (nF ? 1 : 0) + (eF ? 1 : 0) + (sF ? 1 : 0) + (wF ? 1 : 0);
+    const interior = woodN >= 3;
     const firs: Array<keyof typeof SPR_TREE> = ["fir0", "fir1", "fir2", "fir3", "fir4", "fir5"];
-    const nTrees = tile.road !== "none" ? (salt(0) > 0.55 ? 1 : 0) : salt(0) > 0.78 ? 2 : 1;
-    for (let i = 0; i < nTrees; i++) {
-      const key = firs[Math.floor(salt(10 + i) * firs.length) % firs.length]!;
-      let fx = x + TILE / 2 + (salt(20 + i) - 0.5) * 8;
-      let fy = y + TILE - 4 + (salt(30 + i) - 0.5) * 4;
-      if (isWater(nb.e)) fx = Math.min(fx, x + TILE / 2);
-      if (isWater(nb.w)) fx = Math.max(fx, x + TILE / 2);
-      if (isWater(nb.s)) fy = Math.min(fy, y + TILE - 6);
-      if (isWater(nb.n)) fy = Math.max(fy, y + TILE - 4);
-      if (tile.road !== "none") {
-        const left = salt(5 + i) > 0.5;
-        fx = left ? x + 7 : x + TILE - 7;
-        fy = y + TILE - 6;
+    const edge: Array<keyof typeof SPR_TREE> = ["fir1", "fir4", "birch", "fir5"];
+    if (tile.road !== "none") {
+      if (salt(0) > 0.35) {
+        const left = salt(5) > 0.5;
+        const key = firs[Math.floor(salt(6) * firs.length) % firs.length]!;
+        const fx = left ? x + 6 : x + TILE - 6;
+        const fy = y + TILE - 6 + (salt(7) - 0.5) * 6;
+        push(key, fx, fy, TILE * (1.15 + salt(8) * 0.2));
       }
-      const h = TILE * (0.95 + salt(40 + i) * 0.2);
-      push(key, fx, fy, h);
+    } else if (interior) {
+      const n = 2 + (salt(0) > 0.4 ? 1 : 0);
+      for (let i = 0; i < n + 5 && spots.length < n; i++) {
+        const key = firs[Math.floor(salt(10 + i) * firs.length) % firs.length]!;
+        const sx = (salt(20 + i) < 0.5 ? -1 : 1) * (12 + salt(21 + i) * 4);
+        const sy = (salt(30 + i) - 0.5) * 16;
+        let fx = x + TILE / 2 + sx;
+        let fy = y + TILE - 6 + sy;
+        if (isWater(nb.e)) fx = Math.min(fx, x + TILE - 14);
+        if (isWater(nb.w)) fx = Math.max(fx, x + 14);
+        if (isWater(nb.s)) fy = Math.min(fy, y + TILE - 10);
+        const h = TILE * (1.15 + salt(40 + i) * 0.4);
+        push(key, fx, fy, h);
+      }
+    } else {
+      const key = edge[Math.floor(salt(11) * edge.length) % edge.length]!;
+      let fx = x + TILE / 2 + (salt(12) < 0.5 ? -1 : 1) * (10 + salt(13) * 6);
+      let fy = y + TILE - 8 + (salt(14) - 0.5) * 10;
+      if (isWater(nb.e)) fx = Math.min(fx, x + TILE / 2 - 4);
+      if (isWater(nb.w)) fx = Math.max(fx, x + TILE / 2 + 4);
+      if (isWater(nb.s)) fy = Math.min(fy, y + TILE - 10);
+      if (isWater(nb.n)) fy = Math.max(fy, y + TILE - 6);
+      push(key, fx, fy, TILE * (1.1 + salt(15) * 0.2));
     }
   } else if (tile.biome === "swamp") {
-    push("reeds", x + TILE / 2, y + TILE - 6, 18 + salt(3) * 6);
+    push("reeds", x + 10 + salt(2) * 24, y + TILE - 6, 16 + salt(3) * 8);
   }
 
-  spots.sort((a, b) => a.fy - b.fy);
-  for (const s of spots) drawSprFoot(ctx, img, SPR_TREE[s.key], s.fx, s.fy, s.h);
+  for (const s of spots) {
+    const key = s.key;
+    const fx = s.fx;
+    const fy = s.fy;
+    const h = s.h;
+    out.push({
+      fy,
+      draw: () => drawSprFoot(ctx, img, SPR_TREE[key], fx, fy, h),
+    });
+  }
+}
+
+function paintPaintedProps(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
+  const buf: Array<{ fy: number; draw: () => void }> = [];
+  collectPaintedProps(ctx, tile, world, buf);
+  buf.sort((a, b) => a.fy - b.fy);
+  for (const p of buf) p.draw();
 }
 
 function paintPaintedFence(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number, world: World) {
@@ -1139,33 +1191,10 @@ function paintForestGround(
   y: number,
   _art: ReturnType<typeof getArt>,
 ) {
-  const n = sides4(world, tile.x, tile.y);
-  const nF = !!n.n && isWooded(n.n);
-  const eF = !!n.e && isWooded(n.e);
-  const sF = !!n.s && isWooded(n.s);
-  const wF = !!n.w && isWooded(n.w);
-  const count = (nF ? 1 : 0) + (eF ? 1 : 0) + (sF ? 1 : 0) + (wF ? 1 : 0);
-  const fieldOpen = isOpenLand(n.n) || isOpenLand(n.e) || isOpenLand(n.s) || isOpenLand(n.w);
-  const interior = count >= 4 || (count >= 3 && !fieldOpen);
-  if (tile.road !== "none") {
-    paintMeadow(ctx, tile, x, y, false);
-    return;
-  }
-  if (interior || tile.plot || tile.building !== "none") {
-    useFill(ctx, "moss", "#5c6a42");
-    ctx.fillRect(x, y, TILE, TILE);
-    ctx.fillStyle = "rgba(42, 56, 28, 0.28)";
-    ctx.beginPath();
-    ctx.ellipse(x + TILE / 2, y + TILE / 2, 16, 15, 0, 0, Math.PI * 2);
-    ctx.fill();
-    return;
-  }
-
-  paintMeadow(ctx, tile, x, y, false);
-  if (!nF) paintShoreGrass(ctx, x, y, "n", tile.x, tile.y);
-  if (!eF) paintShoreGrass(ctx, x, y, "e", tile.x, tile.y);
-  if (!sF) paintShoreGrass(ctx, x, y, "s", tile.x, tile.y);
-  if (!wF) paintShoreGrass(ctx, x, y, "w", tile.x, tile.y);
+  void world;
+  void tile;
+  useFill(ctx, "moss", "#5c6a42");
+  ctx.fillRect(x, y, TILE, TILE);
 }
 
 function paintForestCrowns(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
