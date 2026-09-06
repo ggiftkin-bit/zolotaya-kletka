@@ -3,6 +3,9 @@ import type { Biome, BuildingKind, Inventory, ItemId, Profession, Season, Transp
 /** Альфа. Вторая цифра — новая механика, третья — доработка. */
 export const GAME_VERSION = "0.8.8";
 
+/** Пробные листы пола / крон / воды. false — эллипсы и paintRiverGround. */
+export const PAINTED_BIOME = true;
+
 export const MAP_W = 96;
 export const MAP_H = 96;
 export const TILE = 44;
