@@ -29,13 +29,25 @@ const SAND_WET = "#b89568";
 const YARD_STONE = "#7a7064";
 const STREET_STONE = "#a3947c";
 
-type FillKind = "water" | "meadow" | "moss" | "stone" | "sand";
-const FILL_SCALE = 0.42;
+type FillKind = "water" | "meadow" | "moss" | "stone" | "sand" | "cobble" | "dirt" | "swamp" | "plank" | "needle" | "rings";
+const FILL_SCALE: Record<FillKind, number> = {
+  water: 0.42,
+  meadow: 0.42,
+  moss: 0.42,
+  stone: 0.42,
+  sand: 0.42,
+  cobble: 0.25,
+  dirt: 0.4,
+  swamp: 0.42,
+  plank: 0.35,
+  needle: 0.32,
+  rings: 0.22,
+};
 let fillPatterns: Partial<Record<FillKind, CanvasPattern>> | null = null;
 
-function makeFillPattern(ctx: CanvasRenderingContext2D, img: HTMLImageElement) {
-  const w = Math.max(32, Math.round(img.width * FILL_SCALE));
-  const h = Math.max(32, Math.round(img.height * FILL_SCALE));
+function makeFillPattern(ctx: CanvasRenderingContext2D, img: HTMLImageElement, scale: number) {
+  const w = Math.max(32, Math.round(img.width * scale));
+  const h = Math.max(32, Math.round(img.height * scale));
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
@@ -46,13 +58,14 @@ function makeFillPattern(ctx: CanvasRenderingContext2D, img: HTMLImageElement) {
 }
 
 function ensureFillPatterns(ctx: CanvasRenderingContext2D) {
-  if (!FILL_TEX || fillPatterns) return;
+  if (!FILL_TEX) return;
   const a = getArt();
-  if (!a?.fillWater || !a.fillMeadow || !a.fillMoss || !a.fillStone || !a.fillSand) return;
+  if (!a) return;
+  if (fillPatterns?.cobble && fillPatterns.needle && fillPatterns.water) return;
   fillPatterns = {};
-  const bind = (kind: FillKind, img: HTMLImageElement | null) => {
+  const bind = (kind: FillKind, img: HTMLImageElement | null | undefined) => {
     if (!img) return;
-    const p = makeFillPattern(ctx, img);
+    const p = makeFillPattern(ctx, img, FILL_SCALE[kind]);
     if (p) fillPatterns![kind] = p;
   };
   bind("water", a.fillWater);
@@ -60,6 +73,16 @@ function ensureFillPatterns(ctx: CanvasRenderingContext2D) {
   bind("moss", a.fillMoss);
   bind("stone", a.fillStone);
   bind("sand", a.fillSand);
+  bind("cobble", a.fillCobble);
+  bind("dirt", a.fillDirt);
+  bind("swamp", a.fillSwamp);
+  bind("plank", a.fillPlank);
+  bind("needle", a.fillNeedle);
+  bind("rings", a.fillRings);
+}
+
+function hasFill(kind: FillKind) {
+  return FILL_TEX && !!fillPatterns?.[kind];
 }
 
 function useFill(ctx: CanvasRenderingContext2D, kind: FillKind, fallback: string) {
@@ -727,6 +750,11 @@ function paintBiome(
   y: number,
   wooded = true,
 ) {
+  if (FILL_TEX && biome === "swamp") {
+    useFill(ctx, "swamp", BIOME_FILL.swamp);
+    ctx.fillRect(x, y, TILE, TILE);
+    return;
+  }
   if (FILL_TEX && (biome === "mountain" || biome === "ore")) {
     useFill(ctx, "stone", BIOME_FILL[biome]);
     ctx.fillRect(x, y, TILE, TILE);
@@ -1020,23 +1048,36 @@ function paintForestCrowns(ctx: CanvasRenderingContext2D, tile: Tile, world: Wor
 
 function paintTree(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number, shade = 0.5, ox = 0) {
   const tx = cx + ox;
-  ctx.fillStyle = "#3a2a18";
+  ensureFillPatterns(ctx);
+  if (hasFill("rings")) useFill(ctx, "rings", "#3a2a18");
+  else ctx.fillStyle = "#3a2a18";
   ctx.fillRect(tx - 1.3 * s, cy - 1, 2.6 * s, 7.5 * s);
   const dark = shade > 0.55 ? "#243618" : "#2e421c";
   const mid = shade > 0.55 ? "#324c22" : "#3d5c28";
   const lite = shade > 0.55 ? "#3a5826" : "#4e7034";
-  ctx.fillStyle = dark;
+  ctx.save();
   ctx.beginPath();
   ctx.ellipse(cx, cy - 7 * s, 8.2 * s, 9 * s, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = mid;
+  ctx.clip();
+  if (hasFill("needle")) useFill(ctx, "needle", dark);
+  else ctx.fillStyle = dark;
+  ctx.fillRect(cx - 10 * s, cy - 18 * s, 20 * s, 22 * s);
+  ctx.restore();
+  if (!hasFill("needle")) {
+    ctx.fillStyle = mid;
+    ctx.beginPath();
+    ctx.ellipse(cx - 2.2 * s, cy - 9 * s, 5 * s, 5.4 * s, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = lite;
+    ctx.beginPath();
+    ctx.ellipse(cx + 1.4 * s, cy - 8.2 * s, 3.2 * s, 3.4 * s, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.strokeStyle = shade > 0.55 ? "rgba(16, 24, 10, 0.55)" : "rgba(28, 40, 16, 0.45)";
+  ctx.lineWidth = 1.15;
   ctx.beginPath();
-  ctx.ellipse(cx - 2.2 * s, cy - 9 * s, 5 * s, 5.4 * s, -0.3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = lite;
-  ctx.beginPath();
-  ctx.ellipse(cx + 1.4 * s, cy - 8.2 * s, 3.2 * s, 3.4 * s, 0.2, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.ellipse(cx, cy - 7 * s, 8.2 * s, 9 * s, 0, 0, Math.PI * 2);
+  ctx.stroke();
 }
 
 function paintWaterShade(ctx: CanvasRenderingContext2D, tile: Tile, world: World, x: number, y: number) {
@@ -1060,6 +1101,12 @@ function paintFieldEarth(ctx: CanvasRenderingContext2D, x: number, y: number) {
 }
 
 function paintCobbles(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number, street: boolean) {
+  ensureFillPatterns(ctx);
+  if (hasFill("cobble")) {
+    useFill(ctx, "cobble", street ? STREET_STONE : YARD_STONE);
+    ctx.fillRect(x, y, TILE, TILE);
+    return;
+  }
   ctx.fillStyle = street ? STREET_STONE : YARD_STONE;
   ctx.fillRect(x, y, TILE, TILE);
   ctx.save();
@@ -1100,6 +1147,12 @@ function paintCobbles(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: n
 }
 
 function paintPackedDirt(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number) {
+  ensureFillPatterns(ctx);
+  if (hasFill("cobble")) {
+    useFill(ctx, "cobble", STREET_STONE);
+    ctx.fillRect(x, y, TILE, TILE);
+    return;
+  }
   ctx.fillStyle = hash01(tile.x, tile.y, 1) > 0.5 ? "#8c9662" : "#84905c";
   ctx.fillRect(x, y, TILE, TILE);
   ctx.fillStyle = "rgba(130, 108, 72, 0.32)";
@@ -1438,25 +1491,35 @@ function paintRoad(ctx: CanvasRenderingContext2D, tile: Tile, world: World, x: n
   const ewW = w && e ? TILE : w || e ? TILE / 2 + half : BAND;
 
   if (tile.road === "bridge") {
-    ctx.fillStyle = "#8a623c";
+    ensureFillPatterns(ctx);
+    if (hasFill("plank")) useFill(ctx, "plank", "#8a623c");
+    else ctx.fillStyle = "#8a623c";
     if (ns) ctx.fillRect(cx - half, nsY0, BAND, nsH);
     if (ew) ctx.fillRect(ewX0, cy - half, ewW, BAND);
-    ctx.fillStyle = "#6b4a2f";
-    const across = ns && !ew;
-    if (across) {
-      for (let i = nsY0; i < nsY0 + nsH; i += 5) {
-        ctx.fillRect(cx - half, i, BAND, 1.2);
-      }
-    } else {
-      for (let i = ewX0; i < ewX0 + ewW; i += 5) {
-        ctx.fillRect(i, cy - half, 1.2, BAND);
+    if (!hasFill("plank")) {
+      ctx.fillStyle = "#6b4a2f";
+      const across = ns && !ew;
+      if (across) {
+        for (let i = nsY0; i < nsY0 + nsH; i += 5) {
+          ctx.fillRect(cx - half, i, BAND, 1.2);
+        }
+      } else {
+        for (let i = ewX0; i < ewX0 + ewW; i += 5) {
+          ctx.fillRect(i, cy - half, 1.2, BAND);
+        }
       }
     }
     return;
   }
 
   if (tile.road === "stone") {
-    ctx.fillStyle = "#7a7368";
+    ensureFillPatterns(ctx);
+    if (hasFill("cobble")) {
+      useFill(ctx, "cobble", "#7a7368");
+      if (ns) ctx.fillRect(cx - half, nsY0, BAND, nsH);
+      if (ew) ctx.fillRect(ewX0, cy - half, ewW, BAND);
+      return;
+    }
     if (ns) ctx.fillRect(cx - half, nsY0, BAND, nsH);
     if (ew) ctx.fillRect(ewX0, cy - half, ewW, BAND);
     ctx.fillStyle = "#5a544c";
@@ -1479,6 +1542,13 @@ function paintRoad(ctx: CanvasRenderingContext2D, tile: Tile, world: World, x: n
 
   const dirt = "#c4a46a";
   const dirtD = "#a07848";
+  ensureFillPatterns(ctx);
+  if (hasFill("dirt")) {
+    useFill(ctx, "dirt", dirt);
+    if (ns) ctx.fillRect(cx - half, nsY0, BAND, nsH);
+    if (ew) ctx.fillRect(ewX0, cy - half, ewW, BAND);
+    return;
+  }
   if (ns) {
     const segs = 5;
     const segH = nsH / segs;
@@ -1542,7 +1612,8 @@ function paintFence(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: num
     if (!live(kind)) return;
     const look = kind === "gate" ? "wood" : kind;
     const s = spec(look);
-    ctx.fillStyle = s.fill;
+    if (look !== "wall") useFill(ctx, "plank", s.fill);
+    else ctx.fillStyle = s.fill;
     if (look === "palisade") {
       ctx.fillRect(cx - 2.5, cy - 9, 5, 16);
       ctx.beginPath();
@@ -1567,12 +1638,14 @@ function paintFence(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: num
   const paintRailH = (kind: FenceKind, yy: number) => {
     const s = spec(kind);
     const inset = s.post * 0.55 + 0.4;
-    ctx.fillStyle = s.fill;
+    if (kind !== "wall") useFill(ctx, "plank", s.fill);
+    else ctx.fillStyle = s.fill;
     ctx.fillRect(x + inset, yy - s.rail / 2, TILE - inset * 2, s.rail);
     ctx.fillStyle = s.top;
     ctx.fillRect(x + inset, yy - s.rail / 2, TILE - inset * 2, 1.2);
     if (!s.pali) return;
-    ctx.fillStyle = s.fill;
+    if (kind !== "wall") useFill(ctx, "plank", s.fill);
+    else ctx.fillStyle = s.fill;
     for (let i = 0; i < 3; i++) {
       const sx = x + 11 + i * 11;
       ctx.fillRect(sx - 1.6, yy - 8, 3.2, 12);
@@ -1588,12 +1661,14 @@ function paintFence(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: num
   const paintRailV = (kind: FenceKind, xx: number) => {
     const s = spec(kind);
     const inset = s.post * 0.55 + 0.4;
-    ctx.fillStyle = s.fill;
+    if (kind !== "wall") useFill(ctx, "plank", s.fill);
+    else ctx.fillStyle = s.fill;
     ctx.fillRect(xx - s.rail / 2, y + inset, s.rail, TILE - inset * 2);
     ctx.fillStyle = s.top;
     ctx.fillRect(xx - s.rail / 2, y + inset, 1.2, TILE - inset * 2);
     if (!s.pali) return;
-    ctx.fillStyle = s.fill;
+    if (kind !== "wall") useFill(ctx, "plank", s.fill);
+    else ctx.fillStyle = s.fill;
     for (let i = 0; i < 3; i++) {
       const sy = y + 11 + i * 11;
       ctx.fillRect(xx - 1.6, sy - 6, 3.2, 12);
@@ -1731,10 +1806,18 @@ function paintCut(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: numbe
       const r = 2.6 + hash01(tile.x, tile.y, 31 + i) * 2.2;
       ctx.fillStyle = "rgba(62, 48, 32, 0.92)";
       ctx.fillRect(sx, sy, r * 1.5, r * 2);
-      ctx.fillStyle = "rgba(108, 86, 58, 0.95)";
+      ctx.save();
       ctx.beginPath();
       ctx.arc(sx + r * 0.75, sy, r, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.clip();
+      useFill(ctx, "rings", "rgba(108, 86, 58, 0.95)");
+      ctx.fillRect(sx - r, sy - r, r * 3, r * 3);
+      ctx.restore();
+      ctx.strokeStyle = "rgba(50, 36, 22, 0.7)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(sx + r * 0.75, sy, r, 0, Math.PI * 2);
+      ctx.stroke();
     }
     return;
   }

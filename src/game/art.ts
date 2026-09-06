@@ -11,6 +11,12 @@ export type ArtPack = {
   fillMoss: HTMLImageElement | null;
   fillStone: HTMLImageElement | null;
   fillSand: HTMLImageElement | null;
+  fillCobble: HTMLImageElement | null;
+  fillDirt: HTMLImageElement | null;
+  fillSwamp: HTMLImageElement | null;
+  fillPlank: HTMLImageElement | null;
+  fillNeedle: HTMLImageElement | null;
+  fillRings: HTMLImageElement | null;
 };
 
 const TILE_INDEX: Record<Biome, number> = {
@@ -95,8 +101,22 @@ export function ensureArt() {
     loadImage("/game/fill-moss.jpg").catch(() => null),
     loadImage("/game/fill-stone.jpg").catch(() => null),
     loadImage("/game/fill-sand.jpg").catch(() => null),
-  ]).then(([tiles, props, meeple, tokens, life, fillWater, fillMeadow, fillMoss, fillStone, fillSand]) => {
-    pack = { tiles, props, meeple, tokens, life, fillWater, fillMeadow, fillMoss, fillStone, fillSand };
+    loadImage("/game/fill-cobble.jpg").catch(() => null),
+    loadImage("/game/fill-dirt.jpg").catch(() => null),
+    loadImage("/game/fill-swamp.jpg").catch(() => null),
+    loadImage("/game/fill-plank.jpg").catch(() => null),
+    loadImage("/game/fill-needle.jpg").catch(() => null),
+    loadImage("/game/fill-rings.jpg").catch(() => null),
+  ]).then(([
+    tiles, props, meeple, tokens, life,
+    fillWater, fillMeadow, fillMoss, fillStone, fillSand,
+    fillCobble, fillDirt, fillSwamp, fillPlank, fillNeedle, fillRings,
+  ]) => {
+    pack = {
+      tiles, props, meeple, tokens, life,
+      fillWater, fillMeadow, fillMoss, fillStone, fillSand,
+      fillCobble, fillDirt, fillSwamp, fillPlank, fillNeedle, fillRings,
+    };
     return pack;
   });
   return pending;
