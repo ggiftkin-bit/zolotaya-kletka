@@ -41,7 +41,7 @@ function isYardPave(t: Tile): boolean {
   return !!t.plot && !isFieldFloor(t) && !t.pit && !isWater(t);
 }
 
-function isStreetPave(t: Tile): boolean {
+function isPackedStreet(t: Tile): boolean {
   return !!t.commons && !t.plot && !t.pit && !isWater(t) && t.building !== "field";
 }
 
@@ -182,7 +182,7 @@ function currentLight(tickOfDay: number, tickAt: number, now: number): Light {
 
 function lightKind(tile: Tile): "water" | "stone" | "wood" | "grass" {
   if (isWater(tile)) return "water";
-  if (isYardPave(tile) || isStreetPave(tile)) return "stone";
+  if (isYardPave(tile)) return "stone";
   if (isWooded(tile) || tile.biome === "forest") return "wood";
   return "grass";
 }
@@ -651,20 +651,21 @@ function paintMeadow(
   y: number,
   fertile: boolean,
 ) {
-  ctx.fillStyle = fertile ? "#a8b06c" : "#9aaa62";
+  const tint = hash01(tile.x, tile.y, 1);
+  ctx.fillStyle = fertile
+    ? tint > 0.55 ? "#a4b068" : "#9eaa66"
+    : tint > 0.55 ? "#8fa85c" : "#86a056";
   ctx.fillRect(x, y, TILE, TILE);
-  ctx.fillStyle = fertile ? "rgba(92, 118, 48, 0.22)" : "rgba(80, 108, 44, 0.2)";
-  ctx.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
-  ctx.fillStyle = fertile ? "rgba(122, 148, 64, 0.35)" : "rgba(110, 138, 58, 0.32)";
-  for (let i = 0; i < 3; i++) {
-    const gx = x + 6 + ((i * 13 + tile.x * 5) % (TILE - 12));
-    const gy = y + 10 + ((i * 11 + tile.y * 7) % (TILE - 16));
-    ctx.fillRect(gx, gy, 8, 2);
+  ctx.fillStyle = fertile ? "rgba(92, 118, 48, 0.16)" : "rgba(72, 102, 40, 0.14)";
+  for (let i = 0; i < 4; i++) {
+    const gx = x + 4 + ((i * 11 + tile.x * 7 + tile.y * 3) % (TILE - 10));
+    const gy = y + 6 + ((i * 9 + tile.y * 5) % (TILE - 12));
+    ctx.fillRect(gx, gy, 7, 1.6);
   }
-  if (hash01(tile.x, tile.y, 3) > 0.82) {
-    ctx.fillStyle = "rgba(120, 114, 96, 0.7)";
+  if (hash01(tile.x, tile.y, 3) > 0.88) {
+    ctx.fillStyle = "rgba(120, 114, 96, 0.55)";
     ctx.beginPath();
-    ctx.ellipse(x + 10 + hash01(tile.x, tile.y, 4) * 22, y + 14 + hash01(tile.x, tile.y, 5) * 16, 3.2, 2.1, 0.2, 0, Math.PI * 2);
+    ctx.ellipse(x + 10 + hash01(tile.x, tile.y, 4) * 22, y + 14 + hash01(tile.x, tile.y, 5) * 16, 2.4, 1.6, 0.2, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -864,6 +865,10 @@ function paintForestGround(
   const count = (nF ? 1 : 0) + (eF ? 1 : 0) + (sF ? 1 : 0) + (wF ? 1 : 0);
   const fieldOpen = isOpenLand(n.n) || isOpenLand(n.e) || isOpenLand(n.s) || isOpenLand(n.w);
   const interior = count >= 4 || (count >= 3 && !fieldOpen);
+  if (tile.road !== "none") {
+    paintMeadow(ctx, tile, x, y, false);
+    return;
+  }
   if (interior || tile.plot || tile.building !== "none") {
     ctx.fillStyle = "#5c6a42";
     ctx.fillRect(x, y, TILE, TILE);
@@ -877,14 +882,6 @@ function paintForestGround(
       const v = hash01(tile.x, tile.y, 50 + i);
       let cx = x + 8 + u * (TILE - 16);
       let cy = y + 12 + v * (TILE - 18);
-      if (tile.road !== "none") {
-        const dx = cx - (x + TILE / 2);
-        const dy = cy - (y + TILE / 2);
-        if (Math.abs(dx) < 11 && Math.abs(dy) < 11) {
-          cx += dx >= 0 ? 13 : -13;
-          cy += dy >= 0 ? 9 : -9;
-        }
-      }
       const s = 0.8 + hash01(tile.x, tile.y, 70 + i) * 0.3;
       paintTree(ctx, cx, cy, s);
     }
@@ -933,14 +930,6 @@ function paintForestGround(
     const v = hash01(tile.x, tile.y, 50 + i);
     let cx = x0 + 7 + u * Math.max(8, x1 - x0 - 14);
     let cy = y0 + 10 + v * Math.max(8, y1 - y0 - 16);
-    if (tile.road !== "none") {
-      const dx = cx - (x + TILE / 2);
-      const dy = cy - (y + TILE / 2);
-      if (Math.abs(dx) < 11 && Math.abs(dy) < 11) {
-        cx += dx >= 0 ? 13 : -13;
-        cy += dy >= 0 ? 9 : -9;
-      }
-    }
     const s = 0.85 + hash01(tile.x, tile.y, 70 + i) * 0.35;
     paintTree(ctx, cx, cy, s);
   }
@@ -1024,6 +1013,26 @@ function paintCobbles(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: n
   ctx.restore();
 }
 
+function paintPackedDirt(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number) {
+  ctx.fillStyle = hash01(tile.x, tile.y, 1) > 0.5 ? "#8c9662" : "#84905c";
+  ctx.fillRect(x, y, TILE, TILE);
+  ctx.fillStyle = "rgba(130, 108, 72, 0.32)";
+  ctx.beginPath();
+  ctx.ellipse(
+    x + 14 + hash01(tile.x, tile.y, 2) * 16,
+    y + 18 + hash01(tile.x, tile.y, 3) * 10,
+    12,
+    7,
+    0.15,
+    0,
+    Math.PI * 2,
+  );
+  ctx.fill();
+  ctx.fillStyle = "rgba(72, 92, 40, 0.16)";
+  ctx.fillRect(x + 6 + hash01(tile.x, tile.y, 4) * 10, y + 10, 12, 2);
+  ctx.fillRect(x + 16, y + 26, 10, 2);
+}
+
 function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
   const x = tile.x * TILE;
   const y = tile.y * TILE;
@@ -1034,8 +1043,8 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
     paintRiverGround(ctx, tile, world, x, y, art);
   } else if (isYardPave(tile)) {
     paintCobbles(ctx, tile, x, y, false);
-  } else if (isStreetPave(tile)) {
-    paintCobbles(ctx, tile, x, y, true);
+  } else if (isPackedStreet(tile)) {
+    paintPackedDirt(ctx, tile, x, y);
   } else if (tile.plot && isFieldFloor(tile)) {
     paintFieldEarth(ctx, x, y);
   } else if (lushForest) {
@@ -1054,7 +1063,7 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
   if (tile.pit) paintPit(ctx, tile, world, x, y);
 
   if (tile.village) {
-    if (!isYardPave(tile) && !isStreetPave(tile)) {
+    if (!isYardPave(tile) && !isPackedStreet(tile)) {
       ctx.fillStyle = "rgba(70, 90, 110, 0.2)";
       ctx.fillRect(x, y, TILE, TILE);
     }
@@ -1108,7 +1117,7 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
     tile.resource !== "herb" &&
     tile.building === "none" &&
     !tile.caravan &&
-    !(lushForest && tile.resource === "wood")
+    !(tile.biome === "forest" && tile.resource === "wood")
   ) {
     const n = Math.min(3, Math.max(1, Math.ceil(tile.amount / 3)));
     const col =
@@ -1549,10 +1558,6 @@ function paintHerb(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: numb
   if (tile.building !== "none" || tile.caravan || tile.commons || tile.plot) return;
   const has = tile.resource === "herb" && tile.amount > 0;
   const meadow = tile.biome === "plains" && !tile.commons;
-  if (meadow && has) {
-    ctx.fillStyle = "rgba(86, 118, 58, 0.28)";
-    ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
-  }
   if (!has) {
     if (meadow && tile.resource === "herb" && tile.scarred) {
       ctx.fillStyle = "rgba(120, 108, 72, 0.28)";
@@ -1588,24 +1593,17 @@ function paintHerb(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: numb
 
 function paintCut(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number) {
   if (tile.biome === "forest" && tile.amount < 4) {
-    const stumps = tile.amount <= 0 ? 4 : 2;
-    ctx.fillStyle = "rgba(62, 48, 32, 0.92)";
+    if (tile.plot || tile.commons || tile.road !== "none" || tile.building !== "none" || tile.pit) return;
+    const stumps = tile.amount <= 0 ? 3 : 2;
     for (let i = 0; i < stumps; i++) {
-      const sx = x + 8 + i * 9;
-      const sy = y + 20 + (i % 2) * 6;
-      ctx.fillRect(sx, sy, 7, 9);
-      ctx.beginPath();
-      ctx.fillStyle = "rgba(108, 86, 58, 0.95)";
-      ctx.arc(sx + 3.5, sy, 4.2, 0, Math.PI * 2);
-      ctx.fill();
+      const sx = x + 8 + hash01(tile.x, tile.y, 11 + i) * 24;
+      const sy = y + 16 + hash01(tile.x, tile.y, 21 + i) * 16;
       ctx.fillStyle = "rgba(62, 48, 32, 0.92)";
-    }
-    if (tile.amount > 0) {
-      const keep = Math.min(2, tile.amount);
-      for (let i = 0; i < keep; i++) {
-        const sx = x + 12 + i * 14;
-        paintTree(ctx, sx, y + 18, 0.7);
-      }
+      ctx.fillRect(sx, sy, 6, 8);
+      ctx.fillStyle = "rgba(108, 86, 58, 0.95)";
+      ctx.beginPath();
+      ctx.arc(sx + 3, sy, 3.6, 0, Math.PI * 2);
+      ctx.fill();
     }
     return;
   }
