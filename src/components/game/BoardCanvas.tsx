@@ -896,56 +896,98 @@ function paintForestGround(
 
 function paintForestCrowns(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
   if (!isWooded(tile) || tile.plot || tile.building !== "none") return;
+  if (tile.road === "bridge") return;
   const x = tile.x * TILE;
   const y = tile.y * TILE;
-  const spots: Array<{ cx: number; cy: number; s: number }> = [];
-  const push = (cx: number, cy: number, s: number) => {
-    spots.push({ cx, cy, s });
+  const nb = sides4(world, tile.x, tile.y);
+  const nF = !!nb.n && isWooded(nb.n);
+  const eF = !!nb.e && isWooded(nb.e);
+  const sF = !!nb.s && isWooded(nb.s);
+  const wF = !!nb.w && isWooded(nb.w);
+  const woodN = (nF ? 1 : 0) + (eF ? 1 : 0) + (sF ? 1 : 0) + (wF ? 1 : 0);
+  const fieldOpen = isOpenLand(nb.n) || isOpenLand(nb.e) || isOpenLand(nb.s) || isOpenLand(nb.w);
+  const interior = woodN >= 4 || (woodN >= 3 && !fieldOpen);
+  const salt = (s: number) => hash01(tile.x * 13 + tile.y * 7, tile.y * 3 + tile.x, s);
+  const spots: Array<{ cx: number; cy: number; s: number; shade: number; ox: number }> = [];
+  const inLane = (cx: number, cy: number, rad: number) => {
+    if (tile.road === "none") return false;
+    const half = 7.5 + rad;
+    const mx = x + TILE / 2;
+    const my = y + TILE / 2;
+    const rn = hasRoad(world, tile.x, tile.y - 1);
+    const rs = hasRoad(world, tile.x, tile.y + 1);
+    const rw = hasRoad(world, tile.x - 1, tile.y);
+    const re = hasRoad(world, tile.x + 1, tile.y);
+    const ns = rn || rs || (!rw && !re);
+    const ew = rw || re;
+    if (ns && Math.abs(cx - mx) < half) return true;
+    if (ew && Math.abs(cy - my) < half) return true;
+    return false;
   };
+  const tryPush = (cx: number, cy: number, s: number, shade: number, ox: number) => {
+    if (inLane(cx + ox, cy, 8 * s)) return;
+    for (const p of spots) {
+      const dx = p.cx - cx;
+      const dy = p.cy - cy;
+      if (dx * dx + dy * dy < 110) return;
+    }
+    spots.push({ cx, cy, s, shade, ox });
+  };
+
   if (tile.road !== "none") {
-    const n = hasRoad(world, tile.x, tile.y - 1);
-    const s = hasRoad(world, tile.x, tile.y + 1);
-    const w = hasRoad(world, tile.x - 1, tile.y);
-    const e = hasRoad(world, tile.x + 1, tile.y);
-    const ns = n || s || (!w && !e);
-    const ew = w || e;
-    if (ns) {
-      push(x + 7 + hash01(tile.x, tile.y, 30) * 3, y + 18 + hash01(tile.x, tile.y, 31) * 10, 0.82);
-      push(x + TILE - 9 - hash01(tile.x, tile.y, 32) * 3, y + 22 + hash01(tile.x, tile.y, 33) * 8, 0.88);
-    } else if (ew) {
-      push(x + 12 + hash01(tile.x, tile.y, 34) * 8, y + 11 + hash01(tile.x, tile.y, 35) * 4, 0.84);
-      push(x + 24 + hash01(tile.x, tile.y, 36) * 8, y + 30 + hash01(tile.x, tile.y, 37) * 4, 0.9);
+    if (salt(0) > 0.42) {
+      const s = 0.62 + salt(2) * 0.28;
+      const shade = salt(3);
+      const ox = (salt(4) - 0.5) * 3;
+      const rn = hasRoad(world, tile.x, tile.y - 1);
+      const rs = hasRoad(world, tile.x, tile.y + 1);
+      const rw = hasRoad(world, tile.x - 1, tile.y);
+      const re = hasRoad(world, tile.x + 1, tile.y);
+      const ns = rn || rs || (!rw && !re);
+      if (ns) {
+        const left = salt(5) > 0.5;
+        tryPush(left ? x + 6 : x + TILE - 6, y + 14 + salt(6) * 16, s, shade, ox);
+      } else {
+        const up = salt(5) > 0.5;
+        tryPush(x + 10 + salt(6) * 24, up ? y + 10 : y + TILE - 8, s, shade, ox);
+      }
     }
   } else {
-    const slots: Array<[number, number]> = [
-      [0.28, 0.4],
-      [0.72, 0.36],
-      [0.5, 0.74],
-    ];
-    for (let i = 0; i < 3; i++) {
-      const [u0, v0] = slots[i]!;
-      const cx = x + (u0 + (hash01(tile.x, tile.y, 30 + i) - 0.5) * 0.16) * TILE;
-      const cy = y + (v0 + (hash01(tile.x, tile.y, 50 + i) - 0.5) * 0.12) * TILE;
-      const s = 0.82 + hash01(tile.x, tile.y, 70 + i) * 0.22;
-      push(cx, cy, s);
+    const n = interior ? 3 + (salt(0) > 0.4 ? 1 : 0) : 1 + (salt(0) > 0.55 ? 1 : 0);
+    const pullX = (eF && !wF ? 7 : wF && !eF ? -7 : 0);
+    const pullY = (sF && !nF ? 7 : nF && !sF ? -7 : 0);
+    for (let i = 0; i < n + 4 && spots.length < n; i++) {
+      const u = salt(10 + i);
+      const v = salt(20 + i);
+      let cx = x + 7 + u * (TILE - 14) + pullX;
+      let cy = y + 10 + v * (TILE - 16) + pullY;
+      cx = Math.max(x + 6, Math.min(x + TILE - 6, cx));
+      cy = Math.max(y + 8, Math.min(y + TILE - 6, cy));
+      const kind = salt(30 + i);
+      const s = kind < 0.34 ? 0.58 : kind < 0.7 ? 0.86 : 1.12;
+      tryPush(cx, cy, s, salt(40 + i), (salt(50 + i) - 0.5) * 4);
     }
   }
   spots.sort((a, b) => a.cy - b.cy);
-  for (const t of spots) paintTree(ctx, t.cx, t.cy, t.s);
+  for (const t of spots) paintTree(ctx, t.cx, t.cy, t.s, t.shade, t.ox);
 }
 
-function paintTree(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number) {
+function paintTree(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number, shade = 0.5, ox = 0) {
+  const tx = cx + ox;
   ctx.fillStyle = "#3a2a18";
-  ctx.fillRect(cx - 1.3 * s, cy - 1, 2.6 * s, 7.5 * s);
-  ctx.fillStyle = "#2a3d1c";
+  ctx.fillRect(tx - 1.3 * s, cy - 1, 2.6 * s, 7.5 * s);
+  const dark = shade > 0.55 ? "#243618" : "#2e421c";
+  const mid = shade > 0.55 ? "#324c22" : "#3d5c28";
+  const lite = shade > 0.55 ? "#3a5826" : "#4e7034";
+  ctx.fillStyle = dark;
   ctx.beginPath();
   ctx.ellipse(cx, cy - 7 * s, 8.2 * s, 9 * s, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#3d5c28";
+  ctx.fillStyle = mid;
   ctx.beginPath();
   ctx.ellipse(cx - 2.2 * s, cy - 9 * s, 5 * s, 5.4 * s, -0.3, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#4a6b32";
+  ctx.fillStyle = lite;
   ctx.beginPath();
   ctx.ellipse(cx + 1.4 * s, cy - 8.2 * s, 3.2 * s, 3.4 * s, 0.2, 0, Math.PI * 2);
   ctx.fill();
@@ -1337,59 +1379,87 @@ function paintRoad(ctx: CanvasRenderingContext2D, tile: Tile, world: World, x: n
   const s = hasRoad(world, tile.x, tile.y + 1);
   const w = hasRoad(world, tile.x - 1, tile.y);
   const e = hasRoad(world, tile.x + 1, tile.y);
-  const col =
-    tile.road === "stone" ? "#7a7368" : tile.road === "bridge" ? "#8a623c" : "#c4a46a";
-  const shade =
-    tile.road === "stone" ? "#5c564e" : tile.road === "bridge" ? "#6b4a2f" : "#a07848";
   const BAND = 15;
-  const RUT = 4.5;
+  const RUT = 4.2;
   const half = BAND / 2;
   const cx = x + TILE / 2;
   const cy = y + TILE / 2;
   const ns = n || s || (!w && !e);
   const ew = w || e;
+  const nsY0 = n ? y : cy - half;
+  const nsH = n && s ? TILE : n || s ? TILE / 2 + half : BAND;
+  const ewX0 = w ? x : cx - half;
+  const ewW = w && e ? TILE : w || e ? TILE / 2 + half : BAND;
 
   if (tile.road === "bridge") {
-    ctx.fillStyle = col;
-    if (n || ns) ctx.fillRect(cx - half, n ? y : cy - half, BAND, n && s ? TILE : n ? TILE / 2 + half : s ? TILE / 2 + half : BAND);
-    if (s && !n) ctx.fillRect(cx - half, cy, BAND, TILE / 2 + 1);
-    if (w) ctx.fillRect(x, cy - half, TILE / 2 + 1, BAND);
-    if (e) ctx.fillRect(cx, cy - half, TILE / 2 + 1, BAND);
-    ctx.strokeStyle = "rgba(40,28,18,0.4)";
-    ctx.lineWidth = 1;
-    for (let i = -2; i <= 2; i++) {
-      ctx.beginPath();
-      ctx.moveTo(cx - half + 1, cy + i * 3);
-      ctx.lineTo(cx + half - 1, cy + i * 3);
-      ctx.stroke();
+    ctx.fillStyle = "#8a623c";
+    if (ns) ctx.fillRect(cx - half, nsY0, BAND, nsH);
+    if (ew) ctx.fillRect(ewX0, cy - half, ewW, BAND);
+    ctx.fillStyle = "#6b4a2f";
+    const across = ns && !ew;
+    if (across) {
+      for (let i = nsY0; i < nsY0 + nsH; i += 5) {
+        ctx.fillRect(cx - half, i, BAND, 1.2);
+      }
+    } else {
+      for (let i = ewX0; i < ewX0 + ewW; i += 5) {
+        ctx.fillRect(i, cy - half, 1.2, BAND);
+      }
     }
     return;
   }
 
+  if (tile.road === "stone") {
+    ctx.fillStyle = "#7a7368";
+    if (ns) ctx.fillRect(cx - half, nsY0, BAND, nsH);
+    if (ew) ctx.fillRect(ewX0, cy - half, ewW, BAND);
+    ctx.fillStyle = "#5a544c";
+    if (ns) {
+      for (let i = nsY0 + 3; i < nsY0 + nsH; i += 8 + hash01(tile.x, tile.y, i) * 3) {
+        ctx.fillRect(cx - half + 0.5, i, BAND - 1, 1.1);
+      }
+      ctx.fillRect(cx - 0.6, nsY0, 1.2, nsH);
+    }
+    if (ew) {
+      for (let i = ewX0 + 3; i < ewX0 + ewW; i += 8 + hash01(tile.x, tile.y, i + 9) * 3) {
+        ctx.fillRect(i, cy - half + 0.5, 1.1, BAND - 1);
+      }
+      ctx.fillRect(ewX0, cy - 0.6, ewW, 1.2);
+    }
+    ctx.fillStyle = "rgba(239,230,214,0.22)";
+    ctx.fillRect(cx - 4, cy - 3, 3, 2);
+    return;
+  }
+
+  const dirt = "#c4a46a";
+  const dirtD = "#a07848";
   if (ns) {
-    const y0 = n ? y : cy - half;
-    const h = n && s ? TILE : n || s ? TILE / 2 + half : BAND;
-    ctx.fillStyle = col;
-    ctx.fillRect(cx - half, y0, RUT, h);
-    ctx.fillRect(cx + half - RUT, y0, RUT, h);
-    ctx.fillStyle = shade;
-    ctx.fillRect(cx - half + 1.3, y0, 1.2, h);
-    ctx.fillRect(cx + half - RUT + 1.3, y0, 1.2, h);
+    const segs = 5;
+    const segH = nsH / segs;
+    for (let i = 0; i < segs; i++) {
+      const wob = (hash01(tile.x, tile.y, 80 + i) - 0.5) * 2.4;
+      const yy = nsY0 + i * segH;
+      ctx.fillStyle = dirt;
+      ctx.fillRect(cx - half + wob, yy, RUT, segH + 0.6);
+      ctx.fillRect(cx + half - RUT - wob, yy, RUT, segH + 0.6);
+      ctx.fillStyle = dirtD;
+      ctx.fillRect(cx - half + wob + 1.2, yy, 1.1, segH + 0.6);
+      ctx.fillRect(cx + half - RUT - wob + 1.2, yy, 1.1, segH + 0.6);
+    }
   }
   if (ew) {
-    const x0 = w ? x : cx - half;
-    const wdt = w && e ? TILE : w || e ? TILE / 2 + half : BAND;
-    ctx.fillStyle = col;
-    ctx.fillRect(x0, cy - half, wdt, RUT);
-    ctx.fillRect(x0, cy + half - RUT, wdt, RUT);
-    ctx.fillStyle = shade;
-    ctx.fillRect(x0, cy - half + 1.3, wdt, 1.2);
-    ctx.fillRect(x0, cy + half - RUT + 1.3, wdt, 1.2);
-  }
-  if (tile.road === "stone") {
-    ctx.fillStyle = "rgba(239,230,214,0.28)";
-    ctx.fillRect(cx - half + 1, cy - 1, 3, 2);
-    ctx.fillRect(cx + half - 5, cy + 1, 3, 2);
+    const segs = 5;
+    const segW = ewW / segs;
+    for (let i = 0; i < segs; i++) {
+      const wob = (hash01(tile.x, tile.y, 90 + i) - 0.5) * 2.4;
+      const xx = ewX0 + i * segW;
+      ctx.fillStyle = dirt;
+      ctx.fillRect(xx, cy - half + wob, segW + 0.6, RUT);
+      ctx.fillRect(xx, cy + half - RUT - wob, segW + 0.6, RUT);
+      ctx.fillStyle = dirtD;
+      ctx.fillRect(xx, cy - half + wob + 1.2, segW + 0.6, 1.1);
+      ctx.fillRect(xx, cy + half - RUT - wob + 1.2, segW + 0.6, 1.1);
+    }
   }
 }
 
@@ -1610,13 +1680,14 @@ function paintCut(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: numbe
     if (tile.plot || tile.commons || tile.road !== "none" || tile.building !== "none" || tile.pit) return;
     const stumps = tile.amount <= 0 ? 3 : 2;
     for (let i = 0; i < stumps; i++) {
-      const sx = x + 8 + hash01(tile.x, tile.y, 11 + i) * 24;
-      const sy = y + 16 + hash01(tile.x, tile.y, 21 + i) * 16;
+      const sx = x + 7 + hash01(tile.x * 13 + tile.y * 7, tile.y, 11 + i) * 26;
+      const sy = y + 14 + hash01(tile.x * 13 + tile.y * 7, tile.x, 21 + i) * 18;
+      const r = 2.6 + hash01(tile.x, tile.y, 31 + i) * 2.2;
       ctx.fillStyle = "rgba(62, 48, 32, 0.92)";
-      ctx.fillRect(sx, sy, 6, 8);
+      ctx.fillRect(sx, sy, r * 1.5, r * 2);
       ctx.fillStyle = "rgba(108, 86, 58, 0.95)";
       ctx.beginPath();
-      ctx.arc(sx + 3, sy, 3.6, 0, Math.PI * 2);
+      ctx.arc(sx + r * 0.75, sy, r, 0, Math.PI * 2);
       ctx.fill();
     }
     return;

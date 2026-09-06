@@ -108,7 +108,9 @@ function Sheet({ tile }: { tile: Tile }) {
                   : tile.building !== "none"
                     ? BUILDING_LABEL[tile.building]
                     : tile.road !== "none"
-                      ? `${tile.road === "bridge" ? "мост" : "тракт"} · ${
+                      ? `${
+                          tile.road === "bridge" ? "мост" : tile.road === "stone" ? "камень" : "тракт"
+                        } · ${
                           tile.biome === "forest"
                             ? "лес"
                             : tile.biome === "river" || tile.biome === "ford"
