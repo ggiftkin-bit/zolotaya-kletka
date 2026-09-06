@@ -9,7 +9,7 @@
 5. **public/game/TEXTURE-MAP.md** — какие jpg/png куда класть.
 
 Код: https://github.com/ggiftkin-bit/zolotaya-kletka  
-Сейв карманный: `zolotaya-kletka-v8`. Сид: `kletka-land-02`. Версия: `0.9.0`.
+Сейв карманный: `zolotaya-kletka-v8` (черновик). Сид: `kletka-land-02`. Версия: `0.9.1`.
 
 Вход: почта и пароль. Google / X на столе нет.
 
