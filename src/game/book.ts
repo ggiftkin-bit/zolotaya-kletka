@@ -60,6 +60,24 @@ export function publishOwner(owner: string | undefined, selfId: string): string 
   return owner;
 }
 
+/** Хозяин клетки и хозяин телеги: в книге id, на экране свой — «you». */
+export function wireSlim(slim: SlimTile, selfId: string, mode: "publish" | "localize"): SlimTile {
+  const map = mode === "publish" ? publishOwner : localizeOwner;
+  const on = slim.on != null ? map(slim.on, selfId) : slim.on;
+  const wg = slim.wg != null ? map(slim.wg, selfId) : slim.wg;
+  if (on === slim.on && wg === slim.wg) return slim;
+  const next = { ...slim };
+  if (on !== slim.on) {
+    if (on) next.on = on;
+    else delete next.on;
+  }
+  if (wg !== slim.wg) {
+    if (wg) next.wg = wg;
+    else delete next.wg;
+  }
+  return next;
+}
+
 export type TilePacket = {
   x: number;
   y: number;

@@ -1,6 +1,6 @@
 import { JAIL_MS } from "./pace";
-import { plotBounds, yardStrength } from "./fence";
-import { asPile } from "./pile";
+import { plotBounds, setYardGateLock, yardStrength } from "./fence";
+import { asPile, pileTake } from "./pile";
 import type { Character, Dummy, ItemId, Tile, World } from "./types";
 import { tileAt } from "./worldgen";
 
@@ -45,6 +45,12 @@ export function stealChance(world: World, tile: Tile, thief: Character, night: b
   return Math.min(0.82, Math.max(0.08, p));
 }
 
+/** Ночь, колья, скрытность. Манекен не нужен — закон смотрит клетки двора. */
+export function rollCaught(world: World, tile: Tile, thief: Character, night: boolean, extra = 0): boolean {
+  const p = stealChance(world, tile, thief, night);
+  return Math.random() < Math.min(0.88, Math.max(0, p + extra));
+}
+
 export function lootFrom(tile: Tile): { item: ItemId; n: number } | null {
   if (!tile.chestLock) {
     const chest = tile.chest;
@@ -66,6 +72,25 @@ export function lootFrom(tile: Tile): { item: ItemId; n: number } | null {
     return { item: "food", n: Math.min(tile.amount, 2) };
   }
   return null;
+}
+
+/** Один тык — пачка, не весь сундук. Вещь из клетки в сумку вора. */
+export function takeLoot(tile: Tile, loot: { item: ItemId; n: number }) {
+  if (!tile.chestLock && (tile.chest[loot.item] ?? 0) > 0) {
+    tile.chest[loot.item] = Math.max(0, (tile.chest[loot.item] ?? 0) - loot.n);
+    return;
+  }
+  if ((asPile(tile.pile)[loot.item] ?? 0) > 0) {
+    pileTake(tile, loot.item, loot.n);
+    return;
+  }
+  if (tile.building === "field") {
+    tile.amount = Math.max(0, tile.amount - loot.n);
+  }
+}
+
+export function markCrime(tile: Tile, who: string) {
+  tile.mark = { who, at: Date.now() };
 }
 
 export function applyCatch(c: Character, law: boolean, why = "кража", now = Date.now()): Character {
@@ -116,7 +141,7 @@ export function hasLaw(world: World, tile: Tile): boolean {
   return false;
 }
 
-/** Хозяин-манекен на этом дворе. Пустой двор без него и без закона — не яма. */
+/** Хозяин-манекен на этом дворе. Для ямы не нужен: живой хозяин может закрыть стол. */
 export function dummyOnYard(dummies: Dummy[] | undefined, world: World, tile: Tile): boolean {
   const list = dummies ?? [];
   const b = tile.plot ? plotBounds(world, tile.x, tile.y) : null;
@@ -142,4 +167,59 @@ export function jailSpot(world: World, fx: number, fy: number): { x: number; y: 
   const j = world.tiles.find((t) => t.building === "jail" && !t.caravan);
   if (j) return { x: j.x, y: j.y };
   return { x: fx, y: fy };
+}
+
+export type CatchHit = {
+  c: Character;
+  jailed: boolean;
+  law: boolean;
+  spot: { x: number; y: number } | null;
+};
+
+/** Яма только при законе двора. Без закона — розыск. Хозяин оффлайн годится. */
+export function punish(c: Character, world: World, tile: Tile, why: string, now = Date.now()): CatchHit {
+  const law = hasLaw(world, tile);
+  let next = applyCatch(c, law, why, now);
+  if (!isJailed(next)) return { c: next, jailed: false, law, spot: null };
+  const spot = jailSpot(world, tile.x, tile.y);
+  next = { ...next, x: spot.x, y: spot.y, px: spot.x, py: spot.y, busy: null };
+  return { c: next, jailed: true, law, spot };
+}
+
+export function plotCells(world: World, tile: Tile): { x: number; y: number }[] {
+  const b = tile.plot ? plotBounds(world, tile.x, tile.y) : null;
+  if (!b) return [{ x: tile.x, y: tile.y }];
+  const out: { x: number; y: number }[] = [];
+  for (let y = b.y0; y <= b.y1; y++) {
+    for (let x = b.x0; x <= b.x1; x++) out.push({ x, y });
+  }
+  return out;
+}
+
+export function harmCells(...tiles: Array<{ x: number; y: number } | null | undefined>): { x: number; y: number }[] {
+  const seen = new Set<string>();
+  const out: { x: number; y: number }[] = [];
+  for (const t of tiles) {
+    if (!t) continue;
+    const k = `${t.x},${t.y}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ x: t.x, y: t.y });
+  }
+  return out;
+}
+
+export function fenceBurnCells(tile: Tile, side: "n" | "w" | "s" | "e"): { x: number; y: number }[] {
+  if (side === "s") return harmCells(tile, { x: tile.x, y: tile.y + 1 });
+  if (side === "e") return harmCells(tile, { x: tile.x + 1, y: tile.y });
+  return harmCells(tile);
+}
+
+export function unlockKind(world: World, tile: Tile, kind: "chest" | "gate"): { x: number; y: number }[] {
+  if (kind === "chest") {
+    tile.chestLock = false;
+    return harmCells(tile);
+  }
+  setYardGateLock(world, tile.x, tile.y, false);
+  return plotCells(world, tile);
 }

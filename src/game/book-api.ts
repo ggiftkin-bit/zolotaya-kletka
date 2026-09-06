@@ -514,6 +514,136 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
     return { ok: true as const, written };
   });
 
+export const writeHarmDeed = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: unknown) =>
+    z
+      .object({
+        kind: z.string(),
+        tiles: z.array(tileInSchema),
+        pawn: pawnInSchema,
+      })
+      .parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    if (!data.tiles.length) {
+      const body = await mergeFightIntoPawnBody(sql, context.userId, data.pawn.body);
+      await sql.query(
+        `insert into pawn (world_id, user_id, name, color, x, y, body, seen_at, updated_at)
+         values ($1, $2, $3, $4, $5, $6, $7::jsonb, now(), now())
+         on conflict (world_id, user_id) do update set
+           name = excluded.name,
+           color = excluded.color,
+           x = excluded.x,
+           y = excluded.y,
+           body = excluded.body,
+           seen_at = now(),
+           updated_at = now()`,
+        [
+          WORLD_ID,
+          context.userId,
+          data.pawn.name,
+          data.pawn.color,
+          data.pawn.x,
+          data.pawn.y,
+          JSON.stringify(body),
+        ],
+      );
+      return { ok: true as const, written: [] as { x: number; y: number; ver: number }[] };
+    }
+    const incoming = JSON.stringify(
+      data.tiles.map((t) => ({ x: t.x, y: t.y, slim: t.slim, ver: t.ver })),
+    );
+    const rows = await sql.query<{ written: unknown; conflicts: unknown }>(
+      `with incoming as (
+         select (e->>'x')::int as x, (e->>'y')::int as y, e->'slim' as slim, (e->>'ver')::int as ver
+         from jsonb_array_elements($2::jsonb) e
+       ),
+       mismatch as (
+         select i.x, i.y, coalesce(t.slim, '{}'::jsonb) as slim, coalesce(t.ver, 0) as ver,
+                coalesce(t.updated_at::text, now()::text) as updated_at
+         from incoming i
+         left join tile t on t.world_id = $1 and t.x = i.x and t.y = i.y
+         where t.ver is distinct from i.ver
+       ),
+       upd as (
+         update tile as t
+         set slim = i.slim, ver = t.ver + 1, updated_at = now(), updated_by = $3
+         from incoming i
+         where t.world_id = $1 and t.x = i.x and t.y = i.y and t.ver = i.ver
+           and not exists (select 1 from mismatch)
+         returning t.x, t.y, t.ver
+       )
+       select
+         coalesce((select jsonb_agg(jsonb_build_object('x', x, 'y', y, 'ver', ver)) from upd), '[]'::jsonb) as written,
+         coalesce((select jsonb_agg(jsonb_build_object('x', x, 'y', y, 'slim', slim, 'ver', ver, 'updated_at', updated_at)) from mismatch), '[]'::jsonb) as conflicts`,
+      [WORLD_ID, incoming, context.userId],
+    );
+    const rawWritten = rows[0]?.written;
+    const rawConflicts = rows[0]?.conflicts;
+    const written: { x: number; y: number; ver: number }[] = Array.isArray(rawWritten)
+      ? (rawWritten as { x: number; y: number; ver: number }[])
+      : [];
+    const conflictRows: { x: number; y: number; slim: unknown; ver: number; updated_at: string }[] = Array.isArray(
+      rawConflicts,
+    )
+      ? (rawConflicts as { x: number; y: number; slim: unknown; ver: number; updated_at: string }[])
+      : [];
+    const conflicts: TilePacket[] = conflictRows.map((c) => ({
+      x: c.x,
+      y: c.y,
+      slim: asSlim(c.slim),
+      ver: c.ver,
+      updatedAt: c.updated_at,
+    }));
+    if (conflicts.length || written.length !== data.tiles.length) {
+      return {
+        ok: false as const,
+        hint: "клетка уже другая",
+        conflicts,
+        written: [],
+      };
+    }
+    const origin = data.tiles[0];
+    await sql.query(
+      `insert into deed (world_id, user_id, kind, x, y, payload)
+       values ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [
+        WORLD_ID,
+        context.userId,
+        data.kind,
+        origin?.x ?? data.pawn.x,
+        origin?.y ?? data.pawn.y,
+        JSON.stringify({ n: data.tiles.length, harm: true }),
+      ],
+    );
+    const body = await mergeFightIntoPawnBody(sql, context.userId, data.pawn.body);
+    await sql.query(
+      `insert into pawn (world_id, user_id, name, color, x, y, body, seen_at, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7::jsonb, now(), now())
+       on conflict (world_id, user_id) do update set
+         name = excluded.name,
+         color = excluded.color,
+         x = excluded.x,
+         y = excluded.y,
+         body = excluded.body,
+         seen_at = now(),
+         updated_at = now()`,
+      [
+        WORLD_ID,
+        context.userId,
+        data.pawn.name,
+        data.pawn.color,
+        data.pawn.x,
+        data.pawn.y,
+        JSON.stringify(body),
+      ],
+    );
+    await imprintSpot(sql, context.userId, data.pawn.x, data.pawn.y);
+    return { ok: true as const, written };
+  });
+
 export const heartbeatWorld = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((d: unknown) =>

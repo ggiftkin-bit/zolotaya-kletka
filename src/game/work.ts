@@ -25,6 +25,8 @@ export const BUSY_LABEL: Record<BusyKind, string> = {
   dig: "копаю",
   fill: "засыпаю",
   road: "кладу путь",
+  lock: "взлом",
+  burn: "поджог",
 };
 
 export const TOOL_LIFE = {
@@ -103,6 +105,8 @@ export function workMs(kind: BusyKind, herdKind: string | null, c: Character): n
   if (kind === "build") sec = 28;
   if (kind === "craft") sec = 14;
   if (kind === "road") sec = 16;
+  if (kind === "lock") sec = 10;
+  if (kind === "burn") sec = 8;
   if (kind === "hunt" && c.hand === "spear") sec *= 0.7;
   if (kind === "catch" && c.hand === "rope") sec *= 0.85;
   if (kind === "fish" && c.hand === "rod") sec *= 0.8;
@@ -115,9 +119,11 @@ export function workMs(kind: BusyKind, herdKind: string | null, c: Character): n
           ? c.skills.build
           : kind === "craft"
             ? c.skills.craft
-            : kind === "mine" || kind === "dig"
-              ? c.skills.mine
-              : c.skills.survival;
+            : kind === "lock"
+              ? c.skills.stealth
+              : kind === "mine" || kind === "dig"
+                ? c.skills.mine
+                : c.skills.survival;
   sec *= Math.max(0.6, 1 - skill * 0.03);
   return Math.round(sec * 1000);
 }

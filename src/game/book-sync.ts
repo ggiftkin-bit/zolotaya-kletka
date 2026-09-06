@@ -6,20 +6,19 @@ import {
   fogAt,
   FOG_LIVE,
   liveTilesOf,
-  localizeOwner,
   maskLiveFog,
   packPawn,
-  publishOwner,
   rememberFog,
   slimOf,
   unpackPawn,
+  wireSlim,
   WORLD_SEED,
   type BookFight,
   type WorldClock,
 } from "./book";
-import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, strikeBookFight, writeWorldDeed } from "./book-api";
+import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, strikeBookFight, writeHarmDeed, writeWorldDeed } from "./book-api";
 import { rememberLiveFoe } from "./fight";
-import { loadGame } from "./save";
+import { loadGame, saveGame, type SlimTile } from "./save";
 import type { Character, GameState, OtherPawn } from "./types";
 import { spawnPoint } from "./worldgen";
 
@@ -45,13 +44,13 @@ function selfIdOf(): string {
   return store?.get().selfId || "";
 }
 
-function localizePackets<T extends { slim: { on?: string } }>(packets: T[]): T[] {
+function localizePackets<T extends { slim: SlimTile }>(packets: T[]): T[] {
   const selfId = selfIdOf();
   if (!selfId) return packets;
   return packets.map((p) => {
-    const on = localizeOwner(p.slim.on, selfId);
-    if (on === p.slim.on) return p;
-    return { ...p, slim: { ...p.slim, on } };
+    const slim = wireSlim(p.slim, selfId, "localize");
+    if (slim === p.slim) return p;
+    return { ...p, slim };
   });
 }
 
@@ -65,7 +64,7 @@ function publishTiles(state: GameState) {
       const k = keyOf(t.x, t.y);
       if (lastSlim.get(k) === sig) return null;
       const ver = sVer(state, t.x, t.y);
-      const wire = slim.on ? { ...slim, on: publishOwner(slim.on, selfId) } : slim;
+      const wire = wireSlim(slim, selfId, "publish");
       return { x: t.x, y: t.y, slim: wire, ver, sig, k };
     })
     .filter((v): v is NonNullable<typeof v> => !!v);
@@ -246,6 +245,61 @@ export async function flushBook() {
       flushAgain = false;
       void flushBook();
     }
+  }
+}
+
+/** Вред: клетка и фишка вора в книгу сразу, с ver. Конфликт — не пишет сумку. */
+export async function commitHarm(kind: string, cells: Array<{ x: number; y: number }>, prior?: Character) {
+  if (!store) return false;
+  const s = store.get();
+  if (s.started) saveGame(s);
+  if (!s.bookOn || !s.started) return true;
+  const selfId = selfIdOf();
+  const tiles = cells.map((c) => {
+    const t = s.world.tiles[c.y * s.world.width + c.x];
+    const slim = t ? wireSlim(slimOf(t), selfId, "publish") : { b: "plains" as const };
+    const sig = t ? JSON.stringify(slimOf(t)) : "";
+    return {
+      x: c.x,
+      y: c.y,
+      slim,
+      ver: sVer(s, c.x, c.y),
+      k: keyOf(c.x, c.y),
+      sig,
+    };
+  });
+  try {
+    const res = await writeHarmDeed({
+      data: {
+        kind,
+        tiles: tiles.map(({ x, y, slim, ver }) => ({ x, y, slim, ver })),
+        pawn: pawnPayload(s.character),
+      },
+    });
+    if (!res) return false;
+    if (res.ok) {
+      const ver = (store.get().world.ver ?? []).slice();
+      for (const w of res.written) {
+        ver[w.y * s.world.width + w.x] = w.ver;
+      }
+      for (const t of tiles) lastSlim.set(t.k, t.sig);
+      store.set({ world: { ...store.get().world, ver } });
+      return true;
+    }
+    let world = store.get().world;
+    if (res.conflicts.length) world = applyLive(world, localizePackets(res.conflicts));
+    world = maskLiveFog(world, store.get().character.x, store.get().character.y);
+    const patch: Partial<GameState> = { world };
+    if (prior) patch.character = prior;
+    store.set(patch);
+    rememberLive(store.get());
+    store.speak?.("клетка уже другая", s.character.x, s.character.y, "другая", "bad");
+    saveGame(store.get());
+    return false;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg !== "Unauthorized") console.warn("[книга] вред", err);
+    return false;
   }
 }
 

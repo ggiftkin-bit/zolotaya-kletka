@@ -36,10 +36,10 @@ import {
 import { requestLook } from "./cam";
 import { findPath, pathTotal } from "./path";
 import { canDigReason, fillNeedLine, fillPay, giveOrPile, takePaid } from "./pit";
-import { asPile, dumpAllOn, pileAdd, pileEmpty, pileTake } from "./pile";
+import { asPile, dumpAllOn, pileAdd, pileEmpty } from "./pile";
 import { canCrossDiag, MAX_PLOT, clearYard, normRect, plotBounds, putGate, setYardGateLock, stampYard, upgradeYard, yardWoodCost } from "./fence";
 import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, NO_STRENGTH, SKIP_GOLD, deathFee, energyPeriod, formatWait, splitBodyWater } from "./pace";
-import { applyCatch, dummyOnYard, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, ownerOf, stealChance } from "./crime";
+import { applyCatch, harmCells, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, markCrime, ownerOf, plotCells, punish, rollCaught, stealChance, takeLoot, unlockKind, fenceBurnCells } from "./crime";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
 import { clearGame, loadGame, saveGame } from "./save";
 import { stampVillage, clearVillage, friendNames, hamletTitle, hasOwnYard, canFoundVillage, isOutsideYard, setVillageLaw } from "./pact";
@@ -94,7 +94,7 @@ import { chebyshev, dummyHome, foeById, gearSlot, ghostLiveFoe, leaveChance, mak
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
-import { bindBookStore, flushBook, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
+import { bindBookStore, commitHarm, flushBook, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
 
 let worldAcc = 0;
 
@@ -131,7 +131,7 @@ function actHeld(c: Character, now = Date.now()): string | null {
   return heldLine(c, now);
 }
 
-function dumpCargo(world: GameState["world"], x: number, y: number, inv: Inventory, gold = 0, extra: Array<ItemId | null> = []) {
+function dumpCargo(world: GameState["world"], x: number, y: number, inv: Inventory, gold = 0, extra: Array<ItemId | null> = []): { x: number; y: number } | null {
   let origin = tileAt(world, x, y);
   if (!origin || origin.biome === "river" || origin.building === "moat") {
     origin = null;
@@ -148,11 +148,12 @@ function dumpCargo(world: GameState["world"], x: number, y: number, inv: Invento
       }
     }
   }
-  if (!origin) return;
+  if (!origin) return null;
   dumpAllOn(origin, inv, gold);
   for (const id of extra) {
     if (id) pileAdd(origin, id, 1);
   }
+  return { x: origin.x, y: origin.y };
 }
 
 function emptyTheInv(inv: Inventory): Inventory {
@@ -1207,6 +1208,11 @@ bindBookStore({
   speak,
 });
 
+function sealHarm(kind: string, cells: Array<{ x: number; y: number }>, prior?: Character) {
+  noteDeed(kind);
+  void commitHarm(kind, cells, prior);
+}
+
 function catchUpSim(dt: number) {
   const s = useGame.getState();
   if (!s.started) return;
@@ -1484,8 +1490,9 @@ function worldTick() {
   if ((c.carts ?? 0) < 1 && c.transport === "cart") c.transport = "walk";
   if (c.hand && c.inventory[c.hand] <= 0) c.hand = null;
 
+  let dumped: { x: number; y: number } | null = null;
   if (c.hp <= 0 && c.life === "alive") {
-    dumpCargo(s.world, c.x, c.y, c.inventory, 0, [c.body, c.shield, c.helm]);
+    dumped = dumpCargo(s.world, c.x, c.y, c.inventory, 0, [c.body, c.shield, c.helm]);
     c.inventory = emptyTheInv(c.inventory);
     c.body = null;
     c.shield = null;
@@ -1580,6 +1587,7 @@ function worldTick() {
       tickAt: Date.now(),
     });
     useGame.getState().persist();
+    if (dumped) sealHarm("pile", [dumped]);
     return;
   }
 
@@ -1598,6 +1606,7 @@ function worldTick() {
     world: { ...s.world, tiles: s.world.tiles },
     tickAt: Date.now(),
   });
+  if (dumped) sealHarm("pile", [dumped]);
 }
 
 function gatherHere() {
@@ -1912,8 +1921,8 @@ function hangLock(kind: "chest" | "gate") {
     },
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "замок", tone: "ok" as const }].slice(-10),
   });
-  noteDeed("lock");
-  useGame.getState().persist();
+  const cells = kind === "gate" ? plotCells(useGame.getState().world, tile) : harmCells(tile);
+  sealHarm("lock", cells, s.character);
 }
 
 function takeLock(kind: "chest" | "gate") {
@@ -1951,6 +1960,8 @@ function takeLock(kind: "chest" | "gate") {
     hint: { text: "Замок в сумке.", tone: "ok" },
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "снял", tone: "ok" as const }].slice(-10),
   });
+  const cells = kind === "gate" ? plotCells(useGame.getState().world, tile) : harmCells(tile);
+  sealHarm("lock", cells, s.character);
 }
 
 function pickLock(kind: "chest" | "gate") {
@@ -1964,6 +1975,7 @@ function pickLock(kind: "chest" | "gate") {
     speak(hold, s.character.x, s.character.y, "нельзя", "bad");
     return;
   }
+  if (busyBlock()) return;
   const tile = s.inspect ? tileAt(s.world, s.inspect.x, s.inspect.y) : hereTile();
   if (!tile) return;
   const near = Math.max(Math.abs(s.character.x - tile.x), Math.abs(s.character.y - tile.y)) <= 1;
@@ -1988,65 +2000,15 @@ function pickLock(kind: "chest" | "gate") {
     speak("Нет сил на взлом.", tile.x, tile.y, "нет силы", "bad");
     return;
   }
-  const law = hasLaw(s.world, tile);
-  const ownerHere = dummyOnYard(s.dummies, s.world, tile);
-  const canCatch = law || ownerHere;
-  const p = canCatch ? stealChance(s.world, tile, s.character, s.phase === "night") : 0;
-  const caught = canCatch && Math.random() < Math.min(0.88, p + 0.16);
-  tile.mark = { who: s.character.name, at: Date.now() };
-  let c = {
-    ...s.character,
-    energy: Math.max(0, s.character.energy - 3),
-  };
-  c = bumpSkill(c, "stealth", caught ? 0.05 : 0.25);
-  const betrayal = s.character.pacts[who] === "friend" || (!!s.character.village && tile.village === s.character.village);
-  if (betrayal) c = { ...c, pacts: { ...c.pacts, [who]: "feud" }, wanted: (c.wanted ?? 0) + 2 };
-  if (caught) {
-    c = applyCatch(c, true, `взлом у ${who}`);
-    if (c.wagon || c.transport === "wagon") {
-      parkWagonNear(s.world, s.character.x, s.character.y, "you");
-      c = { ...c, wagon: false, transport: c.horses > 0 ? "horse" : "walk" };
-    }
-    if (isJailed(c)) {
-      cancelNotice("walk");
-      const spot = jailSpot(s.world, tile.x, tile.y);
-      c = { ...c, x: spot.x, y: spot.y, px: spot.x, py: spot.y, busy: null };
-      viewPos.x = spot.x;
-      viewPos.y = spot.y;
-    }
-    useGame.setState({
-      character: c,
-      inspect: null,
-      travel: null,
-      preview: null,
-      hint: isJailed(c)
-        ? { text: `Сидишь. ${c.jailWhy}. Залог ${goldTxt(BAIL_GOLD)}.`, tone: "bad" as const, keep: "jail" as const }
-        : { text: "Видели взлом. Ямы нет, розыск. Замок цел.", tone: "bad" as const },
-      world: { ...s.world, tiles: s.world.tiles },
-      log: pushLog(
-        s.log,
-        isJailed(c)
-          ? `Поймали за взлом. ${law ? "Закон" : "Хозяин"} — яма. Замок цел.`
-          : `Видели взлом. Ямы нет, розыск. Замок цел.`,
-      ),
-      floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: law ? "яма" : "видели", tone: "bad" as const }].slice(-10),
-    });
-    return;
-  }
-  if (kind === "chest") tile.chestLock = false;
-  else setYardGateLock(s.world, tile.x, tile.y, false);
-  useGame.setState({
-    character: c,
-    world: { ...s.world, tiles: s.world.tiles },
-    log: pushLog(
-      s.log,
-      kind === "chest"
-        ? `Взломал сундук у ${who}. Замок сорван.`
-        : `Взломал калитку у ${who}. Засов сорван. Можно войти.`,
-    ),
-    hint: { text: kind === "chest" ? "Сундук открыт." : "Калитка открыта. Можно войти.", tone: "ok" },
-    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "взлом", tone: "ok" as const }].slice(-10),
-  });
+  const ms = workMs("lock", null, s.character);
+  startBusy(
+    { ...s.character, energy: Math.max(0, s.character.energy - 3) },
+    makeBusy("lock", tile.x, tile.y, Date.now() + ms, { lock: kind }),
+    `Взламываю ${kind === "chest" ? "сундук" : "калитку"} · ${Math.ceil(ms / 1000)} с.`,
+    tile.x,
+    tile.y,
+    "взлом",
+  );
 }
 
 function buyLock() {
@@ -2096,8 +2058,7 @@ function pickupPile() {
     ].slice(-10),
     world: { ...s.world, tiles: s.world.tiles },
   });
-  noteDeed("pile");
-  useGame.getState().persist();
+  sealHarm("pile", harmCells(tile), s.character);
 }
 
 function dropItem(item: ItemId, qty: number) {
@@ -2132,8 +2093,7 @@ function dropItem(item: ItemId, qty: number) {
     ].slice(-10),
     world: { ...s.world, tiles: s.world.tiles },
   });
-  noteDeed("pile");
-  useGame.getState().persist();
+  sealHarm("pile", harmCells(tile), s.character);
 }
 
 function storeItem(item: ItemId, qty: number) {
@@ -2505,10 +2465,12 @@ function toggleLaw() {
   if (village) {
     const next = !hasLaw(s.world, t);
     setVillageLaw(s.world, village, next);
+    const cells = s.world.tiles.filter((q) => q.village === village).map((q) => ({ x: q.x, y: q.y }));
     useGame.setState({
       world: { ...s.world, tiles: s.world.tiles },
       log: pushLog(s.log, next ? `Закон деревни «${village}»: вора сажают.` : `В «${village}» законов нет.`),
     });
+    sealHarm("law", cells);
     return;
   }
   if (t.owner && t.owner !== "you") {
@@ -2533,6 +2495,7 @@ function toggleLaw() {
         : "Законов нет. Вора не посадят — но двор может мстить сам.",
     ),
   });
+  sealHarm("law", plotCells(s.world, t));
 }
 
 function stealHere() {
@@ -2574,18 +2537,12 @@ function stealHere() {
     speak("Пусто. Уже вынесли.", tile.x, tile.y, "пусто", "bad", { theme: "empty" });
     return;
   }
-  const law = hasLaw(s.world, tile);
-  const ownerHere = dummyOnYard(s.dummies, s.world, tile);
-  const canCatch = law || ownerHere;
-  const p = canCatch ? stealChance(s.world, tile, s.character, s.phase === "night") : 0;
-  const caught = canCatch && Math.random() < p;
+  const prior = s.character;
+  const caught = rollCaught(s.world, tile, s.character, s.phase === "night");
   const inv = { ...s.character.inventory };
   inv[loot.item] += loot.n;
-  if (!tile.chestLock && tile.chest[loot.item] > 0) tile.chest[loot.item] -= loot.n;
-  else if (asPile(tile.pile)[loot.item]) {
-    pileTake(tile, loot.item, loot.n);
-  } else if (tile.building === "field") tile.amount = Math.max(0, tile.amount - loot.n);
-  tile.mark = { who: s.character.name, at: Date.now() };
+  takeLoot(tile, loot);
+  markCrime(tile, s.character.name);
   let c: Character = {
     ...s.character,
     inventory: inv,
@@ -2596,29 +2553,32 @@ function stealHere() {
     c = { ...c, pacts: { ...c.pacts, [who]: "feud" }, wanted: (c.wanted ?? 0) + 2 };
   }
   if (caught) {
-    c = applyCatch(c, true, `кража у ${who}`);
+    const hit = punish(c, s.world, tile, `кража у ${who}`);
+    c = hit.c;
+    let parkedCell: { x: number; y: number } | null = null;
     if (c.wagon || c.transport === "wagon") {
-      parkWagonNear(s.world, s.character.x, s.character.y, "you");
+      parkedCell = parkWagonNear(s.world, s.character.x, s.character.y, "you");
       c = { ...c, wagon: false, transport: c.horses > 0 ? "horse" : "walk" };
     }
-    if (isJailed(c)) {
+    if (hit.jailed) {
       cancelNotice("walk");
-      const spot = jailSpot(s.world, tile.x, tile.y);
-      c = { ...c, x: spot.x, y: spot.y, px: spot.x, py: spot.y, busy: null };
-      viewPos.x = spot.x;
-      viewPos.y = spot.y;
+      viewPos.x = c.x;
+      viewPos.y = c.y;
     }
-    const why = law ? "Закон двора — яма." : "Хозяин на дворе — яма.";
+    const why = hit.law ? "Закон двора — яма." : "Закона нет — ямы нет, розыск.";
     useGame.setState({
       character: c,
       inspect: null,
       travel: null,
       preview: null,
-      hint: { text: `Сидишь. ${c.jailWhy}. Залог ${goldTxt(BAIL_GOLD)}.`, tone: "bad", keep: "jail" },
+      hint: hit.jailed
+        ? { text: `Сидишь. ${c.jailWhy}. Залог ${goldTxt(BAIL_GOLD)}.`, tone: "bad", keep: "jail" }
+        : { text: "Видели кражу. Ямы нет, розыск.", tone: "bad" },
       world: { ...s.world, tiles: s.world.tiles },
-      log: pushLog(s.log, `Поймали за кражу. ${why} ${c.jailWhy}. Успел унести ${loot.n} ${ITEM_LABEL[loot.item]}.`),
-      floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "яма", tone: "bad" as const }].slice(-10),
+      log: pushLog(s.log, `Поймали за кражу. ${why} Успел унести ${loot.n} ${ITEM_LABEL[loot.item]}.`),
+      floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: hit.jailed ? "яма" : "видели", tone: "bad" as const }].slice(-10),
     });
+    sealHarm("steal", harmCells(tile, parkedCell), prior);
     return;
   }
   useGame.setState({
@@ -2627,6 +2587,7 @@ function stealHere() {
     log: pushLog(s.log, `Утащил ${loot.n} ${ITEM_LABEL[loot.item]} со двора ${who}. Тихо.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${loot.n} ${ITEM_LABEL[loot.item]}`, tone: "ok" as const }].slice(-10),
   });
+  sealHarm("steal", harmCells(tile), prior);
 }
 
 function cookHere() {
@@ -2948,6 +2909,8 @@ function resolveBusy() {
   else if (b.kind === "road") resolveRoad(s, c0, tile, b.road);
   else if (b.kind === "dig") resolveDig(s, c0, tile);
   else if (b.kind === "fill") resolveFill(s, c0, tile);
+  else if (b.kind === "lock") resolveLock(s, c0, tile, b.lock);
+  else if (b.kind === "burn") resolveBurn(s, c0, tile);
   else useGame.setState({ character: c0 });
 }
 
@@ -3316,13 +3279,109 @@ function burnHere() {
     speak("Нет сил на огонь.", tile.x, tile.y, "нет сил", "bad");
     return;
   }
-  const foreign = !!(tile.owner && tile.owner !== "you");
-  const energy = Math.max(0, s.character.energy - 2);
-
   if (tile.building !== "none" && !tile.burned) {
     const matter = tile.matter || defaultMatter(tile.building);
     if (!canBurnMatter(matter)) {
       speak("Камень не берёт огонь.", tile.x, tile.y, "камень", "bad");
+      return;
+    }
+  } else if (burnableFence(tile, s.world)) {
+    /* тын дерево — дело */
+  } else if (stoneFence(tile, s.world) || (tile.building !== "none" && (tile.matter || defaultMatter(tile.building)) === "stone")) {
+    speak("Камень не берёт огонь.", tile.x, tile.y, "камень", "bad");
+    return;
+  } else {
+    speak("Нечему гореть. Хворост и дерево — да. Камень — нет.", tile.x, tile.y, "нечему", "bad");
+    return;
+  }
+  const ms = workMs("burn", null, s.character);
+  startBusy(
+    { ...s.character, energy: Math.max(0, s.character.energy - 2) },
+    makeBusy("burn", tile.x, tile.y, Date.now() + ms),
+    `Поджигаю · ${Math.ceil(ms / 1000)} с.`,
+    tile.x,
+    tile.y,
+    "огонь",
+  );
+}
+
+function resolveLock(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>, kind?: "chest" | "gate") {
+  const lock = kind === "gate" ? "gate" : "chest";
+  const who = ownerOf(tile);
+  const prior = s.character;
+  if (!who || who === "you") {
+    useGame.setState({ character: c0, log: pushLog(s.log, "Своё не взламывают.") });
+    return;
+  }
+  if (lock === "chest" && !tile.chestLock) {
+    useGame.setState({ character: c0, log: pushLog(s.log, "Сундук уже открыт.") });
+    return;
+  }
+  if (lock === "gate" && !tile.gateLock) {
+    useGame.setState({ character: c0, log: pushLog(s.log, "Калитка уже без засова.") });
+    return;
+  }
+  const caught = rollCaught(s.world, tile, c0, s.phase === "night", 0.16);
+  markCrime(tile, c0.name);
+  let c = bumpSkill(c0, "stealth", caught ? 0.05 : 0.25);
+  const betrayal = c.pacts[who] === "friend" || (!!c.village && tile.village === c.village);
+  if (betrayal) c = { ...c, pacts: { ...c.pacts, [who]: "feud" }, wanted: (c.wanted ?? 0) + 2 };
+  if (caught) {
+    const hit = punish(c, s.world, tile, `взлом у ${who}`);
+    c = hit.c;
+    let parked: { x: number; y: number } | null = null;
+    if (c.wagon || c.transport === "wagon") {
+      parked = parkWagonNear(s.world, s.character.x, s.character.y, "you");
+      c = { ...c, wagon: false, transport: c.horses > 0 ? "horse" : "walk" };
+    }
+    if (hit.jailed) {
+      cancelNotice("walk");
+      viewPos.x = c.x;
+      viewPos.y = c.y;
+    }
+    useGame.setState({
+      character: c,
+      inspect: null,
+      travel: null,
+      preview: null,
+      hint: hit.jailed
+        ? { text: `Сидишь. ${c.jailWhy}. Залог ${goldTxt(BAIL_GOLD)}.`, tone: "bad" as const, keep: "jail" as const }
+        : { text: "Видели взлом. Ямы нет, розыск. Замок цел.", tone: "bad" as const },
+      world: { ...s.world, tiles: s.world.tiles },
+      log: pushLog(
+        s.log,
+        hit.jailed
+          ? `Поймали за взлом. Закон — яма. Замок цел.`
+          : `Видели взлом. Ямы нет, розыск. Замок цел.`,
+      ),
+      floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: hit.jailed ? "яма" : "видели", tone: "bad" as const }].slice(-10),
+    });
+    sealHarm("lock", harmCells(tile, parked), prior);
+    return;
+  }
+  const cells = unlockKind(s.world, tile, lock);
+  useGame.setState({
+    character: c,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(
+      s.log,
+      lock === "chest"
+        ? `Взломал сундук у ${who}. Замок сорван.`
+        : `Взломал калитку у ${who}. Засов сорван. Можно войти.`,
+    ),
+    hint: { text: lock === "chest" ? "Сундук открыт." : "Калитка открыта. Можно войти.", tone: "ok" },
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "взлом", tone: "ok" as const }].slice(-10),
+  });
+  sealHarm("lock", cells, prior);
+}
+
+function resolveBurn(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>) {
+  const prior = s.character;
+  const foreign = !!(tile.owner && tile.owner !== "you");
+  if (tile.building !== "none" && !tile.burned) {
+    const matter = tile.matter || defaultMatter(tile.building);
+    if (!canBurnMatter(matter)) {
+      useGame.setState({ character: c0, log: pushLog(s.log, "Камень не берёт огонь.") });
       return;
     }
     tile.burned = true;
@@ -3336,17 +3395,15 @@ function burnHere() {
       tile.chest = chest;
       pileAdd(tile, item, n);
     }
-    let c: Character = { ...s.character, energy };
-    const law = hasLaw(s.world, tile);
+    markCrime(tile, c0.name);
+    let c: Character = c0;
     if (foreign) {
-      const who = hamletTitle(tile.owner);
-      c = applyCatch(c, law, `поджог у ${who}`);
-      if (isJailed(c)) {
+      const hit = punish(c, s.world, tile, `поджог у ${hamletTitle(tile.owner)}`);
+      c = hit.c;
+      if (hit.jailed) {
         cancelNotice("walk");
-        const spot = jailSpot(s.world, tile.x, tile.y);
-        c = { ...c, x: spot.x, y: spot.y, px: spot.x, py: spot.y, busy: null };
-        viewPos.x = spot.x;
-        viewPos.y = spot.y;
+        viewPos.x = c.x;
+        viewPos.y = c.y;
       }
     }
     const jailedNow = isJailed(c);
@@ -3364,22 +3421,22 @@ function burnHere() {
       ),
       floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "огонь", tone: "bad" as const }].slice(-10),
     });
+    sealHarm("burn", harmCells(tile), prior);
     return;
   }
 
   const edge = burnableFence(tile, s.world);
   if (edge) {
     applyFenceBurn(tile, s.world, edge.side);
-    let c: Character = { ...s.character, energy };
-    const law = hasLaw(s.world, tile);
+    markCrime(tile, c0.name);
+    let c: Character = c0;
     if (foreign) {
-      c = applyCatch(c, law, `поджог тына у ${hamletTitle(tile.owner)}`);
-      if (isJailed(c)) {
+      const hit = punish(c, s.world, tile, `поджог тына у ${hamletTitle(tile.owner)}`);
+      c = hit.c;
+      if (hit.jailed) {
         cancelNotice("walk");
-        const spot = jailSpot(s.world, tile.x, tile.y);
-        c = { ...c, x: spot.x, y: spot.y, px: spot.x, py: spot.y, busy: null };
-        viewPos.x = spot.x;
-        viewPos.y = spot.y;
+        viewPos.x = c.x;
+        viewPos.y = c.y;
       }
     }
     useGame.setState({
@@ -3391,13 +3448,10 @@ function burnHere() {
       log: pushLog(s.log, "Тын горит. Дыра в заборе."),
       floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "тын горит", tone: "bad" as const }].slice(-10),
     });
+    sealHarm("burn", fenceBurnCells(tile, edge.side), prior);
     return;
   }
-  if (stoneFence(tile, s.world) || (tile.building !== "none" && (tile.matter || defaultMatter(tile.building)) === "stone")) {
-    speak("Камень не берёт огонь.", tile.x, tile.y, "камень", "bad");
-    return;
-  }
-  speak("Нечему гореть. Хворост и дерево — да. Камень — нет.", tile.x, tile.y, "нечему", "bad");
+  useGame.setState({ character: c0, log: pushLog(s.log, "Нечему гореть.") });
 }
 
 function cladStone() {
@@ -3702,7 +3756,7 @@ function craftCart() {
   });
 }
 
-function parkWagonNear(world: GameState["world"], x: number, y: number, owner: string) {
+function parkWagonNear(world: GameState["world"], x: number, y: number, owner: string): { x: number; y: number } | null {
   const tryTile = (tx: number, ty: number) => {
     const t = tileAt(world, tx, ty);
     if (!t) return false;
@@ -3711,16 +3765,16 @@ function parkWagonNear(world: GameState["world"], x: number, y: number, owner: s
     t.wagon = owner || "you";
     return true;
   };
-  if (tryTile(x, y)) return true;
+  if (tryTile(x, y)) return { x, y };
   for (let r = 1; r <= 3; r++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-        if (tryTile(x + dx, y + dy)) return true;
+        if (tryTile(x + dx, y + dy)) return { x: x + dx, y: y + dy };
       }
     }
   }
-  return false;
+  return null;
 }
 
 function wagonTileOf(s: GameState) {
@@ -3782,6 +3836,7 @@ function hitchWagon() {
     hint: { text: `Телега. ${CAPACITY.wagon} кг. Не в сумке — отцепишь, останется на клетке.`, tone: "ok" },
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "зацепил", tone: "ok" as const }].slice(-10),
   });
+  sealHarm("wagon", harmCells(tile), s.character);
 }
 
 function unhitchWagon() {
@@ -3822,6 +3877,7 @@ function unhitchWagon() {
     },
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "отцепил", tone: "ok" as const }].slice(-10),
   });
+  sealHarm("wagon", harmCells(ok, tile), s.character);
 }
 
 function stealWagon() {
@@ -3862,9 +3918,9 @@ function stealWagon() {
     return;
   }
   const who = tile.wagon;
-  const p = stealChance(s.world, tile, s.character, s.phase === "night");
-  const caught = Math.random() < Math.min(0.85, p + 0.12);
-  tile.mark = { who: s.character.name, at: Date.now() };
+  const prior = s.character;
+  const caught = rollCaught(s.world, tile, s.character, s.phase === "night", 0.12);
+  markCrime(tile, s.character.name);
   let c = {
     ...s.character,
     energy: Math.max(0, s.character.energy - 2),
@@ -3873,14 +3929,13 @@ function stealWagon() {
   const betrayal = s.character.pacts[who] === "friend" || (!!s.character.village && tile.village === s.character.village);
   if (betrayal) c = { ...c, pacts: { ...c.pacts, [who]: "feud" }, wanted: (c.wanted ?? 0) + 2 };
   if (caught) {
-    const law = hasLaw(s.world, tile);
-    c = applyCatch(c, law, `телега ${who}`);
-    if (isJailed(c)) {
+    const hit = punish(c, s.world, tile, `телега ${who}`);
+    c = hit.c;
+    if (hit.jailed) {
       cancelNotice("walk");
-      const spot = jailSpot(s.world, tile.x, tile.y);
-      c = { ...c, x: spot.x, y: spot.y, px: spot.x, py: spot.y, busy: null, wagon: false, transport: c.horses > 0 ? "horse" : "walk" };
-      viewPos.x = spot.x;
-      viewPos.y = spot.y;
+      c = { ...c, wagon: false, transport: c.horses > 0 ? "horse" : "walk" };
+      viewPos.x = c.x;
+      viewPos.y = c.y;
     }
     useGame.setState({
       character: c,
@@ -3890,13 +3945,14 @@ function stealWagon() {
       world: { ...s.world, tiles: s.world.tiles },
       log: pushLog(
         s.log,
-        law
+        hit.law
           ? `Поймали за телегу. Закон — яма. Телега осталась.`
           : `Видели: уводил телегу. Ямы нет, розыск. Телега на месте.`,
       ),
       hint: { text: "Поймали. Телега осталась.", tone: "bad" },
-      floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: law ? "яма" : "видели", tone: "bad" as const }].slice(-10),
+      floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: hit.law ? "яма" : "видели", tone: "bad" as const }].slice(-10),
     });
+    sealHarm("steal", harmCells(tile), prior);
     return;
   }
   tile.wagon = "";
@@ -3908,6 +3964,7 @@ function stealWagon() {
     hint: { text: "Увёл телегу. За лошадью.", tone: "ok" },
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "увёл", tone: "ok" as const }].slice(-10),
   });
+  sealHarm("steal", harmCells(tile), prior);
 }
 
 function buyWagon() {
@@ -3926,8 +3983,9 @@ function buyWagon() {
     return;
   }
   const hitch = s.character.horses > 0;
+  let parked: { x: number; y: number } | null = null;
   if (!hitch) {
-    const parked = parkWagonNear(s.world, tile.x, tile.y, "you");
+    parked = parkWagonNear(s.world, tile.x, tile.y, "you");
     if (!parked) {
       speak("Некуда ставить телегу.", tile.x, tile.y, "нет места", "bad");
       return;
@@ -3953,6 +4011,7 @@ function buyWagon() {
     },
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `−${goldTxt(WAGON_GOLD)}`, tone: "gold" as const }].slice(-10),
   });
+  if (parked) sealHarm("wagon", harmCells(parked, tile), s.character);
 }
 
 function sellWagon() {
@@ -4012,9 +4071,13 @@ function craftWagon() {
   inv.wood -= 4;
   inv.bar -= 1;
   const hitch = s.character.horses > 0;
-  if (!hitch && !parkWagonNear(s.world, tile.x, tile.y, "you")) {
-    speak("Некуда ставить телегу.", tile.x, tile.y, "нет места", "bad");
-    return;
+  let parked: { x: number; y: number } | null = null;
+  if (!hitch) {
+    parked = parkWagonNear(s.world, tile.x, tile.y, "you");
+    if (!parked) {
+      speak("Некуда ставить телегу.", tile.x, tile.y, "нет места", "bad");
+      return;
+    }
   }
   let c = bumpSkill(
     {
@@ -4039,6 +4102,7 @@ function craftWagon() {
     hint: { text: hitch ? `Телега. ${CAPACITY.wagon} кг.` : "Телега на клетке.", tone: "ok" },
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "телега", tone: "ok" as const }].slice(-10),
   });
+  if (parked) sealHarm("wagon", harmCells(parked, tile), s.character);
 }
 
 function buyLivestock(kind: "cow" | "horse") {

@@ -25,7 +25,9 @@ export type BusyKind =
   | "craft"
   | "dig"
   | "fill"
-  | "road";
+  | "road"
+  | "lock"
+  | "burn";
 
 export type Busy = {
   kind: BusyKind;
@@ -36,6 +38,7 @@ export type Busy = {
   build?: BuildingKind;
   craft?: string;
   road?: "dirt" | "stone" | "bridge";
+  lock?: "chest" | "gate";
   hired?: boolean;
 };
 
