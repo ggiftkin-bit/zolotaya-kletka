@@ -344,6 +344,7 @@ export async function commitStall(kind: "stall-put" | "stall-drop" | "stall-take
     k: keyOf(cell.x, cell.y),
     sig,
   };
+  lastSlim.set(pack.k, pack.sig);
   try {
     const res = await writeStallDeed({
       data: {

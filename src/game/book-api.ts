@@ -264,22 +264,6 @@ async function writePawn(
   );
 }
 
-async function creditSellerDue(sql: Sql, sellerId: string, gold: number) {
-  if (!sellerId || sellerId === "you" || gold <= 0) return;
-  await sql.query(
-    `update pawn
-     set body = jsonb_set(
-           coalesce(body, '{}'::jsonb),
-           '{due}',
-           to_jsonb(coalesce((body->>'due')::int, 0) + $3::int),
-           true
-         ),
-         updated_at = now()
-     where world_id = $1 and user_id = $2`,
-    [WORLD_ID, sellerId, gold],
-  );
-}
-
 function slimOrder(slim: SlimTile): { item: import("./types").ItemId; n: number; gold: number } | null {
   const raw = slim.or;
   if (!raw || !isItemId(raw.i) || raw.n <= 0 || raw.g <= 0) return null;
@@ -905,13 +889,34 @@ export const writeStallDeed = createServerFn({ method: "POST" })
       if (dbGold < liveOrder.gold) {
         return { ok: false as const, hint: "мало золота", conflicts: [], written: [], credit: 0 };
       }
+      const nextSlim: SlimTile = { ...live };
+      delete nextSlim.or;
+      if (t.slim.pl) nextSlim.pl = t.slim.pl;
+      else delete nextSlim.pl;
       const upd = await sql.query<{ ver: number }>(
-        `update tile t
-         set slim = t.slim - 'or', ver = t.ver + 1, updated_at = now(), updated_by = $4
-         where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $5
-           and t.slim ? 'or' and t.slim->>'bd' = 'stall'
-         returning ver`,
-        [WORLD_ID, t.x, t.y, userId, t.ver],
+        `with upd as (
+           update tile t
+           set slim = $5::jsonb, ver = t.ver + 1, updated_at = now(), updated_by = $4
+           where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $6
+             and t.slim ? 'or' and t.slim->>'bd' = 'stall'
+             and t.slim->>'on' is distinct from $4
+           returning t.ver
+         ),
+         pay as (
+           update pawn p
+           set body = jsonb_set(
+                 coalesce(p.body, '{}'::jsonb),
+                 '{due}',
+                 to_jsonb(coalesce((p.body->>'due')::int, 0) + $7::int),
+                 true
+               ),
+               updated_at = now()
+           where p.world_id = $1 and p.user_id = $8
+             and exists (select 1 from upd)
+           returning p.user_id
+         )
+         select ver from upd`,
+        [WORLD_ID, t.x, t.y, userId, JSON.stringify(nextSlim), t.ver, liveOrder.gold, owner],
       );
       if (!upd[0]) {
         const now = await sql.query<TileRow>(
@@ -927,12 +932,9 @@ export const writeStallDeed = createServerFn({ method: "POST" })
           credit: 0,
         };
       }
-      await creditSellerDue(sql, owner, liveOrder.gold);
-      const had = buyer?.body?.inventory?.[liveOrder.item] ?? 0;
-      const inv = { ...data.pawn.body.inventory, [liveOrder.item]: Math.max(data.pawn.body.inventory[liveOrder.item] ?? 0, had + liveOrder.n) };
       const gold = dbGold - liveOrder.gold;
       const fight = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
-      const body = { ...fight, inventory: inv, gold, due: 0 };
+      const body = { ...fight, inventory: data.pawn.body.inventory, gold, due: 0 };
       await writePawn(sql, userId, data.pawn, body);
       await sql.query(
         `insert into deed (world_id, user_id, kind, x, y, payload)
