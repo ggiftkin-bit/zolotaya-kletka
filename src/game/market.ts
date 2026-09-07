@@ -147,6 +147,7 @@ export function canPostService(tile: Tile, mine: boolean): boolean {
   if (!mine || tile.burned) return false;
   if (isGateTile(tile) || tile.building === "stall") return true;
   if (isCraftStation(tile)) return true;
+  if (tile.building === "board") return true;
   if (tile.plot && tile.building === "none") return true;
   return false;
 }

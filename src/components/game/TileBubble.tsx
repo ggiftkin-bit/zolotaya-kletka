@@ -1544,7 +1544,7 @@ function BuildPane({ tile }: { tile: Tile }) {
               </div>
             </div>
           ))}
-          {canPlaceBoard(tile, isYours(tile)) && !tile.plot && (
+          {canPlaceBoard(g.world, tile, isYours(tile)) && !tile.plot && (
             <div>
               <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">Имя</p>
               <Button

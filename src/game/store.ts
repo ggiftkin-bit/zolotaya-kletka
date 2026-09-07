@@ -2248,8 +2248,8 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
     return;
   }
   if (kind === "board") {
-    if (!canPlaceBoard(tile, isYours(tile))) {
-      speak("Доску ставят на улице имени или на своём дворе в имени.", x, y, "не здесь", "bad");
+    if (!canPlaceBoard(s.world, tile, isYours(tile))) {
+      speak("Доску ставят на своём дворе, у тына или на улице имени.", x, y, "не здесь", "bad");
       return;
     }
   } else if (tile.commons) {

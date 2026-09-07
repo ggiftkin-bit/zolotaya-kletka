@@ -289,12 +289,27 @@ export function isOutsideYard(world: World, x: number, y: number): boolean {
   return false;
 }
 
-export function canPlaceBoard(tile: Tile, mine: boolean): boolean {
-  if (!tile.village || tile.burned) return false;
+/** Доска: свой двор (даже без имени), улица имени, клетка у своего тына. */
+export function canPlaceBoard(world: World, tile: Tile, mine: boolean): boolean {
+  if (tile.burned) return false;
   if (tile.building !== "none") return false;
-  if (tile.plot) return mine;
-  return true;
+  if (tile.plot || tile.owned) return mine;
+  if (tile.village) return true;
+  return nextToOwnPlot(world, tile);
 }
+
+function nextToOwnPlot(world: World, tile: Tile, owner = "you"): boolean {
+  if (!isOutsideYard(world, tile.x, tile.y)) return false;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const n = at(world, tile.x + dx, tile.y + dy);
+      if (n?.plot && n.owner === owner) return true;
+    }
+  }
+  return false;
+}
+
 
 export function atNameSpot(world: World, tile: Tile, owner = "you"): boolean {
   if (tile.plot && tile.owner === owner) return true;
