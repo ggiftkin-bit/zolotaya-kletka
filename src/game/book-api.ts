@@ -29,6 +29,15 @@ import {
 
 const slimSchema: z.ZodType<SlimTile> = z.any();
 
+/** Ордер, услуга, имя — книга держит, пока дело не пишет их само. */
+function keepSlimKeys(src: string, keys: Array<"or" | "sv" | "vg">): string {
+  const minus = keys.map((k) => `- '${k}'`).join(" ");
+  const restore = keys
+    .map((k) => `|| case when t.slim ? '${k}' then jsonb_build_object('${k}', t.slim->'${k}') else '{}'::jsonb end`)
+    .join(" ");
+  return `(${src} ${minus}) ${restore}`;
+}
+
 const clockSchema = z.object({
   season: z.enum(["spring", "summer", "autumn", "winter"]),
   year: z.number(),
@@ -729,9 +738,7 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
     for (const t of data.tiles) {
       const upd = await sql.query<{ ver: number }>(
         `update tile t
-         set slim = ($5::jsonb - 'or' - 'sv')
-           || case when t.slim ? 'or' then jsonb_build_object('or', t.slim->'or') else '{}'::jsonb end
-           || case when t.slim ? 'sv' then jsonb_build_object('sv', t.slim->'sv') else '{}'::jsonb end,
+         set slim = ${keepSlimKeys("$5::jsonb", ["or", "sv", "vg"])},
              ver = t.ver + 1, updated_at = now(), updated_by = $6
          where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
          returning ver`,
@@ -821,9 +828,7 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
        ),
        upd as (
          update tile as t
-         set slim = (i.slim - 'or' - 'sv')
-           || case when t.slim ? 'or' then jsonb_build_object('or', t.slim->'or') else '{}'::jsonb end
-           || case when t.slim ? 'sv' then jsonb_build_object('sv', t.slim->'sv') else '{}'::jsonb end,
+         set slim = ${keepSlimKeys("i.slim", ["or", "sv", "vg"])},
              ver = t.ver + 1, updated_at = now(), updated_by = $3
          from incoming i
          where t.world_id = $1 and t.x = i.x and t.y = i.y and t.ver = i.ver
@@ -1090,8 +1095,7 @@ export const writeStallDeed = createServerFn({ method: "POST" })
     }
     const upd = await sql.query<{ ver: number }>(
       `update tile t
-       set slim = ($5::jsonb - 'sv')
-         || case when t.slim ? 'sv' then jsonb_build_object('sv', t.slim->'sv') else '{}'::jsonb end,
+       set slim = ${keepSlimKeys("$5::jsonb", ["sv", "vg"])},
            ver = t.ver + 1, updated_at = now(), updated_by = $6
        where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
          and t.slim->>'bd' = 'stall'
@@ -1207,7 +1211,8 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
 
     const upd = await sql.query<{ ver: number }>(
       `update tile t
-       set slim = $5::jsonb, ver = t.ver + 1, updated_at = now(), updated_by = $6
+       set slim = ${keepSlimKeys("$5::jsonb", ["or", "vg"])},
+           ver = t.ver + 1, updated_at = now(), updated_by = $6
        where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
        returning ver`,
       [WORLD_ID, t.x, t.y, t.ver, JSON.stringify(t.slim), userId],
@@ -1280,16 +1285,50 @@ export const writeVillageDeed = createServerFn({ method: "POST" })
         return { ok: false as const, hint: "чужой двор", conflicts: [] as TilePacket[], written: [], credit: 0 };
       }
     }
+    if (data.kind === "village-found") {
+      const hamletPath = data.tiles.some((t) => t.slim.pt && isHamletOwner(t.slim.on || ""));
+      if (!hamletPath) {
+        const neighbor = await sql.query<{ on: string }>(
+          `select other.slim->>'on' as on
+           from tile mine
+           join tile other
+             on other.world_id = mine.world_id
+            and other.slim ? 'pt'
+            and other.slim->>'on' is not null
+            and other.slim->>'on' is distinct from $2
+            and greatest(abs(mine.x - other.x), abs(mine.y - other.y)) <= 2
+           where mine.world_id = $1
+             and mine.slim ? 'pt'
+             and mine.slim->>'on' = $2`,
+          [WORLD_ID, userId],
+        );
+        if (!neighbor.some((r) => r.on && isLivingOwner(r.on))) {
+          return {
+            ok: false as const,
+            hint: "нужен второй двор рядом или 4 друга хуторов",
+            conflicts: [] as TilePacket[],
+            written: [],
+            credit: 0,
+          };
+        }
+      }
+    }
     if (data.kind === "village-join") {
       const near = await sql.query<{ ok: number }>(
-        `select 1 as ok from tile
-         where world_id = $1 and slim->>'vg' = $2
-           and greatest(abs(x - $3), abs(y - $4)) <= $5
+        `select 1 as ok
+         from tile mine
+         join tile named
+           on named.world_id = mine.world_id
+          and named.slim->>'vg' = $3
+          and greatest(abs(mine.x - named.x), abs(mine.y - named.y)) <= 2
+         where mine.world_id = $1
+           and mine.slim ? 'pt'
+           and mine.slim->>'on' = $2
          limit 1`,
-        [WORLD_ID, name, data.pawn.x, data.pawn.y, 8],
+        [WORLD_ID, userId, name],
       );
       if (!near[0]) {
-        return { ok: false as const, hint: "имя не рядом", conflicts: [] as TilePacket[], written: [], credit: 0 };
+        return { ok: false as const, hint: "двор не касается этого имени", conflicts: [] as TilePacket[], written: [], credit: 0 };
       }
     }
     const incoming = JSON.stringify(
