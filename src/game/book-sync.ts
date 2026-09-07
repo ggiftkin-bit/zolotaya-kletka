@@ -386,6 +386,7 @@ export async function commitService(
   cell: { x: number; y: number },
   prior?: Character,
   early?: "arrive" | "work",
+  also?: Array<{ x: number; y: number }>,
 ) {
   if (!store) return false;
   const s = store.get();
@@ -404,6 +405,14 @@ export async function commitService(
     sig,
   };
   lastSlim.set(pack.k, pack.sig);
+  const extra = (also ?? []).map((c) => {
+    const tile = s.world.tiles[c.y * s.world.width + c.x];
+    const sl = tile ? wireSlim(slimOf(tile), selfId, "publish") : { b: "plains" as const };
+    const sg = tile ? JSON.stringify(slimOf(tile)) : "";
+    const k = keyOf(c.x, c.y);
+    lastSlim.set(k, sg);
+    return { x: c.x, y: c.y, slim: sl, ver: sVer(s, c.x, c.y), k, sig: sg };
+  });
   try {
     const res = await writeServiceDeed({
       data: {
@@ -411,6 +420,7 @@ export async function commitService(
         tile: { x: pack.x, y: pack.y, slim: pack.slim, ver: pack.ver },
         pawn: pawnPayload(s.character),
         early,
+        sheds: extra.map(({ x, y, slim, ver }) => ({ x, y, slim, ver })),
       },
     });
     if (!res) return false;
@@ -420,6 +430,7 @@ export async function commitService(
         ver[w.y * s.world.width + w.x] = w.ver;
       }
       lastSlim.set(pack.k, pack.sig);
+      for (const e of extra) lastSlim.set(e.k, e.sig);
       store.set({ world: { ...store.get().world, ver } });
       applyCredit(res.credit);
       return true;

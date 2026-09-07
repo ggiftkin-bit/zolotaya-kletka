@@ -1,6 +1,6 @@
 import { CAPACITY, ITEMS, ITEM_LABEL, ITEM_WEIGHT } from "./constants";
 import { cargoWeight } from "./travel";
-import type { Inventory, ItemId, Tile, Transport } from "./types";
+import type { Inventory, ItemId, Tile, Transport, World } from "./types";
 
 export type Pile = Partial<Record<ItemId, number>>;
 
@@ -107,4 +107,98 @@ export function dumpAllOn(tile: Tile, inv: Inventory, gold = 0) {
     const n = inv[k] ?? 0;
     if (n > 0) pileAdd(tile, k, n);
   }
+}
+
+/** Склад кормит станок. Не сундук и не витрина. */
+export const SHED_REACH = 2;
+
+export type ShedTake = { x: number; y: number; pile: Pile };
+
+export type NeedPull = {
+  inv: Inventory;
+  pile: Pile;
+  sheds: ShedTake[];
+  cargo: Partial<Record<ItemId, number>>;
+};
+
+function cellReach(ax: number, ay: number, bx: number, by: number) {
+  return Math.max(Math.abs(ax - bx), Math.abs(ay - by));
+}
+
+export function canShedFeed(station: Tile, shed: Tile): boolean {
+  if (shed.building !== "shed" || shed.burned) return false;
+  if (cellReach(station.x, station.y, shed.x, shed.y) > SHED_REACH) return false;
+  if (station.owner && shed.owner && station.owner === shed.owner) return true;
+  if (station.village && shed.village && station.village === shed.village) return true;
+  return false;
+}
+
+export function shedsNear(world: World, station: Tile): Tile[] {
+  const out: Tile[] = [];
+  for (const t of world.tiles) {
+    if (canShedFeed(station, t)) out.push(t);
+  }
+  out.sort((a, b) => {
+    const da = cellReach(station.x, station.y, a.x, a.y);
+    const db = cellReach(station.x, station.y, b.x, b.y);
+    return da - db || a.y - b.y || a.x - b.x;
+  });
+  return out;
+}
+
+export function applyNeedPull(world: World, station: Tile, pulled: NeedPull) {
+  pileSet(station, pulled.pile);
+  for (const sh of pulled.sheds) {
+    const t = world.tiles[sh.y * world.width + sh.x];
+    if (t) pileSet(t, sh.pile);
+  }
+}
+
+/** Куча станка → склад в двух клетках → сумка. Ровно need. */
+export function pullNeed(
+  world: World,
+  inv: Inventory,
+  station: Tile,
+  need: Partial<Record<ItemId, number>>,
+): { ok: true } & NeedPull | { ok: false; hint: string } {
+  const inv2 = { ...inv };
+  const pile = asPile(station.pile);
+  const near = shedsNear(world, station);
+  const sheds: ShedTake[] = near.map((t) => ({ x: t.x, y: t.y, pile: asPile(t.pile) }));
+  const cargo: Partial<Record<ItemId, number>> = {};
+  for (const [k, n0] of Object.entries(need) as [ItemId, number][]) {
+    const n = n0 ?? 0;
+    if (n <= 0) continue;
+    let left = n;
+    const fromPile = Math.min(pile[k] ?? 0, left);
+    if (fromPile > 0) {
+      pile[k] = (pile[k] ?? 0) - fromPile;
+      if ((pile[k] ?? 0) <= 0) delete pile[k];
+      left -= fromPile;
+    }
+    if (left > 0) {
+      for (const sh of sheds) {
+        const take = Math.min(sh.pile[k] ?? 0, left);
+        if (take <= 0) continue;
+        sh.pile[k] = (sh.pile[k] ?? 0) - take;
+        if ((sh.pile[k] ?? 0) <= 0) delete sh.pile[k];
+        left -= take;
+        if (left <= 0) break;
+      }
+    }
+    if (left > 0) {
+      const bag = Math.min(inv2[k] ?? 0, left);
+      inv2[k] = (inv2[k] ?? 0) - bag;
+      left -= bag;
+    }
+    if (left > 0) {
+      return { ok: false, hint: near.length ? "мало на складе" : `Мало: ${ITEM_LABEL[k]}.` };
+    }
+    cargo[k] = n;
+  }
+  const changed = sheds.filter((sh, i) => {
+    const was = asPile(near[i]!.pile);
+    return JSON.stringify(sh.pile) !== JSON.stringify(was);
+  });
+  return { ok: true, inv: inv2, pile, sheds: changed, cargo };
 }

@@ -734,6 +734,11 @@ function HomeBody({ tile }: { tile: Tile }) {
           <span className="text-[12px] text-muted-foreground">{CART_WOOD} дерева · груз, шаг как пешком</span>
         </Button>
       )}
+      {tile.building === "shed" && (
+        <p className="text-[13px] text-muted-foreground">
+          Куча на клетке — сырьё станку в двух клетках. Свой двор или то же имя. Сундук как был.
+        </p>
+      )}
       {(isHome || tile.building === "shed") &&
         (tile.chestLock ? (
           <Button variant="outline" className="h-12 justify-between px-3" onClick={() => g.takeLock("chest")}>

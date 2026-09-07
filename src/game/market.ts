@@ -1,7 +1,7 @@
 import { ITEM_LABEL, ITEMS } from "./constants";
 import { BUILD_COST, BUILDING_LABEL, goldTxt } from "./economy";
 import { CRAFTS, atBench, type CraftKind } from "./craft";
-import { asPile, giveOrPile, pileSet, type Pile } from "./pile";
+import { asPile, giveOrPile, pileSet, pullNeed, type Pile } from "./pile";
 import { FOG_LIVE, chebyshev } from "./book";
 import type { BuildingKind, Character, Inventory, ItemId, ServiceJob, ServiceKind, Tile, Transport, World } from "./types";
 
@@ -162,33 +162,6 @@ function payGold(purse: number, gold: number): { ok: true; gold: number; pay: nu
   return { ok: true, gold: purse - pay, pay };
 }
 
-function pullNeed(
-  inv: Inventory,
-  tile: Tile,
-  need: Partial<Record<ItemId, number>>,
-): { ok: true; inv: Inventory; pile: Pile; cargo: Partial<Record<ItemId, number>> } | { ok: false; hint: string } {
-  const inv2 = { ...inv };
-  const pile = asPile(tile.pile);
-  const cargo: Partial<Record<ItemId, number>> = {};
-  for (const [k, n0] of Object.entries(need) as [ItemId, number][]) {
-    const n = n0 ?? 0;
-    if (n <= 0) continue;
-    let left = n;
-    const bag = Math.min(inv2[k] ?? 0, left);
-    inv2[k] = (inv2[k] ?? 0) - bag;
-    left -= bag;
-    if (left > 0) {
-      const fromPile = Math.min(pile[k] ?? 0, left);
-      pile[k] = (pile[k] ?? 0) - fromPile;
-      if ((pile[k] ?? 0) <= 0) delete pile[k];
-      left -= fromPile;
-    }
-    if (left > 0) return { ok: false, hint: `Мало: ${ITEM_LABEL[k]}.` };
-    cargo[k] = n;
-  }
-  return { ok: true, inv: inv2, pile, cargo };
-}
-
 export function planPostWatch(
   tile: Tile,
   mine: boolean,
@@ -252,7 +225,8 @@ export function planPostCraft(
   craft: CraftKind,
   gold: number,
   now: number,
-): { ok: true; job: ServiceJob; gold: number; inv: Inventory; pile: Pile } | { ok: false; hint: string } {
+  world: World,
+): { ok: true; job: ServiceJob; gold: number; inv: Inventory; pile: Pile; sheds: { x: number; y: number; pile: Pile }[] } | { ok: false; hint: string } {
   if (!mine) return { ok: false, hint: "Чужой станок без заказа не запускать." };
   const def = CRAFTS.find((d) => d.id === craft);
   if (!def) return { ok: false, hint: "Нет такого рецепта." };
@@ -260,13 +234,14 @@ export function planPostCraft(
   if (serviceJobOf(tile)) return { ok: false, hint: "Сначала сними услугу." };
   const pay = payGold(purse, gold);
   if (!pay.ok) return pay;
-  const pulled = pullNeed(inv, tile, def.need);
+  const pulled = pullNeed(world, inv, tile, def.need);
   if (!pulled.ok) return pulled;
   return {
     ok: true,
     gold: pay.gold,
     inv: pulled.inv,
     pile: pulled.pile,
+    sheds: pulled.sheds,
     job: {
       kind: "craft",
       gold: pay.pay,
@@ -290,7 +265,8 @@ export function planPostBuild(
   kind: BuildingKind,
   gold: number,
   now: number,
-): { ok: true; job: ServiceJob; gold: number; inv: Inventory; pile: Pile } | { ok: false; hint: string } {
+  world: World,
+): { ok: true; job: ServiceJob; gold: number; inv: Inventory; pile: Pile; sheds: { x: number; y: number; pile: Pile }[] } | { ok: false; hint: string } {
   if (!mine) return { ok: false, hint: "Строят на клетке заказчика." };
   if (!tile.plot || tile.building !== "none") return { ok: false, hint: "Построй — на пустой клетке двора." };
   if (kind === "none" || kind === "shop" || kind === "board" || kind === "workshop" || kind === "mine") {
@@ -304,13 +280,14 @@ export function planPostBuild(
   const need: Partial<Record<ItemId, number>> = {};
   if (cost.wood) need.wood = cost.wood;
   if (cost.stone) need.stone = cost.stone;
-  const pulled = pullNeed(inv, tile, need);
+  const pulled = pullNeed(world, inv, tile, need);
   if (!pulled.ok) return pulled;
   return {
     ok: true,
     gold: pay.gold,
     inv: pulled.inv,
     pile: pulled.pile,
+    sheds: pulled.sheds,
     job: {
       kind: "build",
       gold: pay.pay,

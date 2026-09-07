@@ -36,7 +36,7 @@ import {
 import { requestLook } from "./cam";
 import { findPath, pathTotal } from "./path";
 import { canDigReason, fillNeedLine, fillPay, giveOrPile, takePaid } from "./pit";
-import { asPile, dumpAllOn, pileAdd, pileEmpty, pileSet } from "./pile";
+import { asPile, dumpAllOn, pileAdd, pileEmpty, pileSet, pullNeed, applyNeedPull } from "./pile";
 import { canCrossDiag, MAX_PLOT, clearYard, normRect, plotBounds, putGate, setYardGateLock, stampYard, upgradeYard, yardWoodCost } from "./fence";
 import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, NO_STRENGTH, SKIP_GOLD, deathFee, energyPeriod, formatWait, splitBodyWater } from "./pace";
 import { applyCatch, harmCells, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, markCrime, ownerOf, plotCells, punish, rollCaught, stealChance, takeLoot, unlockKind, fenceBurnCells } from "./crime";
@@ -2284,23 +2284,26 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
     return;
   }
   const cost = BUILD_COST[kind];
-  const inv = { ...c.inventory };
-  if (inv.wood < cost.wood || inv.stone < cost.stone || c.gold < cost.gold) {
-    const need: string[] = [];
-    if (cost.wood) need.push(`${cost.wood} ${ITEM_LABEL.wood}`);
-    if (cost.stone) need.push(`${cost.stone} ${ITEM_LABEL.stone}`);
-    if (cost.gold) need.push(goldTxt(cost.gold));
-    speak(`Нужно ${need.join(", ")}.`, x, y, "мало материалов", "bad");
+  const need: Partial<Record<ItemId, number>> = {};
+  if (cost.wood) need.wood = cost.wood;
+  if (cost.stone) need.stone = cost.stone;
+  const pulled = pullNeed(s.world, c.inventory, tile, need);
+  if (!pulled.ok) {
+    speak(pulled.hint, x, y, "мало материалов", "bad");
     return;
   }
-  inv.wood -= cost.wood;
-  inv.stone -= cost.stone;
+  if (c.gold < cost.gold) {
+    speak(`Нужно ${goldTxt(cost.gold)}.`, x, y, "мало материалов", "bad");
+    return;
+  }
   if (c.energy < 2) {
     speak(NO_STRENGTH, x, y, "нет силы", "bad");
     return;
   }
-  const next = { ...c, inventory: inv, gold: c.gold - cost.gold, energy: Math.max(0, c.energy - 2) };
+  applyNeedPull(s.world, tile, pulled);
+  const next = { ...c, inventory: pulled.inv, gold: c.gold - cost.gold, energy: Math.max(0, c.energy - 2) };
   const ms = buildMs(kind, next);
+  useGame.setState({ world: { ...s.world, tiles: s.world.tiles } });
   startBusy(
     next,
     makeBusy("build", x, y, Date.now() + ms, { build: kind }),
@@ -3061,14 +3064,13 @@ function resolveCraft(s: GameState, c0: Character, tile: NonNullable<ReturnType<
     return;
   }
   const inv0 = { ...c0.inventory };
-  for (const [k, n] of Object.entries(def.need) as [ItemId, number][]) {
-    if ((inv0[k] ?? 0) < n) {
-      useGame.setState({ character: c0, log: pushLog(s.log, "Мало сырья — дело сорвалось.") });
-      return;
-    }
+  const pulled = pullNeed(s.world, inv0, tile, def.need);
+  if (!pulled.ok) {
+    useGame.setState({ character: c0, log: pushLog(s.log, pulled.hint) });
+    return;
   }
-  for (const [k, n] of Object.entries(def.need) as [ItemId, number][]) inv0[k] -= n;
-  const given = giveOrPile(inv0, c0.transport, tile, def.out, def.n);
+  applyNeedPull(s.world, tile, pulled);
+  const given = giveOrPile(pulled.inv, c0.transport, tile, def.out, def.n);
   let hand = c0.hand;
   let wear = { ...(c0.wear ?? {}) };
   const toolOut = def.out === "axe" || def.out === "pick" || def.out === "spear" || def.out === "rope" || def.out === "bucket" || def.out === "shovel" || def.out === "rod" || def.out === "club" || def.out === "knife";
@@ -4384,11 +4386,11 @@ function doCraft(kind: CraftKind) {
     return;
   }
   const inv = { ...s.character.inventory };
-  for (const [k, n] of Object.entries(def.need) as [ItemId, number][]) {
-    if ((inv[k] ?? 0) < n) {
-      speak(`Мало: ${def.hint}.`, tile!.x, tile!.y, "мало", "bad");
-      return;
-    }
+  if (!tile) return;
+  const pulled = pullNeed(s.world, inv, tile, def.need);
+  if (!pulled.ok) {
+    speak(pulled.hint, tile!.x, tile!.y, "мало", "bad");
+    return;
   }
   const next = { ...s.character, energy: Math.max(0, s.character.energy - needE) };
   const ms = craftMs(needE, slow, next);
@@ -4840,7 +4842,7 @@ function postCraft(craft: CraftKind, gold: number) {
     speak("Подойди.", tile.x, tile.y, "подойди", "bad");
     return;
   }
-  const plan = planPostCraft(tile, isYours(tile), s.character.inventory, s.character.gold, craft, gold, Date.now());
+  const plan = planPostCraft(tile, isYours(tile), s.character.inventory, s.character.gold, craft, gold, Date.now(), s.world);
   if (!plan.ok) {
     speak(plan.hint, tile.x, tile.y, "нет", "bad");
     return;
@@ -4848,6 +4850,7 @@ function postCraft(craft: CraftKind, gold: number) {
   const prior = s.character;
   tile.service = plan.job;
   pileSet(tile, plan.pile);
+  applyNeedPull(s.world, tile, { inv: plan.inv, pile: plan.pile, sheds: plan.sheds, cargo: plan.job.cargo ?? {} });
   let c = { ...s.character, gold: plan.gold, inventory: plan.inv };
   if (c.hand && (c.inventory[c.hand] ?? 0) <= 0) c.hand = null;
   useGame.setState({
@@ -4856,8 +4859,9 @@ function postCraft(craft: CraftKind, gold: number) {
     log: pushLog(s.log, `Услуга: ${serviceLine(plan.job)}.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: serviceLine(plan.job), tone: "gold" as const }].slice(-10),
   });
-  void commitService("service-post", { x: tile.x, y: tile.y }, prior).then((ok) => {
+  void commitService("service-post", { x: tile.x, y: tile.y }, prior, undefined, plan.sheds.map((sh) => ({ x: sh.x, y: sh.y }))).then((ok) => {
     if (!ok) void pullSpot(true);
+    else useGame.getState().persist();
   });
 }
 
@@ -4874,14 +4878,14 @@ function postBuild(kind: BuildingKind, gold: number) {
     speak("Подойди.", tile.x, tile.y, "подойди", "bad");
     return;
   }
-  const plan = planPostBuild(tile, isYours(tile), s.character.inventory, s.character.gold, kind, gold, Date.now());
+  const plan = planPostBuild(tile, isYours(tile), s.character.inventory, s.character.gold, kind, gold, Date.now(), s.world);
   if (!plan.ok) {
     speak(plan.hint, tile.x, tile.y, "нет", "bad");
     return;
   }
   const prior = s.character;
   tile.service = plan.job;
-  pileSet(tile, plan.pile);
+  applyNeedPull(s.world, tile, { inv: plan.inv, pile: plan.pile, sheds: plan.sheds, cargo: plan.job.cargo ?? {} });
   let c = { ...s.character, gold: plan.gold, inventory: plan.inv };
   if (c.hand && (c.inventory[c.hand] ?? 0) <= 0) c.hand = null;
   useGame.setState({
@@ -4890,8 +4894,9 @@ function postBuild(kind: BuildingKind, gold: number) {
     log: pushLog(s.log, `Услуга: ${serviceLine(plan.job)}.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: serviceLine(plan.job), tone: "gold" as const }].slice(-10),
   });
-  void commitService("service-post", { x: tile.x, y: tile.y }, prior).then((ok) => {
+  void commitService("service-post", { x: tile.x, y: tile.y }, prior, undefined, plan.sheds.map((sh) => ({ x: sh.x, y: sh.y }))).then((ok) => {
     if (!ok) void pullSpot(true);
+    else useGame.getState().persist();
   });
 }
 

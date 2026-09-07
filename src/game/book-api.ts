@@ -1125,6 +1125,7 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
         tile: tileInSchema,
         pawn: pawnInSchema,
         early: z.enum(["arrive", "work"]).optional(),
+        sheds: z.array(tileInSchema).optional(),
       })
       .parse(d),
   )
@@ -1220,6 +1221,36 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
     if (!upd[0]) {
       return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0 };
     }
+    const written: { x: number; y: number; ver: number }[] = [{ x: t.x, y: t.y, ver: upd[0].ver }];
+    if (data.kind === "service-post" && data.sheds?.length) {
+      const stationOn = (asSlim(cur.slim).on || userId) as string;
+      const stationVg = (asSlim(cur.slim).vg || nextTile.village || "") as string;
+      for (const sh of data.sheds) {
+        if (Math.max(Math.abs(sh.x - t.x), Math.abs(sh.y - t.y)) > 2) continue;
+        const shedRows = await sql.query<TileRow>(
+          `select x, y, slim, ver, updated_at::text as updated_at from tile where world_id = $1 and x = $2 and y = $3`,
+          [WORLD_ID, sh.x, sh.y],
+        );
+        const row = shedRows[0];
+        if (!row || row.ver !== sh.ver) continue;
+        const live = asSlim(row.slim);
+        if (live.bd !== "shed") continue;
+        const on = live.on || "";
+        const sameOwner = on === userId || on === stationOn;
+        const sameName = !!(stationVg && live.vg && live.vg === stationVg);
+        if (!sameOwner && !sameName) continue;
+        const shedUpd = await sql.query<{ ver: number }>(
+          `update tile t
+           set slim = ${keepSlimKeys("$5::jsonb", ["or", "sv", "vg"])},
+               ver = t.ver + 1, updated_at = now(), updated_by = $6
+           where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
+             and t.slim->>'bd' = 'shed'
+           returning ver`,
+          [WORLD_ID, sh.x, sh.y, sh.ver, JSON.stringify(sh.slim), userId],
+        );
+        if (shedUpd[0]) written.push({ x: sh.x, y: sh.y, ver: shedUpd[0].ver });
+      }
+    }
 
     const merged = await mergeBookBody(sql, userId, data.pawn.body);
     const body = {
@@ -1233,7 +1264,7 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
       [WORLD_ID, userId, data.kind, t.x, t.y, JSON.stringify({ k: liveJob?.kind ?? nextJob?.kind, gold: liveJob?.gold ?? nextJob?.gold })],
     );
     await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
-    return { ok: true as const, written: [{ x: t.x, y: t.y, ver: upd[0].ver }], credit: merged.credit };
+    return { ok: true as const, written, credit: merged.credit };
   });
 
 export const writeVillageDeed = createServerFn({ method: "POST" })
