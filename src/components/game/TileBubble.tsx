@@ -8,7 +8,7 @@ import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/pl
 import { FOG_DARK, FOG_LIVE, fogAt } from "@/game/book";
 import { bagGoods, canSeeService, craftsAtTile, isCraftStation, isGateTile, SERVICE_GOLD, SERVICE_LABEL, SERVICE_WAIT, serviceJobOf, serviceLine, stallLine, stallOrderOf, STALL_PRICES } from "@/game/market";
 import { occupantAt } from "@/game/fight";
-import { canFoundVillage, clusterHint, hamletTitle, hasOwnYard } from "@/game/pact";
+import { canFoundVillage, canPutLiveName, clusterHint, hamletTitle, hasOwnYard, namesTouchingYard, villageOf } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
 import { canDigReason, fillPay } from "@/game/pit";
 import { useGame, meetIsIgnored } from "@/game/store";
@@ -283,6 +283,13 @@ function PickPane({
   const riverBlock = (tile.biome === "river" || tile.building === "moat") && tile.road !== "bridge";
   const ownYard = hasOwnYard(g.world);
   const shod = canFoundVillage(g.world, g.character.pacts);
+  const liveName = canPutLiveName(g.world);
+  const myVillage = villageOf(g.world, "you") || g.character.village;
+  const joinNames = !myVillage ? namesTouchingYard(g.world, "you") : [];
+  const joinHere =
+    joinNames.length > 0 &&
+    fogAt(g.world, tile.x, tile.y) === FOG_LIVE &&
+    (tile.village && joinNames.includes(tile.village) ? tile.village : joinNames[0]!);
   const atOwn = tile.plot && (tile.owner === "you" || tile.owned);
   const atFriend = tile.plot && tile.owner && tile.owner !== "you" && g.character.pacts[tile.owner] === "friend";
   const emptyYard = atOwn && tile.building === "none" && !tile.caravan;
@@ -538,7 +545,7 @@ function PickPane({
           )}
         </>
       )}
-      {near && (atOwn || atFriend) && shod && !g.character.village && (
+      {near && (atOwn || atFriend || tile.commons || (!tile.plot && tile.village)) && (shod || liveName) && !myVillage && (
         <>
           <input
             value={vName}
@@ -547,13 +554,20 @@ function PickPane({
             placeholder="Выселки"
             aria-label="Имя деревни"
           />
-          <Sticker title="Сход — деревня" sub="пять дворов, ты староста" onClick={() => g.formVillage(vName)} />
+          <Sticker
+            title={shod ? "Сход — деревня" : "Поставить имя"}
+            sub={shod ? "пять дворов, ты староста" : "вторая почта примет в пятне"}
+            onClick={() => g.formVillage(vName)}
+          />
         </>
       )}
-      {near && atOwn && g.character.village && (
-        <Sticker title="Распустить" sub={g.character.village} dim onClick={() => g.dissolveVillage()} />
+      {near && joinHere && (
+        <Sticker title={`Принять · ${joinHere}`} sub="двор касается имени" onClick={() => g.joinVillage(joinHere)} />
       )}
-      {near && atOwn && !shod && !g.character.village && ownYard && (
+      {near && atOwn && myVillage && (
+        <Sticker title="Уйти" sub={myVillage} dim onClick={() => g.dissolveVillage()} />
+      )}
+      {near && atOwn && !shod && !liveName && !myVillage && ownYard && (
         <p className="text-[12px] text-muted-foreground">{clusterHint(g.world, g.character.pacts)}</p>
       )}
       {near && atOwn && (

@@ -1,4 +1,4 @@
-import type { Character, World } from "./types";
+import type { Character, Tile, World } from "./types";
 
 export const PACT_LABEL = {
   friend: "друг",
@@ -14,11 +14,22 @@ export const HAMLETS = [
   { owner: "Степан", title: "Хутор Степана", dx: -6, dy: 10, w: 3, h: 3, shop: false },
 ] as const;
 
+const HAMLET_OWNER = new Set<string>(HAMLETS.map((h) => h.owner));
+
 /** Свободное 4×4 под двор игрока — вплотную к кусту. */
 export const PLAYER_FIELD = { dx: -8, dy: 1, w: 4, h: 4 } as const;
 
 export function hamletTitle(owner: string): string {
   return HAMLETS.find((h) => h.owner === owner)?.title ?? owner;
+}
+
+export function isHamletOwner(owner: string): boolean {
+  return HAMLET_OWNER.has(owner);
+}
+
+/** Живая почта или «you». Хутор — нет. */
+export function isLivingOwner(owner: string): boolean {
+  return !!owner && !HAMLET_OWNER.has(owner);
 }
 
 export function friendNames(pacts: Character["pacts"]): string[] {
@@ -71,12 +82,44 @@ export function canFoundVillage(world: World, pacts: Character["pacts"]): boolea
   return seen.size >= 5;
 }
 
+export function liveNeighbors(world: World, you = "you"): string[] {
+  const others = new Set<string>();
+  for (const t of world.tiles) {
+    if (t.plot && t.owner && t.owner !== you && isLivingOwner(t.owner)) others.add(t.owner);
+  }
+  return [...others].filter((o) => yardsTouch(world, you, o));
+}
+
+export function canPutLiveName(world: World, you = "you"): boolean {
+  if (!hasOwnYard(world)) return false;
+  if (villageOf(world, you)) return false;
+  return liveNeighbors(world, you).length > 0;
+}
+
 export function clusterHint(world: World, pacts: Character["pacts"]): string {
   const friends = friendNames(pacts);
   if (!hasOwnYard(world)) return "Сначала свой двор — два угла.";
-  if (friends.length < 4) return `Сход с ${friends.length}/4 друзей. Дружи у калиток хуторов.`;
-  if (!canFoundVillage(world, pacts)) return "Дворы не в кусте. Свой двор ставь вплотную к хуторам.";
-  return "";
+  if (villageOf(world, "you")) return "";
+  if (canFoundVillage(world, pacts) || canPutLiveName(world)) return "";
+  if (friends.length < 4) return `Сход с ${friends.length}/4 друзей хуторов. Или второй двор рядом — имя у калитки.`;
+  return "Дворы не в кусте. Свой двор ставь вплотную к хуторам или ко второму двору.";
+}
+
+export function normVillageName(raw: string | undefined): string {
+  const n = (raw ?? "").trim().replace(/\s+/g, " ").slice(0, 24);
+  return n || "Выселки";
+}
+
+export function planFoundOwners(
+  world: World,
+  pacts: Character["pacts"],
+  you = "you",
+): { ok: true; owners: string[]; via: "hamlet" | "live" } | { ok: false; hint: string } {
+  if (!hasOwnYard(world)) return { ok: false, hint: "Сначала свой двор — два угла." };
+  if (villageOf(world, you)) return { ok: false, hint: "Уже в имени." };
+  if (canFoundVillage(world, pacts)) return { ok: true, owners: [you, ...friendNames(pacts)], via: "hamlet" };
+  if (canPutLiveName(world, you)) return { ok: true, owners: [you], via: "live" };
+  return { ok: false, hint: clusterHint(world, pacts) || "Нужен второй двор рядом или 4 друга хуторов." };
 }
 
 function paintStreets(world: World, owners: string[], name: string) {
@@ -115,6 +158,93 @@ export function clearVillage(world: World, name: string) {
 export function villageOf(world: World, owner: string): string {
   const t = world.tiles.find((x) => x.plot && x.owner === owner && x.village);
   return t?.village ?? "";
+}
+
+export function livingOwnersOf(world: World, name: string): string[] {
+  const set = new Set<string>();
+  if (!name) return [];
+  for (const t of world.tiles) {
+    if (t.village === name && t.plot && t.owner && isLivingOwner(t.owner)) set.add(t.owner);
+  }
+  return [...set];
+}
+
+export function hamletsInName(world: World, name: string): boolean {
+  if (!name) return false;
+  return world.tiles.some((t) => t.village === name && t.plot && isHamletOwner(t.owner));
+}
+
+export function namesTouchingYard(world: World, owner: string): string[] {
+  const mine = yardTiles(world, owner);
+  if (!mine.length) return [];
+  const mineName = villageOf(world, owner);
+  const names = new Set<string>();
+  for (const t of world.tiles) {
+    if (!t.village || t.village === mineName) continue;
+    for (const m of mine) {
+      if (chebyshev(t.x, t.y, m.x, m.y) <= 2) {
+        names.add(t.village);
+        break;
+      }
+    }
+  }
+  return [...names];
+}
+
+export function canJoinVillage(world: World, owner: string, name: string): boolean {
+  if (!name || villageOf(world, owner)) return false;
+  return namesTouchingYard(world, owner).includes(name);
+}
+
+function streetStill(world: World, tile: Tile, owners: string[]): boolean {
+  if (tile.plot || tile.caravan || tile.biome === "river") return false;
+  const plots = world.tiles.filter((t) => t.plot && owners.includes(t.owner));
+  let n = 0;
+  const near = new Set<string>();
+  for (const p of plots) {
+    if (chebyshev(tile.x, tile.y, p.x, p.y) === 1) {
+      n += 1;
+      near.add(p.owner);
+    }
+  }
+  return n >= 2 || near.size >= 2;
+}
+
+/** Снять имя только со своих клеток. Последний живой, хуторов нет — стереть имя. */
+export function leaveVillage(
+  world: World,
+  owner: string,
+): { ok: true; name: string; cleared: boolean } | { ok: false; hint: string } {
+  const name = villageOf(world, owner);
+  if (!name) return { ok: false, hint: "Имени нет." };
+  for (const t of world.tiles) {
+    if (t.plot && t.owner === owner && t.village === name) t.village = "";
+  }
+  const remainOwners = [...new Set(world.tiles.filter((t) => t.plot && t.village === name).map((t) => t.owner))];
+  for (const t of world.tiles) {
+    if (t.village !== name || t.plot) continue;
+    if (!streetStill(world, t, remainOwners)) t.village = "";
+  }
+  const living = livingOwnersOf(world, name);
+  const hamlets = hamletsInName(world, name);
+  if (living.length === 0 && !hamlets) {
+    clearVillage(world, name);
+    return { ok: true, name, cleared: true };
+  }
+  return { ok: true, name, cleared: false };
+}
+
+export function snapVillage(world: World): string[] {
+  return world.tiles.map((t) => t.village || "");
+}
+
+export function villageChangedCells(world: World, before: string[]): { x: number; y: number }[] {
+  const cells: { x: number; y: number }[] = [];
+  for (let i = 0; i < world.tiles.length; i++) {
+    const t = world.tiles[i]!;
+    if ((t.village || "") !== (before[i] || "")) cells.push({ x: t.x, y: t.y });
+  }
+  return cells;
 }
 
 export function setVillageLaw(world: World, name: string, law: boolean) {
@@ -156,5 +286,14 @@ export function isOutsideYard(world: World, x: number, y: number): boolean {
       if (n?.plot) return true;
     }
   }
+  return false;
+}
+
+export function atNameSpot(world: World, tile: Tile, owner = "you"): boolean {
+  if (tile.plot && tile.owner === owner) return true;
+  if (tile.fenceN === "gate" || tile.fenceW === "gate") return true;
+  if (tile.commons) return true;
+  if (tile.village && !tile.plot) return true;
+  if (isOutsideYard(world, tile.x, tile.y)) return true;
   return false;
 }

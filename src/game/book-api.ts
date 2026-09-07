@@ -8,6 +8,7 @@ import { GROW_CATCHUP_TICKS, GROW_WRITE_BATCH, TICK_MS, stepWorldClock, tickGrow
 import type { Season, Tile } from "./types";
 import { generateWorld } from "./worldgen";
 import { isItemId, settleService, serviceJobOf } from "./market";
+import { isHamletOwner, isLivingOwner } from "./pact";
 import { defaultMatter, MATTER_HP } from "./work";
 import { pileAdd } from "./pile";
 import type { ItemId, ServiceJob } from "./types";
@@ -1228,6 +1229,159 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
     );
     await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
     return { ok: true as const, written: [{ x: t.x, y: t.y, ver: upd[0].ver }], credit: merged.credit };
+  });
+
+export const writeVillageDeed = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: unknown) =>
+    z
+      .object({
+        kind: z.enum(["village-found", "village-join", "village-leave"]),
+        name: z.string(),
+        tiles: z.array(tileInSchema),
+        pawn: pawnInSchema,
+      })
+      .parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const userId = context.userId;
+    const name = data.name.trim().replace(/\s+/g, " ").slice(0, 24);
+    if (data.kind !== "village-leave" && !name) {
+      return { ok: false as const, hint: "имя словом", conflicts: [] as TilePacket[], written: [], credit: 0 };
+    }
+    if (data.tiles.length > 200) {
+      return { ok: false as const, hint: "слишком широко", conflicts: [] as TilePacket[], written: [], credit: 0 };
+    }
+    if (!data.tiles.length) {
+      const merged = await mergeBookBody(sql, userId, data.pawn.body);
+      await writePawn(sql, userId, data.pawn, merged.body);
+      return { ok: true as const, written: [] as { x: number; y: number; ver: number }[], credit: merged.credit };
+    }
+    const keys = JSON.stringify(data.tiles.map((t) => ({ x: t.x, y: t.y })));
+    const curRows = await sql.query<TileRow>(
+      `select x, y, slim, ver, updated_at::text as updated_at
+       from tile
+       where world_id = $1
+         and (x, y) in (select * from jsonb_to_recordset($2::jsonb) as p(x int, y int))`,
+      [WORLD_ID, keys],
+    );
+    const byKey = new Map(curRows.map((r) => [`${r.x},${r.y}`, r]));
+    for (const t of data.tiles) {
+      const cur = byKey.get(`${t.x},${t.y}`);
+      if (!cur) {
+        return { ok: false as const, hint: "клетка уже другая", conflicts: [] as TilePacket[], written: [], credit: 0 };
+      }
+      const live = asSlim(cur.slim);
+      const on = live.on || "";
+      if (live.pt) {
+        if (on === userId) continue;
+        if (data.kind !== "village-leave" && isHamletOwner(on)) continue;
+        return { ok: false as const, hint: "чужой двор", conflicts: [] as TilePacket[], written: [], credit: 0 };
+      }
+    }
+    if (data.kind === "village-join") {
+      const near = await sql.query<{ ok: number }>(
+        `select 1 as ok from tile
+         where world_id = $1 and slim->>'vg' = $2
+           and greatest(abs(x - $3), abs(y - $4)) <= $5
+         limit 1`,
+        [WORLD_ID, name, data.pawn.x, data.pawn.y, 8],
+      );
+      if (!near[0]) {
+        return { ok: false as const, hint: "имя не рядом", conflicts: [] as TilePacket[], written: [], credit: 0 };
+      }
+    }
+    const incoming = JSON.stringify(
+      data.tiles.map((t) => ({ x: t.x, y: t.y, slim: t.slim, ver: t.ver })),
+    );
+    const rows = await sql.query<{ written: unknown; conflicts: unknown }>(
+      `with incoming as (
+         select (e->>'x')::int as x, (e->>'y')::int as y, e->'slim' as slim, (e->>'ver')::int as ver
+         from jsonb_array_elements($2::jsonb) e
+       ),
+       mismatch as (
+         select i.x, i.y, coalesce(t.slim, '{}'::jsonb) as slim, coalesce(t.ver, 0) as ver,
+                coalesce(t.updated_at::text, now()::text) as updated_at
+         from incoming i
+         left join tile t on t.world_id = $1 and t.x = i.x and t.y = i.y
+         where t.ver is distinct from i.ver
+       ),
+       upd as (
+         update tile as t
+         set slim = (i.slim - 'or' - 'sv')
+           || case when t.slim ? 'or' then jsonb_build_object('or', t.slim->'or') else '{}'::jsonb end
+           || case when t.slim ? 'sv' then jsonb_build_object('sv', t.slim->'sv') else '{}'::jsonb end,
+             ver = t.ver + 1, updated_at = now(), updated_by = $3
+         from incoming i
+         where t.world_id = $1 and t.x = i.x and t.y = i.y and t.ver = i.ver
+           and not exists (select 1 from mismatch)
+         returning t.x, t.y, t.ver
+       )
+       select
+         coalesce((select jsonb_agg(jsonb_build_object('x', x, 'y', y, 'ver', ver)) from upd), '[]'::jsonb) as written,
+         coalesce((select jsonb_agg(jsonb_build_object('x', x, 'y', y, 'slim', slim, 'ver', ver, 'updated_at', updated_at)) from mismatch), '[]'::jsonb) as conflicts`,
+      [WORLD_ID, incoming, userId],
+    );
+    const rawWritten = rows[0]?.written;
+    const rawConflicts = rows[0]?.conflicts;
+    const written: { x: number; y: number; ver: number }[] = Array.isArray(rawWritten)
+      ? (rawWritten as { x: number; y: number; ver: number }[])
+      : [];
+    const conflictRows: { x: number; y: number; slim: unknown; ver: number; updated_at: string }[] = Array.isArray(
+      rawConflicts,
+    )
+      ? (rawConflicts as { x: number; y: number; slim: unknown; ver: number; updated_at: string }[])
+      : [];
+    const conflicts: TilePacket[] = conflictRows.map((c) => ({
+      x: c.x,
+      y: c.y,
+      slim: asSlim(c.slim),
+      ver: c.ver,
+      updatedAt: c.updated_at,
+    }));
+    if (conflicts.length || written.length !== data.tiles.length) {
+      return {
+        ok: false as const,
+        hint: "клетка уже другая",
+        conflicts,
+        written: [],
+        credit: 0,
+      };
+    }
+    if (data.kind === "village-leave" && name) {
+      const left = await sql.query<{ on: string | null; pt: string | null }>(
+        `select slim->>'on' as on, slim->>'pt' as pt from tile where world_id = $1 and slim->>'vg' = $2`,
+        [WORLD_ID, name],
+      );
+      const otherLive = left.some((r) => r.pt && r.on && isLivingOwner(r.on) && r.on !== userId);
+      const hamlets = left.some((r) => r.pt && r.on && isHamletOwner(r.on));
+      if (!otherLive && !hamlets) {
+        await sql.query(
+          `update tile
+           set slim = slim - 'vg', ver = ver + 1, updated_at = now(), updated_by = $3
+           where world_id = $1 and slim->>'vg' = $2`,
+          [WORLD_ID, name, userId],
+        );
+      }
+    }
+    const origin = data.tiles[0];
+    await sql.query(
+      `insert into deed (world_id, user_id, kind, x, y, payload)
+       values ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [
+        WORLD_ID,
+        userId,
+        data.kind,
+        origin?.x ?? data.pawn.x,
+        origin?.y ?? data.pawn.y,
+        JSON.stringify({ name, n: data.tiles.length }),
+      ],
+    );
+    const merged = await mergeBookBody(sql, userId, data.pawn.body);
+    await writePawn(sql, userId, data.pawn, merged.body);
+    await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
+    return { ok: true as const, written, credit: merged.credit };
   });
 
 export const dropPawn = createServerFn({ method: "POST" })

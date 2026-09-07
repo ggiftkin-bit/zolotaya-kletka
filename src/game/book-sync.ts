@@ -16,7 +16,7 @@ import {
   type BookFight,
   type WorldClock,
 } from "./book";
-import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, strikeBookFight, writeHarmDeed, writeServiceDeed, writeStallDeed, writeWorldDeed } from "./book-api";
+import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, strikeBookFight, writeHarmDeed, writeServiceDeed, writeStallDeed, writeVillageDeed, writeWorldDeed } from "./book-api";
 import { rememberLiveFoe } from "./fight";
 import { makeJobs, makeTrader } from "./economy";
 import { TICKS_PER_DAY } from "./constants";
@@ -437,6 +437,68 @@ export async function commitService(
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";
     if (msg !== "Unauthorized") console.warn("[книга] услуга", err);
+    return false;
+  }
+}
+
+export async function commitVillage(
+  kind: "village-found" | "village-join" | "village-leave",
+  name: string,
+  cells: Array<{ x: number; y: number }>,
+  prior?: Character,
+) {
+  if (!store) return false;
+  const s = store.get();
+  if (s.started) saveGame(s);
+  if (!s.bookOn || !s.started) return true;
+  const selfId = selfIdOf();
+  const tiles = cells.map((c) => {
+    const t = s.world.tiles[c.y * s.world.width + c.x];
+    const slim = t ? wireSlim(slimOf(t), selfId, "publish") : { b: "plains" as const };
+    const sig = t ? JSON.stringify(slimOf(t)) : "";
+    return {
+      x: c.x,
+      y: c.y,
+      slim,
+      ver: sVer(s, c.x, c.y),
+      k: keyOf(c.x, c.y),
+      sig,
+    };
+  });
+  for (const t of tiles) lastSlim.set(t.k, t.sig);
+  try {
+    const res = await writeVillageDeed({
+      data: {
+        kind,
+        name,
+        tiles: tiles.map(({ x, y, slim, ver }) => ({ x, y, slim, ver })),
+        pawn: pawnPayload(s.character),
+      },
+    });
+    if (!res) return false;
+    if (res.ok) {
+      const ver = (store.get().world.ver ?? []).slice();
+      for (const w of res.written) {
+        ver[w.y * s.world.width + w.x] = w.ver;
+      }
+      for (const t of tiles) lastSlim.set(t.k, t.sig);
+      store.set({ world: { ...store.get().world, ver } });
+      applyCredit(res.credit);
+      return true;
+    }
+    let world = store.get().world;
+    if (res.conflicts.length) world = applyLive(world, localizePackets(res.conflicts));
+    world = maskLiveFog(world, store.get().character.x, store.get().character.y);
+    const patch: Partial<GameState> = { world };
+    if (prior) patch.character = prior;
+    store.set(patch);
+    rememberLive(store.get());
+    store.speak?.(res.hint || "клетка уже другая", s.character.x, s.character.y, "нет", "bad");
+    saveGame(store.get());
+    return false;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg !== "Unauthorized") console.warn("[книга] имя", err);
     return false;
   }
 }

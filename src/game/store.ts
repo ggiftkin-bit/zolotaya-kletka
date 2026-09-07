@@ -42,7 +42,7 @@ import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_
 import { applyCatch, harmCells, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, markCrime, ownerOf, plotCells, punish, rollCaught, stealChance, takeLoot, unlockKind, fenceBurnCells } from "./crime";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
 import { clearGame, loadGame, saveGame } from "./save";
-import { stampVillage, clearVillage, friendNames, hamletTitle, hasOwnYard, canFoundVillage, isOutsideYard, setVillageLaw } from "./pact";
+import { stampVillage, leaveVillage, hamletTitle, hasOwnYard, isOutsideYard, setVillageLaw, planFoundOwners, canJoinVillage, namesTouchingYard, livingOwnersOf, villageOf, snapVillage, villageChangedCells, atNameSpot, normVillageName } from "./pact";
 import { cargoWeight, loadRatio, pailKg, stepEnergy, wornKg } from "./travel";
 import { atBench, CRAFTS, EAT_ORDER, EAT_SAT, PROF_BLURB, type CraftKind } from "./craft";
 import { markDepleted, tickGrow, REGROW_WAIT } from "./grow";
@@ -95,7 +95,7 @@ import { chebyshev, dummyHome, foeById, gearSlot, ghostLiveFoe, leaveChance, mak
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, FOG_LIVE, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
-import { bindBookStore, commitHarm, commitService, commitStall, flushBook, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
+import { bindBookStore, commitHarm, commitService, commitStall, commitVillage, flushBook, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
 import {
   applyCargoPile,
   canReachStall,
@@ -544,6 +544,7 @@ type Actions = {
   scrapBurned: () => void;
   offerFriend: () => void;
   formVillage: (name?: string) => void;
+  joinVillage: (name?: string) => void;
   dissolveVillage: () => void;
   doCraft: (kind: CraftKind) => void;
   prospectHere: () => void;
@@ -1218,6 +1219,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   scrapBurned: () => scrapBurned(),
   offerFriend: () => offerFriend(),
   formVillage: (name) => formVillage(name),
+  joinVillage: (name) => joinVillage(name),
   dissolveVillage: () => dissolveVillage(),
   doCraft: (kind) => doCraft(kind),
   prospectHere: () => prospectHere(),
@@ -3622,56 +3624,107 @@ function formVillage(name?: string) {
   const tile = s.inspect ? tileAt(s.world, s.inspect.x, s.inspect.y) : hereTile();
   if (!tile) return;
   const near = Math.max(Math.abs(s.character.x - tile.x), Math.abs(s.character.y - tile.y)) <= 1;
-  if (!near) {
-    speak("Сход — у калитки.", tile.x, tile.y, "подойди", "bad");
+  if (!near || !atNameSpot(s.world, tile)) {
+    speak("Имя — у калитки или на улице.", s.character.x, s.character.y, "подойди", "bad");
     return;
   }
-  if (!hasOwnYard(s.world)) {
-    speak("Сначала свой двор — два угла в режиме Двор.", s.character.x, s.character.y, "нет двора", "bad");
+  const plan = planFoundOwners(s.world, s.character.pacts);
+  if (!plan.ok) {
+    speak(plan.hint, tile.x, tile.y, "не куст", "bad");
     return;
   }
-  const friends = friendNames(s.character.pacts);
-  if (!canFoundVillage(s.world, s.character.pacts)) {
-    speak(
-      friends.length < 4
-        ? `Нужны 4 друга-двора в кусте. Сейчас ${friends.length}.`
-        : "Сход только если дворы вплотную (Чебышёв ≤2). Свой двор ставь к кусту хуторов.",
-      tile.x,
-      tile.y,
-      "не куст",
-      "bad",
-    );
-    return;
-  }
-  const nm = (name || s.character.village || "Выселки").trim() || "Выселки";
-  stampVillage(s.world, ["you", ...friends], nm);
+  const nm = normVillageName(name || s.character.village);
+  const prior = s.character;
+  const before = snapVillage(s.world);
+  stampVillage(s.world, plan.owners, nm);
+  const cells = villageChangedCells(s.world, before);
   useGame.setState({
     character: { ...s.character, village: nm },
     inspect: null,
     world: { ...s.world, tiles: s.world.tiles },
-    log: pushLog(s.log, `Сход. Деревня «${nm}». Ты староста — повинность, не корона.`),
+    log: pushLog(
+      s.log,
+      plan.via === "hamlet"
+        ? `Сход. Деревня «${nm}». Ты староста — повинность, не корона.`
+        : `Имя «${nm}» на дворе. Вторая почта примет в пятне.`,
+    ),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: nm, tone: "ok" as const }].slice(-10),
+  });
+  void commitVillage("village-found", nm, cells, prior).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function joinVillage(name?: string) {
+  const s = useGame.getState();
+  const tile = s.inspect ? tileAt(s.world, s.inspect.x, s.inspect.y) : hereTile();
+  if (!tile) return;
+  const near = Math.max(Math.abs(s.character.x - tile.x), Math.abs(s.character.y - tile.y)) <= 1;
+  if (!near || !atNameSpot(s.world, tile)) {
+    speak("Принимают у калитки или на улице.", s.character.x, s.character.y, "подойди", "bad");
+    return;
+  }
+  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
+    speak("В тумане имени нет.", tile.x, tile.y, "туман", "bad");
+    return;
+  }
+  if (!hasOwnYard(s.world)) {
+    speak("Сначала свой двор — два угла.", s.character.x, s.character.y, "нет двора", "bad");
+    return;
+  }
+  const touching = namesTouchingYard(s.world, "you");
+  const nm = (name && touching.includes(name) ? name : tile.village && touching.includes(tile.village) ? tile.village : touching[0]) || "";
+  if (!nm || !canJoinVillage(s.world, "you", nm)) {
+    speak("Двор не касается этого имени.", tile.x, tile.y, "не рядом", "bad");
+    return;
+  }
+  const prior = s.character;
+  const before = snapVillage(s.world);
+  const others = livingOwnersOf(s.world, nm).filter((o) => o !== "you");
+  stampVillage(s.world, ["you", ...others], nm);
+  const cells = villageChangedCells(s.world, before);
+  useGame.setState({
+    character: { ...s.character, village: nm },
+    inspect: null,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, `Принял имя «${nm}».`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: nm, tone: "ok" as const }].slice(-10),
+  });
+  void commitVillage("village-join", nm, cells, prior).then((ok) => {
+    if (!ok) void pullSpot(true);
   });
 }
 
 function dissolveVillage() {
   const s = useGame.getState();
-  const name = s.character.village;
-  if (!name) {
-    speak("Деревни нет.", s.character.x, s.character.y, "нет", "bad");
-    return;
-  }
   const tile = s.inspect ? tileAt(s.world, s.inspect.x, s.inspect.y) : hereTile();
-  if (!tile?.plot || (tile.owner && tile.owner !== "you" && tile.village !== name)) {
-    speak("Распускают у своей калитки.", s.character.x, s.character.y, "не здесь", "bad");
+  if (!tile) return;
+  const near = Math.max(Math.abs(s.character.x - tile.x), Math.abs(s.character.y - tile.y)) <= 1;
+  if (!near || !atNameSpot(s.world, tile)) {
+    speak("Уходят у своей калитки или с улицы.", s.character.x, s.character.y, "не здесь", "bad");
     return;
   }
-  clearVillage(s.world, name);
+  const mine = villageOf(s.world, "you") || s.character.village;
+  if (!mine) {
+    speak("Имени нет.", s.character.x, s.character.y, "нет", "bad");
+    return;
+  }
+  const prior = s.character;
+  const before = snapVillage(s.world);
+  const left = leaveVillage(s.world, "you");
+  if (!left.ok) {
+    speak(left.hint, s.character.x, s.character.y, "нет", "bad");
+    return;
+  }
+  const cells = villageChangedCells(s.world, before);
   useGame.setState({
     character: { ...s.character, village: "" },
     inspect: null,
     world: { ...s.world, tiles: s.world.tiles },
-    log: pushLog(s.log, `Деревня «${name}» распущена.`),
+    log: pushLog(s.log, left.cleared ? `Имя «${left.name}» снято.` : `Ушёл. «${left.name}» держится у остальных.`),
+  });
+  void commitVillage("village-leave", left.name, cells, prior).then((ok) => {
+    if (!ok) void pullSpot(true);
   });
 }
 
