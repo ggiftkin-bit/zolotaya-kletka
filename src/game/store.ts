@@ -103,6 +103,7 @@ import {
   planCancelService,
   planDrop,
   planPostBuild,
+  planPostBring,
   planPostCraft,
   planPostHaul,
   planPostWatch,
@@ -115,6 +116,7 @@ import {
   serviceLine,
   settleService,
   stallLine,
+  tileOfTakenJob,
 } from "./market";
 
 let worldAcc = 0;
@@ -319,7 +321,7 @@ function walkTo(x: number, y: number) {
   }
   if (isBusy(c) && !c.busy?.hired) {
     const b = c.busy!;
-    const toJob = (b.kind === "haul" || b.kind === "watch") && b.x === x && b.y === y;
+    const toJob = (b.kind === "haul" || b.kind === "watch" || b.kind === "bring") && b.x === x && b.y === y;
     if (!toJob) {
       speak(`Занят: ${BUSY_LABEL[c.busy!.kind]}. Жди, брось или найми руки.`, c.x, c.y, BUSY_LABEL[c.busy!.kind], "bad");
       return;
@@ -560,6 +562,7 @@ type Actions = {
   takeStall: () => void;
   postWatch: (gold: number, waitSec: number) => void;
   postHaul: (item: ItemId, gold: number) => void;
+  postBring: (item: ItemId, n: number, destX: number, destY: number, gold: number) => void;
   postCraft: (craft: CraftKind, gold: number) => void;
   postBuild: (kind: BuildingKind, gold: number) => void;
   takeService: () => void;
@@ -1238,6 +1241,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   takeStall: () => takeStall(),
   postWatch: (gold, waitSec) => postWatch(gold, waitSec),
   postHaul: (item, gold) => postHaul(item, gold),
+  postBring: (item, n, destX, destY, gold) => postBring(item, n, destX, destY, gold),
   postCraft: (craft, gold) => postCraft(craft, gold),
   postBuild: (kind, gold) => postBuild(kind, gold),
   takeService: () => takeService(),
@@ -1470,7 +1474,7 @@ function advanceTravel(now: number) {
     void pullSpot();
     const after = useGame.getState();
     const jobBusy = after.character.busy;
-    if (jobBusy?.kind === "haul" && jobBusy.x === x && jobBusy.y === y) {
+    if ((jobBusy?.kind === "haul" || jobBusy?.kind === "bring") && jobBusy.x === x && jobBusy.y === y) {
       finishService("done", "arrive");
       return;
     }
@@ -2992,7 +2996,7 @@ function resolveBusy() {
   else if (b.kind === "fill") resolveFill(s, c0, tile);
   else if (b.kind === "lock") resolveLock(s, c0, tile, b.lock);
   else if (b.kind === "burn") resolveBurn(s, c0, tile);
-  else if (b.kind === "watch" || b.kind === "haul") finishService("done");
+  else if (b.kind === "watch" || b.kind === "haul" || b.kind === "bring") finishService("done");
   else useGame.setState({ character: c0 });
 }
 
@@ -4701,7 +4705,7 @@ function takeStall() {
 }
 
 function isServiceBusy(b: Character["busy"]): boolean {
-  return !!b && (b.kind === "watch" || b.kind === "haul" || !!b.service);
+  return !!b && (b.kind === "watch" || b.kind === "haul" || b.kind === "bring" || !!b.service);
 }
 
 function serviceHere(): Tile | null {
@@ -4719,8 +4723,12 @@ function finishService(kind: "done" | "fail", early?: "arrive" | "work") {
   const b = s.character.busy;
   if (!b) return;
   cancelNotice("busy");
-  const tile = tileAt(s.world, b.x, b.y);
-  const job = tile ? serviceJobOf(tile) : null;
+  let tile = tileAt(s.world, b.x, b.y);
+  let job = tile ? serviceJobOf(tile) : null;
+  if (!job) {
+    tile = tileOfTakenJob(s.world, b.x, b.y, "you");
+    job = tile ? serviceJobOf(tile) : null;
+  }
   if (!tile || !job) {
     useGame.setState({ character: { ...s.character, busy: null } });
     return;
@@ -4728,7 +4736,7 @@ function finishService(kind: "done" | "fail", early?: "arrive" | "work") {
   const prior = s.character;
   const exec = { x: s.character.x, y: s.character.y };
   const poster = job.by === "you" ? exec : null;
-  const cargo = job.cargo ?? (job.item && (job.n ?? 0) > 0 ? { [job.item]: job.n ?? 1 } : {});
+  const cargo = job.kind === "bring" ? {} : job.cargo ?? (job.item && (job.n ?? 0) > 0 ? { [job.item]: job.n ?? 1 } : {});
   const result =
     kind === "fail"
       ? { wait: false as const, ok: false, refundTo: job.by, cargo, toPosterBag: false }
@@ -4740,11 +4748,31 @@ function finishService(kind: "done" | "fail", early?: "arrive" | "work") {
   if (!settled.ok) {
     applyCargoPile(tile, settled.cargo);
   } else if (settled.out) {
+    const destTile =
+      job.kind === "bring" ? tileAt(s.world, job.destX ?? tile.x, job.destY ?? tile.y) ?? tile : tile;
+    if (job.kind === "bring" && job.item) {
+      const have = c.inventory[job.item] ?? 0;
+      const need = settled.out.n;
+      if (have < need) {
+        applyCargoPile(tile, {});
+        tile.service = null;
+        useGame.setState({
+          character: c,
+          world: { ...s.world, tiles: s.world.tiles },
+          log: pushLog(s.log, "Нет в сумке. Срыв. Золото заказчику."),
+        });
+        void commitService("service-fail", { x: tile.x, y: tile.y }, prior).then((ok) => {
+          if (!ok) void pullSpot(true);
+        });
+        return;
+      }
+      c = { ...c, inventory: { ...c.inventory, [job.item]: have - need } };
+    }
     if (settled.toPosterBag && job.by === "you") {
-      const given = giveOrPile({ ...c.inventory }, c.transport, tile, settled.out.item, settled.out.n);
+      const given = giveOrPile({ ...c.inventory }, c.transport, destTile, settled.out.item, settled.out.n);
       c = { ...c, inventory: given.inv };
     } else {
-      pileAdd(tile, settled.out.item, settled.out.n);
+      pileAdd(destTile, settled.out.item, settled.out.n);
     }
   }
   if (settled.ok && settled.build && tile.building === "none") {
@@ -4821,6 +4849,43 @@ function postHaul(item: ItemId, gold: number) {
   tile.service = plan.job;
   let c = { ...s.character, gold: plan.gold, inventory: plan.inv };
   if (c.hand && (c.inventory[c.hand] ?? 0) <= 0) c.hand = null;
+  useGame.setState({
+    character: c,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, `Услуга: ${serviceLine(plan.job)}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: serviceLine(plan.job), tone: "gold" as const }].slice(-10),
+  });
+  void commitService("service-post", { x: tile.x, y: tile.y }, prior).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function postBring(item: ItemId, n: number, destX: number, destY: number, gold: number) {
+  const s = useGame.getState();
+  if (serviceBlocked()) return;
+  const tile = serviceHere();
+  if (!tile) return;
+  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
+    speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
+    return;
+  }
+  if (!canReachStall(s.character.x, s.character.y, tile)) {
+    speak("Подойди.", tile.x, tile.y, "подойди", "bad");
+    return;
+  }
+  const dest = tileAt(s.world, destX, destY);
+  if (!dest) {
+    speak("Куда: свой двор, склад или калитка.", tile.x, tile.y, "нет", "bad");
+    return;
+  }
+  const plan = planPostBring(tile, isYours(tile), s.character.gold, item, n, dest, gold);
+  if (!plan.ok) {
+    speak(plan.hint, tile.x, tile.y, "нет", "bad");
+    return;
+  }
+  const prior = s.character;
+  tile.service = plan.job;
+  const c = { ...s.character, gold: plan.gold };
   useGame.setState({
     character: c,
     world: { ...s.world, tiles: s.world.tiles },
@@ -4912,7 +4977,7 @@ function takeService() {
     speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
     return;
   }
-  const plan = planTakeService(tile, isYours(tile), s.character.x, s.character.y, s.character.busy, Date.now());
+  const plan = planTakeService(tile, isYours(tile), s.character.x, s.character.y, s.character.busy, Date.now(), s.character.inventory);
   if (!plan.ok) {
     speak(plan.hint, tile.x, tile.y, "нет", "bad");
     return;
@@ -4924,8 +4989,8 @@ function takeService() {
   let busy: NonNullable<Character["busy"]>;
   if (job.kind === "watch") {
     busy = makeBusy("watch", tile.x, tile.y, serviceBusyUntil(job, now), { service: true });
-  } else if (job.kind === "haul") {
-    busy = makeBusy("haul", job.destX ?? tile.x, job.destY ?? tile.y, serviceBusyUntil(job, now), { item: job.item, service: true });
+  } else if (job.kind === "haul" || job.kind === "bring") {
+    busy = makeBusy(job.kind, job.destX ?? tile.x, job.destY ?? tile.y, serviceBusyUntil(job, now), { item: job.item, service: true });
   } else if (job.kind === "craft") {
     const def = CRAFTS.find((d) => d.id === job.craft);
     const wet = isWatered(s.world, tile);
@@ -4964,7 +5029,7 @@ function dropService() {
   const job = plan.job;
   tile.service = null;
   let inv = { ...s.character.inventory };
-  const cargo = job.cargo ?? (job.item && (job.n ?? 0) > 0 ? { [job.item]: job.n ?? 1 } : {});
+  const cargo = job.kind === "bring" ? {} : job.cargo ?? (job.item && (job.n ?? 0) > 0 ? { [job.item]: job.n ?? 1 } : {});
   for (const k of Object.keys(cargo) as ItemId[]) {
     const n = cargo[k] ?? 0;
     if (n > 0) {

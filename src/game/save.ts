@@ -92,7 +92,7 @@ function slimCargo(c?: Partial<Record<ItemId, number>>): Partial<Record<ItemId, 
 function fatService(raw: SlimTile["sv"] | undefined): ServiceJob | null {
   if (!raw || typeof raw !== "object") return null;
   const kind = raw.k;
-  if (kind !== "watch" && kind !== "haul" && kind !== "build" && kind !== "craft") return null;
+  if (kind !== "watch" && kind !== "haul" && kind !== "build" && kind !== "craft" && kind !== "bring") return null;
   if (!raw.by || typeof raw.g !== "number" || raw.g <= 0 || typeof raw.u !== "number") return null;
   const job: ServiceJob = { kind, gold: Math.floor(raw.g), until: raw.u, by: raw.by };
   if (raw.tk) job.take = raw.tk;

@@ -305,6 +305,20 @@ async function creditItems(sql: Sql, userId: string, cargo: Partial<Record<ItemI
   return true;
 }
 
+async function debitItems(sql: Sql, userId: string, cargo: Partial<Record<ItemId, number>>) {
+  const keys = (Object.keys(cargo) as ItemId[]).filter((k) => (cargo[k] ?? 0) > 0);
+  if (!userId || userId === "you" || !keys.length) return false;
+  const row = await readPawn(sql, userId);
+  if (!row?.body) return false;
+  const inv = { ...(row.body.inventory ?? {}) };
+  for (const k of keys) {
+    if ((inv[k] ?? 0) < (cargo[k] ?? 0)) return false;
+  }
+  for (const k of keys) inv[k] = (inv[k] ?? 0) - (cargo[k] ?? 0);
+  await writePawn(sql, userId, row, { ...row.body, inventory: inv });
+  return true;
+}
+
 async function clearBusy(sql: Sql, userId: string) {
   if (!userId || userId === "you") return;
   const row = await readPawn(sql, userId);
@@ -337,12 +351,35 @@ async function applyServiceSettle(
     if (result.refundTo) await creditDue(sql, result.refundTo, job.gold);
   } else {
     if (result.out) {
+      const dx = job.kind === "bring" ? (job.destX ?? tile.x) : tile.x;
+      const dy = job.kind === "bring" ? (job.destY ?? tile.y) : tile.y;
+      const putOnHang = () => pileAdd(tile, result.out!.item, result.out!.n);
       if (result.toPosterBag && job.by) {
         const ok = await creditItems(sql, job.by, { [result.out.item]: result.out.n });
-        if (!ok) pileAdd(tile, result.out.item, result.out.n);
+        if (!ok) putOnHang();
+      } else if (job.kind === "bring" && (dx !== tile.x || dy !== tile.y)) {
+        const destRows = await sql.query<TileRow>(
+          `select x, y, slim, ver, updated_at::text as updated_at from tile where world_id = $1 and x = $2 and y = $3`,
+          [WORLD_ID, dx, dy],
+        );
+        const destRow = destRows[0];
+        if (destRow) {
+          const dest = fatTile(asSlim(destRow.slim), dx, dy);
+          pileAdd(dest, result.out.item, result.out.n);
+          await sql.query(
+            `update tile t
+             set slim = ${keepSlimKeys("$4::jsonb", ["or", "sv", "vg"])},
+                 ver = t.ver + 1, updated_at = now(), updated_by = $5
+             where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $6`,
+            [WORLD_ID, dx, dy, JSON.stringify(slimTile(dest)), actor, destRow.ver],
+          );
+        } else putOnHang();
       } else {
-        pileAdd(tile, result.out.item, result.out.n);
+        putOnHang();
       }
+    }
+    if (result.ok && job.kind === "bring" && result.out) {
+      await debitItems(sql, actor, { [result.out.item]: result.out.n });
     }
     if (result.build && tile.building === "none") {
       tile.building = result.build;
@@ -1172,6 +1209,12 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
       if (liveJob.by === userId) return { ok: false as const, hint: "свою услугу снимай сам", conflicts: [], written: [], credit: 0 };
       if (liveJob.take) return { ok: false as const, hint: "уже взяли", conflicts: asConflict(), written: [], credit: 0 };
       if (reach > 1) return { ok: false as const, hint: "подойди", conflicts: [], written: [], credit: 0 };
+      if (liveJob.kind === "bring") {
+        const need = liveJob.n ?? 1;
+        const it = liveJob.item;
+        const have = it ? ((data.pawn.body.inventory?.[it] ?? 0) as number) : 0;
+        if (!it || have < need) return { ok: false as const, hint: "нет в сумке", conflicts: [], written: [], credit: 0 };
+      }
       if (!nextJob || nextJob.take !== userId) return { ok: false as const, hint: "нет услуги", conflicts: [], written: [], credit: 0 };
       nextTile.service = stampTake(liveJob, userId, Date.now());
       t.slim = slimTile(nextTile);
@@ -1185,12 +1228,18 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
       if (data.kind === "service-done" && liveJob.kind === "watch" && reach > 0) {
         return { ok: false as const, hint: "стой на клетке", conflicts: [], written: [], credit: 0 };
       }
-      if (data.kind === "service-done" && liveJob.kind === "haul") {
+      if (data.kind === "service-done" && (liveJob.kind === "haul" || liveJob.kind === "bring")) {
         const dx = liveJob.destX ?? t.x;
         const dy = liveJob.destY ?? t.y;
         if (Math.max(Math.abs(data.pawn.x - dx), Math.abs(data.pawn.y - dy)) > 0 && data.early !== "arrive") {
           return { ok: false as const, hint: "не дошёл", conflicts: [], written: [], credit: 0 };
         }
+      }
+      if (data.kind === "service-done" && liveJob.kind === "bring") {
+        const need = liveJob.n ?? 1;
+        const it = liveJob.item;
+        const have = it ? ((data.pawn.body.inventory?.[it] ?? 0) as number) : 0;
+        if (!it || have < need) return { ok: false as const, hint: "нет в сумке", conflicts: [], written: [], credit: 0 };
       }
       const cargo = liveJob.cargo ?? (liveJob.item && (liveJob.n ?? 0) > 0 ? { [liveJob.item]: liveJob.n ?? 1 } : {});
       const execPos = { x: data.pawn.x, y: data.pawn.y };

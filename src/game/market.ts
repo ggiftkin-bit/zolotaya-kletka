@@ -25,7 +25,26 @@ export const SERVICE_LABEL: Record<ServiceKind, string> = {
   haul: "отвези",
   build: "построй",
   craft: "сделай",
+  bring: "привези",
 };
+
+export const BRING_N = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+export const BRING_GOODS: ItemId[] = [
+  "wood",
+  "stone",
+  "ore",
+  "food",
+  "fish",
+  "herb",
+  "clay",
+  "plank",
+  "coal",
+  "brick",
+  "grain",
+  "flour",
+  "bar",
+  "bread",
+];
 
 export function isItemId(v: string): v is ItemId {
   return (ITEMS as string[]).includes(v);
@@ -119,7 +138,7 @@ export function isCraftStation(tile: Tile): boolean {
 export function serviceJobOf(tile: Tile | null | undefined): ServiceJob | null {
   const j = tile?.service;
   if (!j) return null;
-  if (j.kind !== "watch" && j.kind !== "haul" && j.kind !== "build" && j.kind !== "craft") return null;
+  if (j.kind !== "watch" && j.kind !== "haul" && j.kind !== "build" && j.kind !== "craft" && j.kind !== "bring") return null;
   if (j.gold <= 0 || !j.by) return null;
   return j;
 }
@@ -139,6 +158,9 @@ export function serviceLine(job: ServiceJob, now = Date.now()): string {
   }
   if (job.kind === "haul" && job.item) {
     return `${SERVICE_LABEL.haul} ${ITEM_LABEL[job.item]}${job.n && job.n > 1 ? ` ×${job.n}` : ""} · ${goldTxt(job.gold)}${when}${who}`;
+  }
+  if (job.kind === "bring" && job.item) {
+    return `${SERVICE_LABEL.bring} ${ITEM_LABEL[job.item]}${job.n && job.n > 1 ? ` ×${job.n}` : ""} · ${goldTxt(job.gold)}${when}${who}`;
   }
   if (job.kind === "craft") {
     const def = CRAFTS.find((d) => d.id === job.craft);
@@ -264,6 +286,70 @@ export function planPostCraft(
   };
 }
 
+export function planPostBring(
+  tile: Tile,
+  mine: boolean,
+  purse: number,
+  item: ItemId,
+  n: number,
+  dest: Tile,
+  gold: number,
+): { ok: true; job: ServiceJob; gold: number } | { ok: false; hint: string } {
+  if (!mine) return { ok: false, hint: "Свою услугу клади у себя." };
+  if (!isGateTile(tile) && tile.building !== "stall") return { ok: false, hint: "Привези — у калитки или прилавка." };
+  if (serviceJobOf(tile)) return { ok: false, hint: "Сначала сними услугу." };
+  if (!isItemId(item)) return { ok: false, hint: "Этого не просят." };
+  const count = Math.floor(n);
+  if (count < 1 || count > 8) return { ok: false, hint: "Число: 1–8." };
+  if (!canBringDest(tile, dest, dest.owner === "you" || (!dest.owner && !!dest.owned))) return { ok: false, hint: "Куда: свой двор, склад или калитка." };
+  const pay = payGold(purse, gold);
+  if (!pay.ok) return pay;
+  return {
+    ok: true,
+    gold: pay.gold,
+    job: {
+      kind: "bring",
+      gold: pay.pay,
+      until: 0,
+      by: "you",
+      item,
+      n: count,
+      destX: dest.x,
+      destY: dest.y,
+    },
+  };
+}
+
+export function canBringDest(hang: Tile, dest: Tile, destMine: boolean): boolean {
+  if (!destMine || dest.burned) return false;
+  if (dest.x === hang.x && dest.y === hang.y) return false;
+  if (dest.building === "board") return false;
+  if (dest.building === "shed") return true;
+  if (isGateTile(dest)) return true;
+  if (dest.plot) return true;
+  return false;
+}
+
+export function bringDests(world: World, hang: Tile, owner = "you"): Tile[] {
+  const mine = (t: Tile) => t.owner === owner || (!t.owner && !!t.owned && owner === "you");
+  const ranked: Tile[] = [];
+  const rest: Tile[] = [];
+  for (const t of world.tiles) {
+    if (!canBringDest(hang, t, mine(t))) continue;
+    if (t.building === "shed" || isGateTile(t) || t.building === "house" || t.building === "shack") ranked.push(t);
+    else rest.push(t);
+  }
+  return ranked.length ? ranked : rest.slice(0, 8);
+}
+
+export function bringDestLine(dest: Tile): string {
+  if (dest.building === "shed") return "склад";
+  if (isGateTile(dest)) return "калитка";
+  if (dest.building === "house" || dest.building === "shack") return BUILDING_LABEL[dest.building];
+  if (dest.plot) return "двор";
+  return `${dest.x},${dest.y}`;
+}
+
 export function planPostBuild(
   tile: Tile,
   mine: boolean,
@@ -315,6 +401,7 @@ export function planTakeService(
   py: number,
   busy: Character["busy"],
   now: number,
+  inv?: Inventory,
 ): { ok: true; job: ServiceJob } | { ok: false; hint: string } {
   const job = serviceJobOf(tile);
   if (!job) return { ok: false, hint: "Нет услуги." };
@@ -322,6 +409,11 @@ export function planTakeService(
   if (job.take) return { ok: false, hint: "Уже взяли." };
   if (chebyshev(px, py, tile.x, tile.y) > 1) return { ok: false, hint: "Подойди." };
   if (busy && busy.until > Date.now()) return { ok: false, hint: "Сначала доделай своё дело." };
+  if (job.kind === "bring") {
+    const need = job.n ?? 1;
+    const it = job.item;
+    if (!it || (inv?.[it] ?? 0) < need) return { ok: false, hint: "Нет в сумке." };
+  }
   return { ok: true, job: stampTake(job, "you", now) };
 }
 
@@ -335,11 +427,21 @@ export function stampTake(job: ServiceJob, who: string, now: number): ServiceJob
   return next;
 }
 
-/** Busy на столе. Постой — until с «Взять». Отвези — пока не дошёл. */
+/** Busy на столе. Постой — until с «Взять». Отвези / привези — пока не дошёл. */
 export function serviceBusyUntil(job: ServiceJob, now: number): number {
   if (job.kind === "watch") return Math.max(job.until, now + 1000);
-  if (job.kind === "haul") return now + HAUL_BUSY_MS;
+  if (job.kind === "haul" || job.kind === "bring") return now + HAUL_BUSY_MS;
   return job.until > now ? job.until : now;
+}
+
+/** Вывеска на другой клетке, чем цель (привези). */
+export function tileOfTakenJob(world: World, destX: number, destY: number, who: string): Tile | null {
+  for (const t of world.tiles) {
+    const job = serviceJobOf(t);
+    if (!job || job.take !== who) continue;
+    if ((job.destX ?? t.x) === destX && (job.destY ?? t.y) === destY) return t;
+  }
+  return null;
 }
 
 export function planCancelService(
@@ -367,6 +469,7 @@ export type ServiceSettle =
     };
 
 function jobCargo(job: ServiceJob): Partial<Record<ItemId, number>> {
+  if (job.kind === "bring") return {};
   if (job.cargo) return { ...job.cargo };
   if (job.item && (job.n ?? 0) > 0) return { [job.item]: job.n ?? 1 };
   return {};
@@ -396,13 +499,13 @@ export function settleService(
     return { wait: true };
   }
 
-  if (early === "arrive" && job.kind === "haul" && atCell(exec, destX, destY, 0)) {
+  if (early === "arrive" && (job.kind === "haul" || job.kind === "bring") && atCell(exec, destX, destY, 0)) {
     return {
       wait: false,
       ok: true,
       payTo: job.take,
-      cargo,
-      toPosterBag: posterHere,
+      cargo: job.kind === "bring" ? {} : cargo,
+      toPosterBag: job.kind === "bring" ? false : posterHere,
       out: job.item ? { item: job.item, n: job.n ?? 1 } : undefined,
     };
   }

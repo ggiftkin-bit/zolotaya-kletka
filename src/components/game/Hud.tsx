@@ -270,7 +270,7 @@ export function Hud() {
             : still
               ? `Сутки без хода · ${formatWait(g.character.stillUntil - now)}`
               : busy
-                ? busy.kind === "haul"
+                ? busy.kind === "haul" || busy.kind === "bring"
                   ? BUSY_LABEL[busy.kind]
                   : `${BUSY_LABEL[busy.kind]} ещё ${formatWait(busy.until - now)}`
                 : g.travel
@@ -340,7 +340,7 @@ export function Hud() {
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 p-2 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
           <div className="pointer-events-auto mx-auto max-w-lg">
             {busy && !bag && !help && !food && (
-              (busy.kind === "watch" || busy.kind === "haul" || busy.service) ? (
+              (busy.kind === "watch" || busy.kind === "haul" || busy.kind === "bring" || busy.service) ? (
               <div className="mb-1.5 grid grid-cols-1 gap-1">
                 <button
                   type="button"

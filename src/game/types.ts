@@ -29,7 +29,8 @@ export type BusyKind =
   | "lock"
   | "burn"
   | "watch"
-  | "haul";
+  | "haul"
+  | "bring";
 
 export type Busy = {
   kind: BusyKind;
@@ -169,7 +170,7 @@ export type StallOrder = {
   gold: number;
 };
 
-export type ServiceKind = "watch" | "haul" | "build" | "craft";
+export type ServiceKind = "watch" | "haul" | "build" | "craft" | "bring";
 
 /** Контракт двух почт. Золото и сырьё в эскро клетки, не в воздухе. */
 export type ServiceJob = {
