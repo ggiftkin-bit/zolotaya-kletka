@@ -54,7 +54,7 @@ export function rollCaught(world: World, tile: Tile, thief: Character, night: bo
 export function lootFrom(tile: Tile): { item: ItemId; n: number } | null {
   if (!tile.chestLock) {
     const chest = tile.chest;
-    const keys: ItemId[] = ["food", "wood", "herb", "fish", "stone", "crystal"];
+    const keys: ItemId[] = ["food", "wood", "herb", "fish", "stone", "brick", "crystal"];
     for (const k of keys) {
       if ((chest[k] ?? 0) > 0) {
         const n = Math.min(chest[k], 1 + Math.floor(Math.random() * 3));
@@ -63,7 +63,7 @@ export function lootFrom(tile: Tile): { item: ItemId; n: number } | null {
     }
   }
   const pile = asPile(tile.pile);
-  const first = (["food", "wood", "herb", "fish", "stone", "crystal"] as ItemId[]).find((k) => (pile[k] ?? 0) > 0);
+  const first = (["food", "wood", "herb", "fish", "stone", "brick", "crystal"] as ItemId[]).find((k) => (pile[k] ?? 0) > 0);
   if (first) {
     const n = Math.min(pile[first] ?? 0, 1 + Math.floor(Math.random() * 2));
     return { item: first, n };

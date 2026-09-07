@@ -135,6 +135,7 @@ export const SELL_GOLD: Record<ItemId, number> = {
   bar_shield: 5,
   wadded: 2,
   helm: 5,
+  brick: 1,
 };
 
 /** Покупка в лавке. Не ×2 к сдаче. */
@@ -168,6 +169,7 @@ export const BUY_GOLD: Record<ItemId, number> = {
   bar_shield: 16,
   wadded: 8,
   helm: 16,
+  brick: 3,
 };
 
 export function goldTxt(n: number): string {
@@ -280,6 +282,7 @@ export function makeTrader(week: number): Trader {
   demand.tonic = 3;
   demand.wheel = 4;
   demand.lock = 3;
+  demand.brick = 4;
   const wares = zInv();
   wares.food = 8;
   wares.fish = 4;

@@ -145,7 +145,8 @@ export type ItemId =
   | "board_shield"
   | "bar_shield"
   | "wadded"
-  | "helm";
+  | "helm"
+  | "brick";
 
 export type WearKind = "axe" | "pick" | "spear" | "shovel" | "club" | "knife";
 
