@@ -21,6 +21,7 @@ import { rememberLiveFoe } from "./fight";
 import { makeJobs, makeTrader } from "./economy";
 import { fillStock } from "./office";
 import { TICKS_PER_DAY } from "./constants";
+import { settleOldCounts } from "./mount";
 import { loadGame, saveGame, type SlimTile } from "./save";
 import type { Character, GameState, GiftId, ItemId, OtherPawn } from "./types";
 import { spawnPoint } from "./worldgen";
@@ -184,23 +185,35 @@ export async function openBookFromServer(): Promise<boolean> {
     };
     if (shot.pawn) {
       let character = unpackPawn(shot.pawn);
+      const mig = settleOldCounts(world, character);
+      character = mig.character;
       const days = Math.floor(shot.clock.clock / TICKS_PER_DAY) - Math.floor(prev.clock / TICKS_PER_DAY);
       if (days > 0 && character.wanted > 0) {
         character = { ...character, wanted: Math.max(0, character.wanted - days) };
       }
       patch.character = character;
       patch.started = true;
+      if (mig.cells.length) {
+        store.set(patch);
+        void commitHarm("wagon", mig.cells, character);
+      }
     } else if (pocket?.started && pocket.character) {
       // Карман даёт только тело, не пни.
-      const character = {
+      let character = {
         ...pocket.character,
         x: pocket.character.x,
         y: pocket.character.y,
         px: pocket.character.x,
         py: pocket.character.y,
       };
+      const mig = settleOldCounts(world, character);
+      character = mig.character;
       patch.character = character;
       patch.started = true;
+      if (mig.cells.length) {
+        store.set(patch);
+        void commitHarm("wagon", mig.cells, character);
+      }
     }
     store.set(patch);
     const next = store.get();

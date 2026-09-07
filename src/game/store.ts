@@ -40,7 +40,7 @@ import { canDigReason, fillNeedLine, fillPay, giveOrPile, takePaid } from "./pit
 import { asPile, dumpAllOn, pileAdd, pileEmpty, pileSet, pullNeed, applyNeedPull } from "./pile";
 import { canCrossDiag, MAX_PLOT, clearYard, normRect, plotBounds, putGate, setYardGateLock, stampYard, upgradeYard, yardHasGate, yardWoodCost } from "./fence";
 import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, NO_STRENGTH, SKIP_GOLD, deathFee, energyPeriod, formatWait, splitBodyWater } from "./pace";
-import { applyCatch, harmCells, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, markCrime, ownerOf, plotCells, punish, rollCaught, stealChance, takeLoot, unlockKind, fenceBurnCells } from "./crime";
+import { applyCatch, applyDriveFail, DRIVE_LABEL, harmCells, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, markCrime, ownerOf, planDriveOff, plotCells, punish, rollCaught, stealChance, takeLoot, unlockKind, fenceBurnCells } from "./crime";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
 import { clearGame, loadGame, saveGame } from "./save";
 import { stampVillage, leaveVillage, hamletTitle, hasOwnYard, isOutsideYard, setVillageLaw, planFoundOwners, canJoinVillage, namesTouchingYard, livingOwnersOf, villageOf, snapVillage, villageChangedCells, atNameSpot, normVillageName, canPlaceBoard } from "./pact";
@@ -48,6 +48,7 @@ import { cargoWeight, loadRatio, pailKg, stepEnergy, wornKg } from "./travel";
 import { atBench, CRAFTS, EAT_ORDER, EAT_SAT, PROF_BLURB, type CraftKind } from "./craft";
 import { markDepleted, tickGrow, REGROW_WAIT } from "./grow";
 import { fillStock, planBuyFromStock, planDonate, planGift, planSellToStock, seedStock } from "./office";
+import { canParkOn, claimMount, mountAt, MOUNT_LABEL, ownNearby, ownsMount, parkNear, ridingHorse, ridingKind, settleOldCounts, stripRidden, takeOwnMount, type MountKind } from "./mount";
 import { lootOn, canOpenPlace } from "./places";
 import { cancelNotice, ensureNotify, maybePingHidden, scheduleNotice } from "./notify";
 import {
@@ -528,6 +529,9 @@ type Actions = {
   hitchWagon: () => void;
   unhitchWagon: () => void;
   stealWagon: () => void;
+  takeMount: (kind: "cart" | "horse") => void;
+  leaveMount: (kind: "cart" | "horse") => void;
+  stealMount: (kind: "cart" | "horse" | "wagon") => void;
   craftGear: (item: "rope" | "bucket" | "spear" | "rod") => void;
   feedHere: () => void;
   upgradeFence: (to: "palisade" | "wall") => void;
@@ -685,6 +689,9 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         chest: { ...emptyChest(), ...t.chest },
         pit: !!t.pit,
         bank: !!t.bank,
+        wagon: t.wagon ?? "",
+        cart: t.cart ?? "",
+        horse: t.horse ?? "",
         pile: (() => {
           const p = asPile(t.pile);
           return pileEmpty(p) ? null : p;
@@ -702,9 +709,10 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       );
       migrateStations(world);
       ensureHamlets(world);
+      const mig = settleOldCounts(world, character);
       set({
         ...saved,
-        character,
+        character: mig.character,
         world,
         jobs: saved.jobs ?? [],
         trader: saved.trader ?? makeTrader(saved.week ?? 1),
@@ -728,6 +736,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         dummies: makeHamletDummies(world, saved.dummies),
         selfId: get().selfId,
       });
+      if (mig.cells.length) queueMicrotask(() => sealHarm("wagon", mig.cells));
       queueMicrotask(() => useGame.getState().catchUp());
     }
   },
@@ -918,47 +927,27 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       hitchWagon();
       return;
     }
-    if (t === "horse" && s.character.horses < 1) {
-      speak(
-        "Лошадь не с неба. Поймай табун верёвкой, купи в лавке или держи в конюшне.",
-        s.character.x,
-        s.character.y,
-        "нет лошади",
-        "bad",
-      );
+    if (t === "walk") {
+      const riding = ridingKind(s.character);
+      if (riding === "cart" || riding === "horse") {
+        leaveMount(riding);
+        return;
+      }
+    }
+    if (t === "horse") {
+      takeMount("horse");
       return;
     }
-    if (t === "cart" && (s.character.carts ?? 0) < 1) {
-      speak(
-        `Тачку продаёт лавка на тракте за ${goldTxt(CART_GOLD)} — или сколоти дома из ${CART_WOOD} дерева. Груз больше, шаг как пешком.`,
-        s.character.x,
-        s.character.y,
-        "нет тачки",
-        "bad",
-      );
+    if (t === "cart") {
+      takeMount("cart");
       return;
     }
     set({
       character: { ...s.character, transport: t, wagon: false },
       preview: null,
       travel: null,
-      log: pushLog(
-        s.log,
-        t === "horse"
-          ? "Сел на лошадь. В 2½ раза быстрее пешего, ноша почти как пешком."
-          : t === "cart"
-            ? `Тачка. Ноша ${CAPACITY.cart} кг, шаг как пешком.`
-            : "Пешком.",
-      ),
-      hint: {
-        text:
-          t === "horse"
-            ? "Лошадь. В 2½ раза быстрее."
-            : t === "cart"
-              ? `Тачка. Ноша ${CAPACITY.cart} кг, шаг как пешком.`
-              : "Пешком.",
-        tone: "ok",
-      },
+      log: pushLog(s.log, "Пешком."),
+      hint: { text: "Пешком.", tone: "ok" },
     });
   },
 
@@ -1098,8 +1087,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     const inv = { ...s.character.inventory };
     let gold = s.character.gold;
     let transport = s.character.transport;
-    let horses = s.character.horses ?? 0;
-    let carts = s.character.carts ?? 0;
+    let wagon = s.character.wagon;
     let line = "";
     if (kind === "wood") {
       inv.wood += 20;
@@ -1111,21 +1099,21 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       gold += 80;
       line = `+${goldTxt(80)} (испытание).`;
     } else if (kind === "cart") {
-      carts = Math.max(1, carts);
       transport = "cart";
+      wagon = false;
       line = "Тачка выдана.";
     } else if (kind === "lock") {
       inv.lock = (inv.lock ?? 0) + 2;
       gold = Math.max(gold, 40);
       line = "Два замка (испытание).";
     } else if (kind === "wagon") {
-      horses = Math.max(1, horses);
       gold = Math.max(gold, 40);
       transport = "wagon";
+      wagon = true;
       line = "Телега за лошадью (испытание).";
     } else {
       transport = "horse";
-      horses += 1;
+      wagon = false;
       gold = Math.max(gold, 40);
       line = "Лошадь выдана (испытание).";
     }
@@ -1135,9 +1123,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         inventory: inv,
         gold,
         transport,
-        horses,
-        carts,
-        wagon: kind === "wagon" ? true : kind === "horse" || kind === "cart" ? false : s.character.wagon,
+        wagon,
       },
       log: pushLog(s.log, line),
     });
@@ -1205,7 +1191,10 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   craftWagon: () => craftWagon(),
   hitchWagon: () => hitchWagon(),
   unhitchWagon: () => unhitchWagon(),
-  stealWagon: () => stealWagon(),
+  stealWagon: () => stealMount("wagon"),
+  takeMount: (kind) => takeMount(kind),
+  leaveMount: (kind) => leaveMount(kind),
+  stealMount: (kind) => stealMount(kind),
   craftGear: (item) => craftGear(item),
   feedHere: () => feedHere(),
   upgradeFence: (to) => upgradeFenceHere(to),
@@ -1549,15 +1538,10 @@ function worldTick() {
     if (roof && c.satiety > 40) c.hp = Math.min(100, c.hp + 3);
     else if (c.satiety > 40 && c.warmth > 40 && c.water > 40) c.hp = Math.min(100, c.hp + 1);
   }
-  if (c.horses < 1 && (c.transport === "horse" || c.transport === "wagon")) {
-    if (c.wagon || c.transport === "wagon") parkWagonNear(s.world, c.x, c.y, "you");
-    c.transport = "walk";
-    c.wagon = false;
-  }
-  if ((c.carts ?? 0) < 1 && c.transport === "cart") c.transport = "walk";
   if (c.hand && c.inventory[c.hand] <= 0) c.hand = null;
 
   let dumped: { x: number; y: number } | null = null;
+  let parkedMount: Array<{ x: number; y: number }> = [];
   if (c.hp <= 0 && c.life === "alive") {
     dumped = dumpCargo(s.world, c.x, c.y, c.inventory, 0, [c.body, c.shield, c.helm]);
     c.inventory = emptyTheInv(c.inventory);
@@ -1565,11 +1549,9 @@ function worldTick() {
     c.shield = null;
     c.helm = null;
     c.hand = null;
-    if (c.wagon || c.transport === "wagon") {
-      parkWagonNear(s.world, c.x, c.y, "you");
-    }
-    c.wagon = false;
-    c.transport = "walk";
+    const stripped = stripRidden(s.world, c, c.x, c.y);
+    c = stripped.c;
+    parkedMount = stripped.cells;
     c.life = "down";
     c.downAt = Date.now();
     c.hp = 0;
@@ -1640,6 +1622,7 @@ function worldTick() {
       world: { ...s.world, tiles: s.world.tiles },
     });
     if (dumped) sealHarm("pile", [dumped]);
+    if (parkedMount.length) sealHarm("wagon", parkedMount);
     return;
   }
 
@@ -1667,6 +1650,7 @@ function worldTick() {
     });
     useGame.getState().persist();
     if (dumped) sealHarm("pile", [dumped]);
+    if (parkedMount.length) sealHarm("wagon", parkedMount);
     return;
   }
 
@@ -1686,6 +1670,7 @@ function worldTick() {
     tickAt: Date.now(),
   });
   if (dumped) sealHarm("pile", [dumped]);
+  if (parkedMount.length) sealHarm("wagon", parkedMount);
 }
 
 function gatherHere() {
@@ -2689,11 +2674,8 @@ function stealHere() {
   if (caught) {
     const hit = punish(c, s.world, tile, `кража у ${who}`);
     c = hit.c;
-    let parkedCell: { x: number; y: number } | null = null;
-    if (c.wagon || c.transport === "wagon") {
-      parkedCell = parkWagonNear(s.world, s.character.x, s.character.y, "you");
-      c = { ...c, wagon: false, transport: c.horses > 0 ? "horse" : "walk" };
-    }
+    const stripped = stripRidden(s.world, c, s.character.x, s.character.y);
+    c = stripped.c;
     if (hit.jailed) {
       cancelNotice("walk");
       viewPos.x = c.x;
@@ -2712,7 +2694,7 @@ function stealHere() {
       log: pushLog(s.log, `Поймали за кражу. ${why} Успел унести ${loot.n} ${ITEM_LABEL[loot.item]}.`),
       floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: hit.jailed ? "яма" : "видели", tone: "bad" as const }].slice(-10),
     });
-    sealHarm("steal", harmCells(tile, parkedCell), prior);
+    sealHarm("steal", harmCells(tile, ...stripped.cells), prior);
     return;
   }
   useGame.setState({
@@ -2951,7 +2933,7 @@ function catchHorse() {
   if (busyBlock()) return;
   const tile = hereTile();
   if (!tile?.herd || tile.herd.kind !== "horse" || !tile.herd.wild || tile.herd.count <= 0) {
-    if ((s.character.horses ?? 0) > 0) {
+    if (ownsMount(s.world, s.character, "horse")) {
       speak("Здесь уже никого. Конь при тебе.", s.character.x, s.character.y, "пусто", "ok", { theme: "horse" });
     } else {
       speak("Диких лошадей нет. Ищи табун на равнине.", s.character.x, s.character.y, "нет табуна", "bad");
@@ -3049,6 +3031,7 @@ function resolveBusy() {
   else if (b.kind === "fill") resolveFill(s, c0, tile);
   else if (b.kind === "lock") resolveLock(s, c0, tile, b.lock);
   else if (b.kind === "burn") resolveBurn(s, c0, tile);
+  else if (b.kind === "drive") resolveDrive(s, c0, tile, b.mount);
   else if (b.kind === "watch" || b.kind === "haul" || b.kind === "bring") finishService("done");
   else useGame.setState({ character: c0 });
 }
@@ -3266,8 +3249,8 @@ function resolveCatch(s: GameState, c0: Character, tile: NonNullable<ReturnType<
   if (!tile.herd || tile.herd.kind !== "horse" || !tile.herd.wild || tile.herd.count <= 0) {
     useGame.setState({
       character: c0,
-      log: pushLog(s.log, (c0.horses ?? 0) > 0 ? "Здесь уже никого. Конь при тебе." : "Табуна уже нет."),
-      hint: { text: (c0.horses ?? 0) > 0 ? "Здесь уже никого. Конь при тебе." : "Табуна уже нет.", tone: "ok", theme: "horse" },
+      log: pushLog(s.log, ownsMount(s.world, c0, "horse") ? "Здесь уже никого. Конь при тебе." : "Табуна уже нет."),
+      hint: { text: ownsMount(s.world, c0, "horse") ? "Здесь уже никого. Конь при тебе." : "Табуна уже нет.", tone: "ok", theme: "horse" },
     });
     return;
   }
@@ -3285,14 +3268,16 @@ function resolveCatch(s: GameState, c0: Character, tile: NonNullable<ReturnType<
   }
   tile.herd.count -= 1;
   if (tile.herd.count <= 0) tile.herd = null;
-  const c = bumpSkill({ ...c0, horses: c0.horses + 1 }, "agro", 0.2);
+  const parked = parkNear(s.world, tile.x, tile.y, "horse", "you");
+  const c = bumpSkill(c0, "agro", 0.2);
   useGame.setState({
     character: c,
     world: { ...s.world, tiles: s.world.tiles },
     hint: null,
-    log: pushLog(s.log, "Поймал лошадь. Седлай в сумке — транспорт «лошадь», не второй лов."),
+    log: pushLog(s.log, parked ? "Поймал лошадь. Стоит на клетке. Сядь — не в сумке." : "Поймал, но некуда ставить. Отойди и поймай снова."),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "+лошадь", tone: "ok" as const }].slice(-10),
   });
+  if (parked) sealHarm("wagon", harmCells(parked, tile), c0);
   noteDeed("catch");
   useGame.getState().persist();
 }
@@ -3351,6 +3336,21 @@ function cancelBusy() {
     noteDeed("hunt");
     useGame.getState().persist();
     return;
+  }
+  if (b.kind === "drive" && tile && b.mount) {
+    const who = tile[b.mount];
+    if (who && who !== "you" && hasLaw(s.world, tile)) {
+      const c = { ...applyDriveFail(s.character, tile), busy: null };
+      useGame.setState({
+        character: c,
+        world: { ...s.world, tiles: s.world.tiles },
+        log: pushLog(s.log, "Бросил увод. След на дворе — как кража кучи."),
+        floaters: [...s.floaters, { id: ++floaterSeq, x: s.character.x, y: s.character.y, text: "след", tone: "bad" as const }].slice(-10),
+      });
+      sealHarm("steal", harmCells(tile), s.character);
+      useGame.getState().persist();
+      return;
+    }
   }
   useGame.setState({
     character: { ...s.character, busy: null },
@@ -3480,11 +3480,8 @@ function resolveLock(s: GameState, c0: Character, tile: NonNullable<ReturnType<t
   if (caught) {
     const hit = punish(c, s.world, tile, `взлом у ${who}`);
     c = hit.c;
-    let parked: { x: number; y: number } | null = null;
-    if (c.wagon || c.transport === "wagon") {
-      parked = parkWagonNear(s.world, s.character.x, s.character.y, "you");
-      c = { ...c, wagon: false, transport: c.horses > 0 ? "horse" : "walk" };
-    }
+    const stripped = stripRidden(s.world, c, s.character.x, s.character.y);
+    c = stripped.c;
     if (hit.jailed) {
       cancelNotice("walk");
       viewPos.x = c.x;
@@ -3507,7 +3504,7 @@ function resolveLock(s: GameState, c0: Character, tile: NonNullable<ReturnType<t
       ),
       floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: hit.jailed ? "яма" : "видели", tone: "bad" as const }].slice(-10),
     });
-    sealHarm("lock", harmCells(tile, parked), prior);
+    sealHarm("lock", harmCells(tile, ...stripped.cells), prior);
     return;
   }
   const cells = unlockKind(s.world, tile, lock);
@@ -3887,7 +3884,7 @@ function buyCart() {
     speak("Тачку продаёт лавка на тракте.", s.character.x, s.character.y, "нет лавки", "bad");
     return;
   }
-  if ((s.character.carts ?? 0) > 0) {
+  if (ownsMount(s.world, s.character, "cart")) {
     speak("Тачка уже есть.", tile.x, tile.y, "есть", "ok");
     return;
   }
@@ -3895,23 +3892,28 @@ function buyCart() {
     speak(`Тачка ${goldTxt(CART_GOLD)}. Сдай дерево в лавку или сколоти дома.`, tile.x, tile.y, "мало золота", "bad");
     return;
   }
+  const parked = parkNear(s.world, tile.x, tile.y, "cart", "you");
+  if (!parked) {
+    speak("Некуда ставить тачку.", tile.x, tile.y, "нет места", "bad");
+    return;
+  }
   useGame.setState({
     character: {
       ...s.character,
       gold: s.character.gold - CART_GOLD,
-      carts: 1,
-      transport: "cart",
     },
+    world: { ...s.world, tiles: s.world.tiles },
     log: pushLog(
       s.log,
-      `Купил тачку за ${goldTxt(CART_GOLD)}. Ноша ${CAPACITY.cart} кг, шаг как пешком.`,
+      `Купил тачку за ${goldTxt(CART_GOLD)}. Стоит на клетке — не в сумке. Возьми, когда пойдёшь.`,
     ),
-    hint: { text: `Тачка. Ноша ${CAPACITY.cart} кг, шаг как пешком.`, tone: "gold" },
+    hint: { text: `Тачка на клетке. Ноша ${CAPACITY.cart} кг.`, tone: "gold" },
     floaters: [
       ...s.floaters,
       { id: ++floaterSeq, x: tile.x, y: tile.y, text: `−${goldTxt(CART_GOLD)}`, tone: "gold" as const },
     ].slice(-10),
   });
+  sealHarm("wagon", harmCells(parked, tile), s.character);
 }
 
 function sellCart() {
@@ -3921,14 +3923,20 @@ function sellCart() {
     speak("Продают в лавке на тракте.", s.character.x, s.character.y, "нет лавки", "bad");
     return;
   }
-  if ((s.character.carts ?? 0) < 1) {
-    speak("Нет тачки.", tile.x, tile.y, "нет", "bad");
+  const riding = s.character.transport === "cart";
+  const hereCart = tile.cart === "you";
+  const near = ownNearby(s.world, tile.x, tile.y, "cart");
+  if (!riding && !hereCart && !near) {
+    speak("Нет тачки у лавки. Привези — оставь на клетке или стой с ней.", tile.x, tile.y, "нет", "bad");
     return;
   }
+  if (hereCart) tile.cart = "";
+  else if (!riding && near) takeOwnMount(near, "cart");
   const pay = Math.floor(CART_GOLD / 2);
-  const transport = s.character.transport === "cart" ? "walk" : s.character.transport;
+  const transport = riding ? "walk" : s.character.transport;
   useGame.setState({
-    character: { ...s.character, carts: 0, gold: s.character.gold + pay, transport },
+    character: { ...s.character, gold: s.character.gold + pay, transport, wagon: riding ? false : s.character.wagon },
+    world: { ...s.world, tiles: s.world.tiles },
     log: pushLog(s.log, `Продал тачку. +${goldTxt(pay)}.`),
     hint: { text: `Продал тачку. +${goldTxt(pay)}.`, tone: "gold" },
     floaters: [
@@ -3936,6 +3944,7 @@ function sellCart() {
       { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${goldTxt(pay)}`, tone: "gold" as const },
     ].slice(-10),
   });
+  sealHarm("wagon", harmCells(tile, near), s.character);
 }
 
 function craftCart() {
@@ -3945,7 +3954,7 @@ function craftCart() {
     speak("Тачку сколачивают в шалаше, доме или на верстаке.", s.character.x, s.character.y, "не здесь", "bad");
     return;
   }
-  if ((s.character.carts ?? 0) > 0) {
+  if (ownsMount(s.world, s.character, "cart")) {
     speak("Тачка уже есть.", tile.x, tile.y, "есть", "ok");
     return;
   }
@@ -3953,35 +3962,45 @@ function craftCart() {
     speak(`Нужно ${CART_WOOD} ${ITEM_LABEL.wood}.`, tile.x, tile.y, "мало дерева", "bad");
     return;
   }
+  const parked = parkNear(s.world, tile.x, tile.y, "cart", "you");
+  if (!parked) {
+    speak("Некуда ставить тачку.", tile.x, tile.y, "нет места", "bad");
+    return;
+  }
   const inv = { ...s.character.inventory, wood: s.character.inventory.wood - CART_WOOD };
-  let c = bumpSkill({ ...s.character, inventory: inv, carts: 1, transport: "cart" }, "craft", 0.1);
+  let c = bumpSkill({ ...s.character, inventory: inv }, "craft", 0.1);
   useGame.setState({
     character: c,
-    log: pushLog(s.log, `Сколотил тачку. Ноша ${CAPACITY.cart} кг, шаг как пешком.`),
-    hint: { text: `Тачка. Ноша ${CAPACITY.cart} кг, шаг как пешком.`, tone: "ok" },
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, `Сколотил тачку. Стоит на клетке. Ноша ${CAPACITY.cart} кг, шаг как пешком.`),
+    hint: { text: `Тачка на клетке. Ноша ${CAPACITY.cart} кг.`, tone: "ok" },
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "тачка", tone: "ok" as const }].slice(-10),
   });
+  sealHarm("wagon", harmCells(parked, tile), s.character);
 }
 
 function parkWagonNear(world: GameState["world"], x: number, y: number, owner: string): { x: number; y: number } | null {
-  const tryTile = (tx: number, ty: number) => {
-    const t = tileAt(world, tx, ty);
-    if (!t) return false;
-    if (t.biome === "river" || t.building === "moat") return false;
-    if (t.wagon) return false;
-    t.wagon = owner || "you";
-    return true;
-  };
-  if (tryTile(x, y)) return { x, y };
-  for (let r = 1; r <= 3; r++) {
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-        if (tryTile(x + dx, y + dy)) return { x: x + dx, y: y + dy };
-      }
-    }
+  return parkNear(world, x, y, "wagon", owner);
+}
+
+function mountTileOf(s: GameState, kind: MountKind) {
+  if (s.inspect) {
+    const t = tileAt(s.world, s.inspect.x, s.inspect.y);
+    if (t?.[kind]) return t;
   }
-  return null;
+  return mountAt(s.world, s.character.x, s.character.y, kind);
+}
+
+function horseReady(s: GameState): boolean {
+  return ridingHorse(s.character) || !!ownNearby(s.world, s.character.x, s.character.y, "horse");
+}
+
+function takeReadyHorse(s: GameState): { x: number; y: number } | null {
+  if (ridingHorse(s.character)) return null;
+  const t = ownNearby(s.world, s.character.x, s.character.y, "horse");
+  if (!t) return null;
+  takeOwnMount(t, "horse");
+  return t;
 }
 
 function wagonTileOf(s: GameState) {
@@ -4015,7 +4034,11 @@ function hitchWagon() {
     speak("Телега уже за тобой.", s.character.x, s.character.y, "уже", "ok");
     return;
   }
-  if (s.character.horses < 1) {
+  if (s.character.transport === "cart") {
+    speak("Оставь тачку — телегу ведёт лошадь.", s.character.x, s.character.y, "тачка", "bad");
+    return;
+  }
+  if (!horseReady(s)) {
     speak("Телегу ведёт лошадь. Купи или поймай — пешком не утащишь, в карман не спрячешь.", s.character.x, s.character.y, "нет лошади", "bad");
     return;
   }
@@ -4030,9 +4053,10 @@ function hitchWagon() {
     return;
   }
   if (tile.wagon !== "you") {
-    stealWagon();
+    stealMount("wagon");
     return;
   }
+  const horseCell = takeReadyHorse(s);
   tile.wagon = "";
   useGame.setState({
     character: { ...s.character, wagon: true, transport: "wagon", resting: false },
@@ -4043,7 +4067,7 @@ function hitchWagon() {
     hint: { text: `Телега. ${CAPACITY.wagon} кг. Не в сумке — отцепишь, останется на клетке.`, tone: "ok" },
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "зацепил", tone: "ok" as const }].slice(-10),
   });
-  sealHarm("wagon", harmCells(tile), s.character);
+  sealHarm("wagon", harmCells(tile, horseCell), s.character);
 }
 
 function unhitchWagon() {
@@ -4068,7 +4092,7 @@ function unhitchWagon() {
   }
   const yard = !!(tile.plot && (tile.owner === "you" || tile.owned));
   useGame.setState({
-    character: { ...s.character, wagon: false, transport: s.character.horses > 0 ? "horse" : "walk" },
+    character: { ...s.character, wagon: false, transport: "horse" },
     world: { ...s.world, tiles: s.world.tiles },
     travel: null,
     preview: null,
@@ -4087,7 +4111,105 @@ function unhitchWagon() {
   sealHarm("wagon", harmCells(ok, tile), s.character);
 }
 
-function stealWagon() {
+function takeMount(kind: "cart" | "horse") {
+  const s = useGame.getState();
+  const hold = actHeld(s.character);
+  if (hold) {
+    speak(hold, s.character.x, s.character.y, "нельзя", "bad");
+    return;
+  }
+  if (s.travel) {
+    speak("Сначала дойди.", s.character.x, s.character.y, "в пути", "bad");
+    return;
+  }
+  if (busyBlock()) return;
+  const riding = ridingKind(s.character);
+  if (riding === kind) {
+    speak(kind === "horse" ? "Уже на лошади." : "Тачка уже с тобой.", s.character.x, s.character.y, "уже", "ok");
+    return;
+  }
+  if (riding === "wagon") {
+    speak("Сначала отцепи телегу.", s.character.x, s.character.y, "отцепи", "bad");
+    return;
+  }
+  const tile = ownNearby(s.world, s.character.x, s.character.y, kind);
+  if (!tile) {
+    const foreign = mountAt(s.world, s.character.x, s.character.y, kind);
+    if (foreign && foreign[kind] && foreign[kind] !== "you") {
+      speak(`Чужую ${MOUNT_LABEL[kind]} уводят с клетки, не из сумки.`, foreign.x, foreign.y, "увести", "bad");
+      return;
+    }
+    speak(
+      kind === "horse"
+        ? "Лошадь не с неба. Поймай табун верёвкой, купи в лавке — стоит на клетке."
+        : `Тачку продаёт лавка на тракте за ${goldTxt(CART_GOLD)} — или сколоти дома из ${CART_WOOD} дерева. Стоит на клетке.`,
+      s.character.x,
+      s.character.y,
+      kind === "horse" ? "нет лошади" : "нет тачки",
+      "bad",
+    );
+    return;
+  }
+  const cells: Array<{ x: number; y: number }> = [tile];
+  if (riding === "cart" || riding === "horse") {
+    const parked = parkNear(s.world, s.character.x, s.character.y, riding, "you");
+    if (!parked) {
+      speak("Некуда ставить то, что сейчас с тобой.", s.character.x, s.character.y, "нет места", "bad");
+      return;
+    }
+    cells.push(parked);
+  }
+  takeOwnMount(tile, kind);
+  useGame.setState({
+    character: { ...s.character, transport: kind, wagon: false, resting: false },
+    world: { ...s.world, tiles: s.world.tiles },
+    preview: null,
+    travel: null,
+    log: pushLog(
+      s.log,
+      kind === "horse"
+        ? "Сел на лошадь. В 2½ раза быстрее пешего, ноша почти как пешком."
+        : `Взял тачку. Ноша ${CAPACITY.cart} кг, шаг как пешком.`,
+    ),
+    hint: {
+      text: kind === "horse" ? "Лошадь. В 2½ раза быстрее." : `Тачка. Ноша ${CAPACITY.cart} кг, шаг как пешком.`,
+      tone: "ok",
+    },
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "взял", tone: "ok" as const }].slice(-10),
+  });
+  sealHarm("wagon", harmCells(...cells), s.character);
+}
+
+function leaveMount(kind: "cart" | "horse") {
+  const s = useGame.getState();
+  if (ridingKind(s.character) !== kind) {
+    speak(kind === "horse" ? "Не на лошади." : "Тачки с тобой нет.", s.character.x, s.character.y, "нет", "bad");
+    return;
+  }
+  if (s.travel) {
+    speak("Сначала стой.", s.character.x, s.character.y, "в пути", "bad");
+    return;
+  }
+  const tile = hereTile();
+  if (!tile) return;
+  const ok = parkNear(s.world, tile.x, tile.y, kind, "you");
+  if (!ok) {
+    speak(canParkOn(tile) ? "Здесь некуда ставить." : "В реку не бросают.", tile.x, tile.y, "нет места", "bad");
+    return;
+  }
+  useGame.setState({
+    character: { ...s.character, transport: "walk", wagon: false },
+    world: { ...s.world, tiles: s.world.tiles },
+    travel: null,
+    preview: null,
+    log: pushLog(s.log, `Оставил ${MOUNT_LABEL[kind]} на клетке. Не в сумке. Возьми снова или уведут.`),
+    hint: { text: `${MOUNT_LABEL[kind][0]!.toUpperCase()}${MOUNT_LABEL[kind].slice(1)} на клетке.`, tone: "ok" },
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "оставил", tone: "ok" as const }].slice(-10),
+  });
+  sealHarm("wagon", harmCells(ok, tile), s.character);
+}
+
+function stealMount(kind: MountKind) {
   const s = useGame.getState();
   const hold = actHeld(s.character);
   if (hold) {
@@ -4098,49 +4220,102 @@ function stealWagon() {
     speak("В пути не крадут.", s.character.x, s.character.y, "в пути", "bad");
     return;
   }
-  if (s.character.wagon || s.character.transport === "wagon") {
-    speak("Своя телега уже за тобой.", s.character.x, s.character.y, "уже", "ok");
+  if (busyBlock()) return;
+  const tile = mountTileOf(s, kind);
+  if (!tile) {
+    speak(`${DRIVE_LABEL[kind][0]!.toUpperCase()}${DRIVE_LABEL[kind].slice(1)} нет.`, s.character.x, s.character.y, "нет", "bad");
     return;
   }
-  if (s.character.horses < 1) {
-    speak("Увести телегу — только на лошади.", s.character.x, s.character.y, "нет лошади", "bad");
+  const plan = planDriveOff(s.world, tile, kind, s.character.x, s.character.y);
+  if (!plan.ok) {
+    if (tile[kind] === "you") {
+      if (kind === "wagon") hitchWagon();
+      else takeMount(kind);
+      return;
+    }
+    speak(plan.hint, tile.x, tile.y, "нет", "bad");
     return;
   }
-  const tile = wagonTileOf(s);
-  if (!tile?.wagon) {
-    speak("Телеги нет.", s.character.x, s.character.y, "нет", "bad");
-    return;
-  }
-  if (tile.wagon === "you") {
-    hitchWagon();
-    return;
-  }
-  const near = Math.max(Math.abs(s.character.x - tile.x), Math.abs(s.character.y - tile.y)) <= 1;
-  if (!near) {
-    speak("Подойди к телеге.", tile.x, tile.y, "подойди", "bad");
+  if (kind === "wagon" && !horseReady(s)) {
+    speak("Увести телегу — только на лошади.", tile.x, tile.y, "нет лошади", "bad");
     return;
   }
   if (s.character.energy < 2) {
-    speak("Нет сил уводить телегу.", tile.x, tile.y, "нет силы", "bad");
+    speak(`Нет сил уводить ${DRIVE_LABEL[kind]}.`, tile.x, tile.y, "нет силы", "bad");
     return;
   }
-  const who = tile.wagon;
+  const ms = workMs("drive", null, s.character);
+  startBusy(
+    { ...s.character, energy: Math.max(0, s.character.energy - 2) },
+    makeBusy("drive", tile.x, tile.y, Date.now() + ms, { mount: kind }),
+    `Увожу ${DRIVE_LABEL[kind]} · ${Math.ceil(ms / 1000)} с.`,
+    tile.x,
+    tile.y,
+    "увести",
+  );
+}
+
+function applyStolenMount(s: GameState, c: Character, tile: NonNullable<ReturnType<typeof tileAt>>, kind: MountKind): Character {
+  const who = tile[kind] || "";
+  let next = { ...c };
+  const betrayal = next.pacts[who] === "friend" || (!!next.village && tile.village === next.village);
+  if (betrayal) next = { ...next, pacts: { ...next.pacts, [who]: "feud" }, wanted: (next.wanted ?? 0) + 2 };
+  const riding = ridingKind(next);
+  if (kind === "wagon") {
+    if (riding === "cart") {
+      parkNear(s.world, next.x, next.y, "cart", "you");
+      next = { ...next, transport: "walk", wagon: false };
+    }
+    takeReadyHorse({ ...s, character: next });
+    tile.wagon = "";
+    return { ...next, wagon: true, transport: "wagon" };
+  }
+  if (riding) {
+    claimMount(tile, kind);
+    return next;
+  }
+  tile[kind] = "";
+  return { ...next, transport: kind, wagon: false };
+}
+
+function resolveDrive(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>, kind?: MountKind) {
+  const mount = kind === "cart" || kind === "horse" || kind === "wagon" ? kind : "wagon";
   const prior = s.character;
-  const caught = rollCaught(s.world, tile, s.character, s.phase === "night", 0.12);
-  markCrime(tile, s.character.name);
-  let c = {
-    ...s.character,
-    energy: Math.max(0, s.character.energy - 2),
-  };
+  const plan = planDriveOff(s.world, tile, mount, c0.x, c0.y);
+  if (!plan.ok) {
+    useGame.setState({ character: c0, log: pushLog(s.log, plan.hint === "Своё забирают без дела." ? "Своё не уводят." : `${DRIVE_LABEL[mount]} уже нет.`) });
+    return;
+  }
+  if (mount === "wagon" && !horseReady({ ...s, character: c0 })) {
+    useGame.setState({ character: c0, log: pushLog(s.log, "Без лошади телегу не увести.") });
+    return;
+  }
+  let c = bumpSkill(c0, "stealth", 0.2);
+  if (!plan.law) {
+    c = applyStolenMount(s, c, tile, mount);
+    useGame.setState({
+      character: c,
+      world: { ...s.world, tiles: s.world.tiles },
+      log: pushLog(s.log, `Увёл ${DRIVE_LABEL[mount]}. Стала твоя. Не в сумке.`),
+      hint: { text: `Увёл ${DRIVE_LABEL[mount]}.`, tone: "ok" },
+      floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "увёл", tone: "ok" as const }].slice(-10),
+    });
+    sealHarm("steal", harmCells(tile), prior);
+    return;
+  }
+  const caught = rollCaught(s.world, tile, c, s.phase === "night", mount === "wagon" ? 0.12 : 0);
+  markCrime(tile, c.name);
   c = bumpSkill(c, "stealth", caught ? 0.05 : 0.2);
-  const betrayal = s.character.pacts[who] === "friend" || (!!s.character.village && tile.village === s.character.village);
+  const who = plan.who;
+  const betrayal = c.pacts[who] === "friend" || (!!c.village && tile.village === c.village);
   if (betrayal) c = { ...c, pacts: { ...c.pacts, [who]: "feud" }, wanted: (c.wanted ?? 0) + 2 };
   if (caught) {
-    const hit = punish(c, s.world, tile, `телега ${who}`);
+    const hit = punish(c, s.world, tile, `${DRIVE_LABEL[mount]} ${who}`);
     c = hit.c;
+    const stripped = stripRidden(s.world, c, s.character.x, s.character.y);
+    c = stripped.c;
     if (hit.jailed) {
       cancelNotice("walk");
-      c = { ...c, wagon: false, transport: c.horses > 0 ? "horse" : "walk" };
       viewPos.x = c.x;
       viewPos.y = c.y;
     }
@@ -4153,25 +4328,28 @@ function stealWagon() {
       log: pushLog(
         s.log,
         hit.law
-          ? `Поймали за телегу. Закон — яма. Телега осталась.`
-          : `Видели: уводил телегу. Ямы нет, розыск. Телега на месте.`,
+          ? `Поймали за ${DRIVE_LABEL[mount]}. Закон — яма. Осталась.`
+          : `Видели: уводил ${DRIVE_LABEL[mount]}. Ямы нет, розыск. На месте.`,
       ),
-      hint: { text: "Поймали. Телега осталась.", tone: "bad" },
+      hint: { text: "Поймали. Осталась.", tone: "bad" },
       floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: hit.law ? "яма" : "видели", tone: "bad" as const }].slice(-10),
     });
-    sealHarm("steal", harmCells(tile), prior);
+    sealHarm("steal", harmCells(tile, ...stripped.cells), prior);
     return;
   }
-  tile.wagon = "";
-  c = { ...c, wagon: true, transport: "wagon" };
+  c = applyStolenMount(s, c, tile, mount);
   useGame.setState({
     character: c,
     world: { ...s.world, tiles: s.world.tiles },
-    log: pushLog(s.log, `Увёл телегу у ${who}. Тихо. В карман не спрячешь — бросишь, снова украдут.`),
-    hint: { text: "Увёл телегу. За лошадью.", tone: "ok" },
+    log: pushLog(s.log, `Увёл ${DRIVE_LABEL[mount]} у ${who}. Тихо. Не в сумке.`),
+    hint: { text: `Увёл ${DRIVE_LABEL[mount]}.`, tone: "ok" },
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "увёл", tone: "ok" as const }].slice(-10),
   });
   sealHarm("steal", harmCells(tile), prior);
+}
+
+function stealWagon() {
+  stealMount("wagon");
 }
 
 function buyWagon() {
@@ -4189,7 +4367,7 @@ function buyWagon() {
     speak(`Телега ${goldTxt(WAGON_GOLD)}. Или плотник: два колеса, 4 дерева, слиток.`, tile.x, tile.y, "мало золота", "bad");
     return;
   }
-  const hitch = s.character.horses > 0;
+  const hitch = horseReady(s);
   let parked: { x: number; y: number } | null = null;
   if (!hitch) {
     parked = parkWagonNear(s.world, tile.x, tile.y, "you");
@@ -4198,6 +4376,7 @@ function buyWagon() {
       return;
     }
   }
+  const horseCell = hitch ? takeReadyHorse(s) : null;
   useGame.setState({
     character: {
       ...s.character,
@@ -4218,7 +4397,7 @@ function buyWagon() {
     },
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `−${goldTxt(WAGON_GOLD)}`, tone: "gold" as const }].slice(-10),
   });
-  if (parked) sealHarm("wagon", harmCells(parked, tile), s.character);
+  if (parked || horseCell) sealHarm("wagon", harmCells(parked, horseCell, tile), s.character);
 }
 
 function sellWagon() {
@@ -4240,7 +4419,7 @@ function sellWagon() {
     character: {
       ...s.character,
       wagon: false,
-      transport: hitched ? (s.character.horses > 0 ? "horse" : "walk") : s.character.transport,
+      transport: hitched ? "horse" : s.character.transport,
       gold: s.character.gold + pay,
     },
     world: { ...s.world, tiles: s.world.tiles },
@@ -4277,7 +4456,7 @@ function craftWagon() {
   inv.wheel -= 2;
   inv.wood -= 4;
   inv.bar -= 1;
-  const hitch = s.character.horses > 0;
+  const hitch = horseReady(s);
   let parked: { x: number; y: number } | null = null;
   if (!hitch) {
     parked = parkWagonNear(s.world, tile.x, tile.y, "you");
@@ -4286,6 +4465,7 @@ function craftWagon() {
       return;
     }
   }
+  const horseCell = hitch ? takeReadyHorse(s) : null;
   let c = bumpSkill(
     {
       ...s.character,
@@ -4309,7 +4489,7 @@ function craftWagon() {
     hint: { text: hitch ? `Телега. ${CAPACITY.wagon} кг.` : "Телега на клетке.", tone: "ok" },
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "телега", tone: "ok" as const }].slice(-10),
   });
-  if (parked) sealHarm("wagon", harmCells(parked, tile), s.character);
+  if (parked || horseCell) sealHarm("wagon", harmCells(parked, horseCell, tile), s.character);
 }
 
 function buyLivestock(kind: "cow" | "horse") {
@@ -4325,12 +4505,19 @@ function buyLivestock(kind: "cow" | "horse") {
     return;
   }
   if (kind === "horse") {
-    const c = { ...s.character, gold: s.character.gold - price, horses: s.character.horses + 1 };
+    const parked = parkNear(s.world, tile.x, tile.y, "horse", "you");
+    if (!parked) {
+      speak("Некуда ставить лошадь.", tile.x, tile.y, "нет места", "bad");
+      return;
+    }
+    const c = { ...s.character, gold: s.character.gold - price };
     useGame.setState({
       character: c,
-      log: pushLog(s.log, `Купил лошадь за ${goldTxt(price)}. Седлай в сумке.`),
+      world: { ...s.world, tiles: s.world.tiles },
+      log: pushLog(s.log, `Купил лошадь за ${goldTxt(price)}. Стоит на клетке. Сядь — не в сумке.`),
       floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `−${goldTxt(price)}`, tone: "gold" as const }].slice(-10),
     });
+    sealHarm("wagon", harmCells(parked, tile), s.character);
     return;
   }
   const pen = s.world.tiles.find((t) => t.building === "pen" && (t.owned || !t.commons));
@@ -4358,25 +4545,38 @@ function sellLivestock(kind: "cow" | "horse") {
     return;
   }
   if (kind === "horse") {
-    if (s.character.horses < 1) {
-      speak("Нет лошади.", tile.x, tile.y, "нет", "bad");
+    const ridingHorseNow = s.character.transport === "horse";
+    const ridingWagon = s.character.wagon || s.character.transport === "wagon";
+    const hereHorse = tile.horse === "you";
+    const near = ownNearby(s.world, tile.x, tile.y, "horse");
+    if (!ridingHorseNow && !ridingWagon && !hereHorse && !near) {
+      speak("Нет лошади у лавки. Приведи — оставь на клетке или стой на ней.", tile.x, tile.y, "нет", "bad");
       return;
     }
     const pay = Math.floor(HORSE_PRICE / 2);
-    const horses = s.character.horses - 1;
+    const cells: Array<{ x: number; y: number }> = [tile];
     let transport = s.character.transport;
     let wagon = s.character.wagon;
-    if (horses < 1) {
-      if (wagon || transport === "wagon") parkWagonNear(s.world, s.character.x, s.character.y, "you");
+    if (hereHorse) tile.horse = "";
+    else if (!ridingHorseNow && !ridingWagon && near) {
+      takeOwnMount(near, "horse");
+      cells.push(near);
+    }
+    if (ridingWagon) {
+      const parked = parkWagonNear(s.world, s.character.x, s.character.y, "you");
+      if (parked) cells.push(parked);
       wagon = false;
+      transport = "walk";
+    } else if (ridingHorseNow) {
       transport = "walk";
     }
     useGame.setState({
-      character: { ...s.character, horses, gold: s.character.gold + pay, transport, wagon },
+      character: { ...s.character, gold: s.character.gold + pay, transport, wagon },
       world: { ...s.world, tiles: s.world.tiles },
       log: pushLog(s.log, `Продал лошадь. +${goldTxt(pay)}.`),
       floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${goldTxt(pay)}`, tone: "gold" as const }].slice(-10),
     });
+    sealHarm("wagon", harmCells(...cells), s.character);
     return;
   }
   const pen = s.world.tiles.find((t) => t.building === "pen" && t.herd?.kind === "cow" && (t.herd.count ?? 0) > 0);
@@ -5595,8 +5795,9 @@ function dummyAnswer() {
   const nextFoe: Dummy = { ...foe, energy: Math.max(0, foe.energy - 2) };
   if (hp <= 0) {
     dumpCargo(s.world, c.x, c.y, c.inventory, 0, [c.body, c.shield, c.helm]);
+    const stripped = stripRidden(s.world, c, c.x, c.y);
     c = {
-      ...c,
+      ...stripped.c,
       inventory: emptyTheInv(c.inventory),
       hand: null,
       body: null,
@@ -5607,10 +5808,7 @@ function dummyAnswer() {
       downAt: Date.now(),
       busy: null,
       resting: false,
-      wagon: false,
-      transport: "walk",
     };
-    if (c0.wagon || c0.transport === "wagon") parkWagonNear(s.world, c.x, c.y, "you");
     useGame.setState({
       character: c,
       dummies: applyDummy(s.dummies, nextFoe),
@@ -5622,6 +5820,7 @@ function dummyAnswer() {
       hint: { text: "Упал. Ползи к шалашу.", tone: "bad", keep: "down" },
       floaters: [...s.floaters, { id: ++floaterSeq, x: c.x, y: c.y, text: `−${hit.dmg}`, tone: "bad" as const }].slice(-10),
     });
+    if (stripped.cells.length) sealHarm("wagon", stripped.cells, c0);
     useGame.getState().persist();
     return;
   }

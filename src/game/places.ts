@@ -56,6 +56,14 @@ export function placeTitle(tile: Tile) {
     if (tile.building !== "none") return `${BUILDING_LABEL[tile.building]} · телега`;
     return tile.wagon === "you" ? "Телега" : `Телега · ${tile.wagon}`;
   }
+  if (tile.cart) {
+    if (tile.building !== "none") return `${BUILDING_LABEL[tile.building]} · тачка`;
+    return tile.cart === "you" ? "Тачка" : `Тачка · ${tile.cart}`;
+  }
+  if (tile.horse) {
+    if (tile.building !== "none") return `${BUILDING_LABEL[tile.building]} · лошадь`;
+    return tile.horse === "you" ? "Лошадь" : `Лошадь · ${tile.horse}`;
+  }
   if (tile.building === "none") return "";
   const lock =
     tile.chestLock || tile.gateLock ? " · на замке" : "";
@@ -64,7 +72,7 @@ export function placeTitle(tile: Tile) {
 }
 
 export function placeHint(tile: Tile) {
-  if (tile.caravan) return "Тачка 20 золота, телега 48, замок 16. Сырьё пачкой. Дверь — контора.";
+  if (tile.caravan) return "Тачка и лошадь стоят на клетке, не в сумке. Телега 48, замок 16. Сырьё пачкой. Дверь — контора.";
   switch (tile.building) {
     case "shack":
       return "Сон, очаг, простое ремесло. Сундук. Замок — кузнец или лавка.";

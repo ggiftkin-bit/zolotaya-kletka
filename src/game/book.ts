@@ -60,14 +60,25 @@ export function publishOwner(owner: string | undefined, selfId: string): string 
   return owner;
 }
 
-/** Хозяин клетки, телеги и услуги: в книге id, на экране свой — «you». */
+/** Хозяин клетки, телеги, тачки, лошади и услуги: в книге id, на экране свой — «you». */
 export function wireSlim(slim: SlimTile, selfId: string, mode: "publish" | "localize"): SlimTile {
   const map = mode === "publish" ? publishOwner : localizeOwner;
   const on = slim.on != null ? map(slim.on, selfId) : slim.on;
   const wg = slim.wg != null ? map(slim.wg, selfId) : slim.wg;
+  const ca = slim.ca != null ? map(slim.ca, selfId) : slim.ca;
+  const ho = slim.ho != null ? map(slim.ho, selfId) : slim.ho;
   const svBy = slim.sv?.by != null ? map(slim.sv.by, selfId) : slim.sv?.by;
   const svTk = slim.sv?.tk != null ? map(slim.sv.tk, selfId) : slim.sv?.tk;
-  if (on === slim.on && wg === slim.wg && svBy === slim.sv?.by && svTk === slim.sv?.tk) return slim;
+  if (
+    on === slim.on &&
+    wg === slim.wg &&
+    ca === slim.ca &&
+    ho === slim.ho &&
+    svBy === slim.sv?.by &&
+    svTk === slim.sv?.tk
+  ) {
+    return slim;
+  }
   const next = { ...slim };
   if (on !== slim.on) {
     if (on) next.on = on;
@@ -76,6 +87,14 @@ export function wireSlim(slim: SlimTile, selfId: string, mode: "publish" | "loca
   if (wg !== slim.wg) {
     if (wg) next.wg = wg;
     else delete next.wg;
+  }
+  if (ca !== slim.ca) {
+    if (ca) next.ca = ca;
+    else delete next.ca;
+  }
+  if (ho !== slim.ho) {
+    if (ho) next.ho = ho;
+    else delete next.ho;
   }
   if (slim.sv && (svBy !== slim.sv.by || svTk !== slim.sv.tk)) {
     next.sv = { ...slim.sv };

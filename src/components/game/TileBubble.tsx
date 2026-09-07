@@ -11,6 +11,7 @@ import { DONATE_GOLD, GIFTS, giftOrdered, LIVE_STOCK, stockOf } from "@/game/off
 import { occupantAt } from "@/game/fight";
 import { canFoundVillage, canPlaceBoard, canPutLiveName, clusterHint, hamletTitle, hasOwnYard, namesTouchingYard, villageOf } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
+import { ownNearby, ownsMount, ridingHorse } from "@/game/mount";
 import { canDigReason, fillPay } from "@/game/pit";
 import { useGame, meetIsIgnored } from "@/game/store";
 import type { BuildingKind, ItemId, Tile } from "@/game/types";
@@ -334,14 +335,30 @@ function PickPane({
         <Sticker
           title={tile.wagon === "you" ? "Зацепить телегу" : `Увести телегу · ${tile.wagon}`}
           sub={
-            g.character.horses < 1
-              ? "нужна лошадь. в карман не кладётся"
-              : tile.wagon === "you"
+            tile.wagon === "you"
+              ? ridingHorse(g.character) || ownNearby(g.world, g.character.x, g.character.y, "horse")
                 ? "к лошади · 180 кг"
-                : "кража · нужна лошадь"
+                : "нужна лошадь. в карман не кладётся"
+              : "дело · увести. не в сумку"
           }
           ico={<Ico i={ICO.road} className="size-11 overflow-hidden rounded-[12px]" />}
           onClick={() => (tile.wagon === "you" ? g.hitchWagon() : g.stealWagon())}
+        />
+      )}
+      {tile.cart && near && g.character.transport !== "cart" && (
+        <Sticker
+          title={tile.cart === "you" ? "Взять тачку" : `Увести тачку · ${tile.cart}`}
+          sub={tile.cart === "you" ? "ноша 72 кг, шаг как пешком" : "дело · увести. не в сумку"}
+          ico={<Ico i={ICO.road} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => (tile.cart === "you" ? g.takeMount("cart") : g.stealMount("cart"))}
+        />
+      )}
+      {tile.horse && near && g.character.transport !== "horse" && !g.character.wagon && g.character.transport !== "wagon" && (
+        <Sticker
+          title={tile.horse === "you" ? "Сесть на лошадь" : `Увести лошадь · ${tile.horse}`}
+          sub={tile.horse === "you" ? "в 2½ раза быстрее" : "дело · увести. не в сумку"}
+          ico={<Ico i={ICO.stake} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => (tile.horse === "you" ? g.takeMount("horse") : g.stealMount("horse"))}
         />
       )}
       {(g.character.wagon || g.character.transport === "wagon") && here && (
@@ -350,6 +367,22 @@ function PickPane({
           sub={atOwn ? "у двора — своя" : "останется на клетке, можно украсть"}
           ico={<Ico i={ICO.road} className="size-11 overflow-hidden rounded-[12px]" />}
           onClick={() => g.unhitchWagon()}
+        />
+      )}
+      {g.character.transport === "cart" && here && (
+        <Sticker
+          title="Оставить тачку"
+          sub="на клетке. не в сумке"
+          ico={<Ico i={ICO.road} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => g.leaveMount("cart")}
+        />
+      )}
+      {g.character.transport === "horse" && here && (
+        <Sticker
+          title="Оставить лошадь"
+          sub="на клетке. не в сумке"
+          ico={<Ico i={ICO.stake} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => g.leaveMount("horse")}
         />
       )}
       {locked && (
@@ -729,7 +762,7 @@ function HomeBody({ tile }: { tile: Tile }) {
           Готовить · еда + полено · сытость
         </Button>
       )}
-      {isHome && (g.character.carts ?? 0) < 1 && (
+      {isHome && !ownsMount(g.world, g.character, "cart") && (
         <Button variant="outline" className="h-12 justify-between px-3" onClick={() => g.craftCart()}>
           <span>Тачка</span>
           <span className="text-[12px] text-muted-foreground">{CART_WOOD} дерева · груз, шаг как пешком</span>
@@ -776,7 +809,7 @@ function WorkshopBody({ tile }: { tile: Tile }) {
   return (
     <div className="mt-4 flex flex-col gap-2">
       <p className="text-[13px] text-muted-foreground">{placeHint(tile)}</p>
-      {isBench && (g.character.carts ?? 0) < 1 && (
+      {isBench && !ownsMount(g.world, g.character, "cart") && (
         <Button variant="outline" className="h-12 justify-between px-3" onClick={() => g.craftCart()}>
           <span>Тачка</span>
           <span className="text-[12px] text-muted-foreground">{CART_WOOD} дерева · груз, шаг как пешком</span>
@@ -826,13 +859,17 @@ function LavkaBody({ tile }: { tile: Tile }) {
       </div>
       <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">Ход</p>
       <div className="mt-1.5 flex gap-1.5">
-        {(g.character.carts ?? 0) < 1 ? (
+        {!ownsMount(g.world, g.character, "cart") ? (
           <Button size="sm" className="h-11 flex-1" onClick={() => g.buyCart()}>
             тачка {goldTxt(CART_GOLD)}
           </Button>
-        ) : (
+        ) : g.character.transport === "cart" || tile.cart === "you" ? (
           <Button size="sm" className="h-11 flex-1" variant="outline" onClick={() => g.sellCart()}>
             продать тачку {goldTxt(Math.floor(CART_GOLD / 2))}
+          </Button>
+        ) : (
+          <Button size="sm" className="h-11 flex-1" variant="outline" onClick={() => g.sellCart()}>
+            тачка не у лавки
           </Button>
         )}
         {haveWagon ? (
@@ -855,9 +892,15 @@ function LavkaBody({ tile }: { tile: Tile }) {
         <Button size="sm" className="h-11 flex-1" onClick={() => g.buyLivestock("cow")}>
           корова {goldTxt(COW_PRICE)}
         </Button>
-        <Button size="sm" className="h-11 flex-1" onClick={() => g.buyLivestock("horse")}>
-          лошадь {goldTxt(HORSE_PRICE)}
-        </Button>
+        {g.character.transport === "horse" || g.character.transport === "wagon" || g.character.wagon || tile.horse === "you" ? (
+          <Button size="sm" className="h-11 flex-1" variant="outline" onClick={() => g.sellLivestock("horse")}>
+            продать лошадь {goldTxt(Math.floor(HORSE_PRICE / 2))}
+          </Button>
+        ) : (
+          <Button size="sm" className="h-11 flex-1" onClick={() => g.buyLivestock("horse")}>
+            лошадь {goldTxt(HORSE_PRICE)}
+          </Button>
+        )}
       </div>
       <TradeLists
         demand={Object.fromEntries(LIVE_STOCK.map((k) => [k, 1])) as Partial<Record<ItemId, number>>}

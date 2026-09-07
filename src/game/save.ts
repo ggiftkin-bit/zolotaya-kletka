@@ -40,6 +40,8 @@ export type SlimTile = {
   br?: 1;
   vg?: string;
   wg?: string;
+  ca?: string;
+  ho?: string;
   cl?: 1;
   gl?: 1;
   pi?: 1;
@@ -172,6 +174,8 @@ export function slimTile(t: Tile): SlimTile {
   if (t.burned) o.br = 1;
   if (t.village) o.vg = t.village;
   if (t.wagon) o.wg = t.wagon;
+  if (t.cart) o.ca = t.cart;
+  if (t.horse) o.ho = t.horse;
   if (t.chestLock) o.cl = 1;
   if (t.gateLock) o.gl = 1;
   if (t.pit) o.pi = 1;
@@ -220,6 +224,8 @@ export function fatTile(raw: Partial<Tile> & { b?: Tile["biome"] }, x: number, y
     burned: !!(raw.burned ?? slim.br),
     village: raw.village ?? slim.vg ?? "",
     wagon: raw.wagon ?? slim.wg ?? "",
+    cart: raw.cart ?? slim.ca ?? "",
+    horse: raw.horse ?? slim.ho ?? "",
     chestLock: !!(raw.chestLock ?? slim.cl),
     gateLock: !!(raw.gateLock ?? slim.gl),
     pit: !!(raw.pit ?? slim.pi),

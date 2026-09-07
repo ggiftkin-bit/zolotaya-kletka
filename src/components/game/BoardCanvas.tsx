@@ -680,6 +680,8 @@ function draw(
   const my = viewPos.y * TILE + TILE / 2;
   if (g.character.wagon || g.character.transport === "wagon") {
     paintWagon(ctx, mx - TILE * 0.62, my - TILE * 0.08, 0.82);
+  } else if (g.character.transport === "cart") {
+    paintWagon(ctx, mx - TILE * 0.52, my + TILE * 0.02, 0.62);
   }
   ctx.fillStyle = "rgba(28,22,18,0.22)";
   ctx.beginPath();
@@ -1663,6 +1665,10 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
   }
   if (tile.wagon) {
     paintWagon(ctx, x + 8, y + 16, 1);
+  } else if (tile.cart) {
+    paintWagon(ctx, x + 10, y + 18, 0.72);
+  } else if (tile.horse && art) {
+    drawAtlas(ctx, art.life, 3, 3, LIFE_INDEX.horse, x + 8, y + 10, 26, 26);
   }
   if (tile.chestLock && tile.building !== "none") {
     const px = x + TILE - 11;

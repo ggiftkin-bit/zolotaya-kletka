@@ -30,7 +30,8 @@ export type BusyKind =
   | "burn"
   | "watch"
   | "haul"
-  | "bring";
+  | "bring"
+  | "drive";
 
 export type Busy = {
   kind: BusyKind;
@@ -45,6 +46,8 @@ export type Busy = {
   hired?: boolean;
   /** Услуга двух почт. Не руки за 16. */
   service?: boolean;
+  /** Увод стоящей тачки / лошади / телеги. */
+  mount?: "cart" | "horse" | "wagon";
 };
 
 export type Weather = "clear" | "rain" | "snow";
@@ -224,6 +227,10 @@ export type Tile = {
   village: string;
   /** Owner id if a wagon is parked here. Empty = none. Never in a bag. */
   wagon: string;
+  /** Стоящая тачка. Хозяин id. Не вещь сумки. */
+  cart: string;
+  /** Стоящая лошадь. Хозяин id. Не вещь сумки. */
+  horse: string;
   /** Padlock on this building's chest. Owner opens it; others pick. */
   chestLock: boolean;
   /** Yard-wide latch: locked gates block non-owners. */

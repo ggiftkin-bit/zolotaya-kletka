@@ -493,6 +493,8 @@ export function migrateStations(world: World) {
     if (t.building === "mine") t.building = "adit";
     if (t.goldDrop == null) t.goldDrop = 0;
     if (t.wagon == null) t.wagon = "";
+    if (t.cart == null) t.cart = "";
+    if (t.horse == null) t.horse = "";
     if (t.chestLock == null) t.chestLock = false;
     if (t.gateLock == null) t.gateLock = false;
     if (t.pit == null) t.pit = false;
@@ -640,6 +642,8 @@ function cloneWorld(world: World): World {
       burned: !!t.burned,
       village: t.village ?? "",
       wagon: t.wagon ?? "",
+      cart: t.cart ?? "",
+      horse: t.horse ?? "",
       chestLock: !!t.chestLock,
       gateLock: !!t.gateLock,
       pit: !!t.pit,
@@ -714,6 +718,8 @@ function buildWorld(seed: string): World {
         burned: false,
         village: "",
         wagon: "",
+        cart: "",
+        horse: "",
         chestLock: false,
         gateLock: false,
         pit: false,

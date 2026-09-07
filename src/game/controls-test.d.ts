@@ -46,9 +46,14 @@ declare global {
       hitchWagon: () => void;
       unhitchWagon: () => void;
       stealWagon: () => void;
+      takeMount: (kind: "cart" | "horse") => void;
+      leaveMount: (kind: "cart" | "horse") => void;
+      stealMount: (kind: "cart" | "horse" | "wagon") => void;
       craftWagon: () => void;
       buyWagon: () => void;
       putWagon: (who?: string) => void;
+      putCart: (who?: string) => void;
+      putHorse: (who?: string) => void;
       putBench: () => void;
       setProfession: (p: "wanderer" | "carpenter" | "smith") => void;
       give: (item: string, n: number) => void;

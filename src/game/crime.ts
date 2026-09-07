@@ -224,3 +224,35 @@ export function unlockKind(world: World, tile: Tile, kind: "chest" | "gate"): { 
   setYardGateLock(world, tile.x, tile.y, false);
   return plotCells(world, tile);
 }
+
+export type DriveKind = "cart" | "horse" | "wagon";
+
+export const DRIVE_LABEL: Record<DriveKind, string> = {
+  cart: "тачка",
+  horse: "лошадь",
+  wagon: "телега",
+};
+
+/** Чужую стоящую уводят делом. Свою — не это. */
+export function planDriveOff(
+  world: World,
+  tile: Tile,
+  kind: DriveKind,
+  px: number,
+  py: number,
+): { ok: true; who: string; law: boolean } | { ok: false; hint: string } {
+  const who = tile[kind] || "";
+  if (!who) return { ok: false, hint: `${DRIVE_LABEL[kind]} нет.` };
+  if (who === "you") return { ok: false, hint: "Своё забирают без дела." };
+  if (Math.max(Math.abs(px - tile.x), Math.abs(py - tile.y)) > 1) {
+    return { ok: false, hint: "Подойди." };
+  }
+  return { ok: true, who, law: hasLaw(world, tile) };
+}
+
+/** Срыв на дворе с законом — след, как кража кучи. */
+export function applyDriveFail(c: Character, tile: Tile): Character {
+  markCrime(tile, c.name);
+  return { ...c, wanted: Math.min(5, (c.wanted ?? 0) + 1) };
+}
+

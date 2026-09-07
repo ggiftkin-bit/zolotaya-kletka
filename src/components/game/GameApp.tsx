@@ -150,6 +150,8 @@ export function GameApp() {
           horses: s.character.horses ?? 0,
           wagon: !!(s.character.wagon || s.character.transport === "wagon"),
           tileWagon: s.world.tiles[s.character.y * s.world.width + s.character.x]?.wagon ?? "",
+          tileCart: s.world.tiles[s.character.y * s.world.width + s.character.x]?.cart ?? "",
+          tileHorse: s.world.tiles[s.character.y * s.world.width + s.character.x]?.horse ?? "",
           cap: CAPACITY[s.character.transport],
           chestLock: !!s.world.tiles[s.character.y * s.world.width + s.character.x]?.chestLock,
           gateLock: !!s.world.tiles[s.character.y * s.world.width + s.character.x]?.gateLock,
@@ -237,6 +239,9 @@ export function GameApp() {
       hitchWagon: () => useGame.getState().hitchWagon(),
       unhitchWagon: () => useGame.getState().unhitchWagon(),
       stealWagon: () => useGame.getState().stealWagon(),
+      takeMount: (kind: "cart" | "horse") => useGame.getState().takeMount(kind),
+      leaveMount: (kind: "cart" | "horse") => useGame.getState().leaveMount(kind),
+      stealMount: (kind: "cart" | "horse" | "wagon") => useGame.getState().stealMount(kind),
       craftWagon: () => useGame.getState().craftWagon(),
       buyWagon: () => useGame.getState().buyWagon(),
       putWagon: (who = "you") => {
@@ -244,6 +249,26 @@ export function GameApp() {
         const t = s.world.tiles[s.character.y * s.world.width + s.character.x];
         if (!t) return;
         t.wagon = who;
+        t.cart = "";
+        t.horse = "";
+        useGame.setState({ world: { ...s.world, tiles: s.world.tiles } });
+      },
+      putCart: (who = "you") => {
+        const s = useGame.getState();
+        const t = s.world.tiles[s.character.y * s.world.width + s.character.x];
+        if (!t) return;
+        t.cart = who;
+        t.wagon = "";
+        t.horse = "";
+        useGame.setState({ world: { ...s.world, tiles: s.world.tiles } });
+      },
+      putHorse: (who = "you") => {
+        const s = useGame.getState();
+        const t = s.world.tiles[s.character.y * s.world.width + s.character.x];
+        if (!t) return;
+        t.horse = who;
+        t.wagon = "";
+        t.cart = "";
         useGame.setState({ world: { ...s.world, tiles: s.world.tiles } });
       },
       putBench: () => {
@@ -272,12 +297,18 @@ export function GameApp() {
       },
       clearWagon: () => {
         const s = useGame.getState();
-        for (const t of s.world.tiles) if (t.wagon) t.wagon = "";
+        for (const t of s.world.tiles) {
+          if (t.wagon) t.wagon = "";
+          if (t.cart) t.cart = "";
+          if (t.horse) t.horse = "";
+        }
         useGame.setState({
           character: {
             ...s.character,
             wagon: false,
-            transport: s.character.transport === "wagon" ? (s.character.horses > 0 ? "horse" : "walk") : s.character.transport,
+            transport: "walk",
+            carts: 0,
+            horses: 0,
           },
           world: { ...s.world, tiles: s.world.tiles },
         });
