@@ -42,7 +42,7 @@ import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_
 import { applyCatch, harmCells, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, markCrime, ownerOf, plotCells, punish, rollCaught, stealChance, takeLoot, unlockKind, fenceBurnCells } from "./crime";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
 import { clearGame, loadGame, saveGame } from "./save";
-import { stampVillage, leaveVillage, hamletTitle, hasOwnYard, isOutsideYard, setVillageLaw, planFoundOwners, canJoinVillage, namesTouchingYard, livingOwnersOf, villageOf, snapVillage, villageChangedCells, atNameSpot, normVillageName } from "./pact";
+import { stampVillage, leaveVillage, hamletTitle, hasOwnYard, isOutsideYard, setVillageLaw, planFoundOwners, canJoinVillage, namesTouchingYard, livingOwnersOf, villageOf, snapVillage, villageChangedCells, atNameSpot, normVillageName, canPlaceBoard } from "./pact";
 import { cargoWeight, loadRatio, pailKg, stepEnergy, wornKg } from "./travel";
 import { atBench, CRAFTS, EAT_ORDER, EAT_SAT, PROF_BLURB, type CraftKind } from "./craft";
 import { markDepleted, tickGrow, REGROW_WAIT } from "./grow";
@@ -95,7 +95,7 @@ import { chebyshev, dummyHome, foeById, gearSlot, ghostLiveFoe, leaveChance, mak
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, FOG_LIVE, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
-import { bindBookStore, commitHarm, commitService, commitStall, commitVillage, flushBook, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
+import { bindBookStore, commitHarm, commitService, commitStall, commitVillage, flushBook, lookStreet, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
 import {
   applyCargoPile,
   canReachStall,
@@ -546,6 +546,7 @@ type Actions = {
   formVillage: (name?: string) => void;
   joinVillage: (name?: string) => void;
   dissolveVillage: () => void;
+  lookBoard: (x: number, y: number) => void;
   doCraft: (kind: CraftKind) => void;
   prospectHere: () => void;
   sowField: () => void;
@@ -853,6 +854,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (!tile) return;
     if (!s.inspect || s.inspect.x !== x || s.inspect.y !== y) dropHint();
     set({ selected: { x, y }, inspect: { x, y }, tool: "move" });
+    if (tile.building === "board") lookBoard(x, y);
   },
 
   inspectTile: (x, y) => {
@@ -861,6 +863,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     const cur = get().inspect;
     if (!cur || cur.x !== x || cur.y !== y) dropHint();
     set({ selected: { x, y }, inspect: { x, y } });
+    if (tile.building === "board") lookBoard(x, y);
   },
 
   goTo: (x, y) => walkTo(x, y),
@@ -1056,8 +1059,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   takeJob: (id) => {
     const s = get();
     const here = tileAt(s.world, s.character.x, s.character.y);
-    if (!here?.caravan && here?.building !== "board") {
-      set({ log: pushLog(s.log, "Заказ закрывают в лавке на тракте или у доски биржи.") });
+    if (!here?.caravan) {
+      set({ log: pushLog(s.log, "Заказ закрывают в лавке на тракте.") });
       return;
     }
     const job = s.jobs.find((j) => j.id === id);
@@ -1221,6 +1224,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   formVillage: (name) => formVillage(name),
   joinVillage: (name) => joinVillage(name),
   dissolveVillage: () => dissolveVillage(),
+  lookBoard: (x, y) => lookBoard(x, y),
   doCraft: (kind) => doCraft(kind),
   prospectHere: () => prospectHere(),
   sowField: () => sowField(),
@@ -2217,8 +2221,8 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
   if (kind === "none") return;
   if (kind === "workshop") kind = "bench";
   if (kind === "mine") kind = "adit";
-  if (kind === "shop" || kind === "board") {
-    speak("Лавка и биржа — на тракте, не зданием.", x, y, "не здесь", "bad");
+  if (kind === "shop") {
+    speak("Лавка — на тракте, не зданием.", x, y, "не здесь", "bad");
     return;
   }
   const c = s.character;
@@ -2242,7 +2246,12 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
     speak("чужой двор", x, y, "чужой двор", "bad");
     return;
   }
-  if (tile.commons) {
+  if (kind === "board") {
+    if (!canPlaceBoard(tile, isYours(tile))) {
+      speak("Доску ставят на улице имени или на своём дворе в имени.", x, y, "не здесь", "bad");
+      return;
+    }
+  } else if (tile.commons) {
     speak("На общей поляне капитальную стройку нельзя. Отойди за край.", x, y, "общая", "bad");
     return;
   }
@@ -2251,7 +2260,7 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
       speak("Колья и ров — только снаружи тына.", x, y, "не снаружи", "bad");
       return;
     }
-  } else if (!tile.owned && !tile.plot && kind !== "shack" && kind !== "field" && kind !== "pen" && kind !== "well" && kind !== "net" && kind !== "camp") {
+  } else if (!tile.owned && !tile.plot && kind !== "shack" && kind !== "field" && kind !== "pen" && kind !== "well" && kind !== "net" && kind !== "camp" && kind !== "board") {
     speak("Шалаш, поле, загон и колодец — без столба. Двор даёт зону под дом и станки.", x, y, "нужен двор", "bad");
     return;
   }
@@ -2694,8 +2703,8 @@ function craftAxe() {
 function workDay() {
   const s = useGame.getState();
   const tile = hereTile();
-  if (!tile || (!tile.caravan && tile.building !== "board")) {
-    speak("Подёнщина — у лавки на тракте или у доски биржи.", s.character.x, s.character.y, "не здесь", "bad");
+  if (!tile || !tile.caravan) {
+    speak("Подёнщина — у лавки на тракте.", s.character.x, s.character.y, "не здесь", "bad");
     return;
   }
   if (s.character.energy < 4) {
@@ -3617,6 +3626,11 @@ function offerFriend() {
     log: pushLog(s.log, `${tile.owner} кивнул. Вы друзья. Воровать у друга — предательство.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "друг", tone: "ok" as const }].slice(-10),
   });
+}
+
+function lookBoard(x: number, y: number) {
+  void pullSpot();
+  void lookStreet(x, y);
 }
 
 function formVillage(name?: string) {

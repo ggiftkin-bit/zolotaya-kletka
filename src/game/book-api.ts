@@ -1423,6 +1423,40 @@ export const writeVillageDeed = createServerFn({ method: "POST" })
     return { ok: true as const, written, credit: merged.credit };
   });
 
+export const readStreetNotices = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: unknown) => z.object({ x: z.number(), y: z.number() }).parse(d))
+  .handler(async ({ data }) => {
+    const sql = await getSql();
+    const boardRows = await sql.query<TileRow>(
+      `select x, y, slim, ver, updated_at::text as updated_at from tile where world_id = $1 and x = $2 and y = $3`,
+      [WORLD_ID, data.x, data.y],
+    );
+    const board = boardRows[0];
+    if (!board) return { name: "", live: [] as TilePacket[] };
+    const slim = asSlim(board.slim);
+    if (slim.bd !== "board") return { name: "", live: [] as TilePacket[] };
+    const name = (slim.vg || "").trim();
+    if (!name) return { name: "", live: [] as TilePacket[] };
+    const rows = await sql.query<TileRow>(
+      `select x, y, slim, ver, updated_at::text as updated_at
+       from tile
+       where world_id = $1
+         and slim->>'vg' = $2
+         and (slim ? 'or' or slim ? 'sv')
+       limit 40`,
+      [WORLD_ID, name],
+    );
+    const live: TilePacket[] = rows.map((r) => ({
+      x: r.x,
+      y: r.y,
+      slim: asSlim(r.slim),
+      ver: r.ver,
+      updatedAt: r.updated_at,
+    }));
+    return { name, live };
+  });
+
 export const dropPawn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {

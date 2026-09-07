@@ -16,7 +16,7 @@ import {
   type BookFight,
   type WorldClock,
 } from "./book";
-import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, strikeBookFight, writeHarmDeed, writeServiceDeed, writeStallDeed, writeVillageDeed, writeWorldDeed } from "./book-api";
+import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, readStreetNotices, strikeBookFight, writeHarmDeed, writeServiceDeed, writeStallDeed, writeVillageDeed, writeWorldDeed } from "./book-api";
 import { rememberLiveFoe } from "./fight";
 import { makeJobs, makeTrader } from "./economy";
 import { TICKS_PER_DAY } from "./constants";
@@ -500,6 +500,23 @@ export async function commitVillage(
     const msg = err instanceof Error ? err.message : "";
     if (msg !== "Unauthorized") console.warn("[книга] имя", err);
     return false;
+  }
+}
+
+export async function lookStreet(x: number, y: number) {
+  if (!store) return;
+  const s = store.get();
+  if (!s.bookOn || !s.started) return;
+  try {
+    const res = await readStreetNotices({ data: { x, y } });
+    if (!res?.live.length) return;
+    let world = applyLive(store.get().world, localizePackets(res.live));
+    world = maskLiveFog(world, store.get().character.x, store.get().character.y);
+    store.set({ world });
+    rememberLive(store.get());
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg !== "Unauthorized") console.warn("[книга] доска", err);
   }
 }
 

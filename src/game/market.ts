@@ -2,8 +2,8 @@ import { ITEM_LABEL, ITEMS } from "./constants";
 import { BUILD_COST, BUILDING_LABEL, goldTxt } from "./economy";
 import { CRAFTS, atBench, type CraftKind } from "./craft";
 import { asPile, giveOrPile, pileSet, type Pile } from "./pile";
-import { chebyshev } from "./book";
-import type { BuildingKind, Character, Inventory, ItemId, ServiceJob, ServiceKind, Tile, Transport } from "./types";
+import { FOG_LIVE, chebyshev } from "./book";
+import type { BuildingKind, Character, Inventory, ItemId, ServiceJob, ServiceKind, Tile, Transport, World } from "./types";
 
 /** One lot on a stall. Item sits on the tile (escrow), not in the air. */
 export type StallOrder = {
@@ -476,3 +476,31 @@ export function applyCargoPile(tile: Tile, cargo: Partial<Record<ItemId, number>
 export function craftsAtTile(tile: Tile) {
   return CRAFTS.filter((d) => atBench(tile, d.bench));
 }
+
+/** Объявление улицы. Вещь на прилавке, не на доске. */
+export type StreetNotice = {
+  kind: "order" | "service";
+  x: number;
+  y: number;
+  line: string;
+};
+
+export function canReadBoard(tile: Tile, px: number, py: number, fog: number): boolean {
+  if (tile.building !== "board") return false;
+  if (fog !== FOG_LIVE) return false;
+  return chebyshev(px, py, tile.x, tile.y) <= 1;
+}
+
+export function streetNotices(world: World, name: string, now = Date.now()): StreetNotice[] {
+  if (!name) return [];
+  const rows: StreetNotice[] = [];
+  for (const t of world.tiles) {
+    if (t.village !== name) continue;
+    const order = stallOrderOf(t);
+    if (order) rows.push({ kind: "order", x: t.x, y: t.y, line: stallLine(order) });
+    const job = serviceJobOf(t);
+    if (job) rows.push({ kind: "service", x: t.x, y: t.y, line: serviceLine(job, now) });
+  }
+  return rows;
+}
+

@@ -289,6 +289,13 @@ export function isOutsideYard(world: World, x: number, y: number): boolean {
   return false;
 }
 
+export function canPlaceBoard(tile: Tile, mine: boolean): boolean {
+  if (!tile.village || tile.burned) return false;
+  if (tile.building !== "none") return false;
+  if (tile.plot) return mine;
+  return true;
+}
+
 export function atNameSpot(world: World, tile: Tile, owner = "you"): boolean {
   if (tile.plot && tile.owner === owner) return true;
   if (tile.fenceN === "gate" || tile.fenceW === "gate") return true;
@@ -297,3 +304,4 @@ export function atNameSpot(world: World, tile: Tile, owner = "you"): boolean {
   if (isOutsideYard(world, tile.x, tile.y)) return true;
   return false;
 }
+

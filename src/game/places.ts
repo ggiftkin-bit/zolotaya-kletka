@@ -97,7 +97,9 @@ export function placeHint(tile: Tile) {
     case "well":
       return "Ведро сюда.";
     case "board":
-      return "Заказы недели.";
+      return tile.village
+        ? "Доска имени. Ордер и услуга этой улицы. Берут у прилавка, не здесь."
+        : "Доска без имени. Пустой лист, не биржа.";
     case "mine":
     case "adit":
       return "Добыча из жилы.";

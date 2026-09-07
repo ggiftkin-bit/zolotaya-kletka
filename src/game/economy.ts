@@ -37,7 +37,7 @@ export const BUILDING_LABEL = {
   field: "поле",
   workshop: "верстак",
   shop: "лавка",
-  board: "биржа",
+  board: "доска",
   mine: "сруб",
   pen: "загон",
   stable: "конюшня",

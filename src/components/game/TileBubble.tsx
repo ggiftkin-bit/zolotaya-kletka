@@ -6,9 +6,9 @@ import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, waterHint } from "@/game/life";
 import { LIFE_INDEX } from "@/game/art";
 import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/places";
 import { FOG_DARK, FOG_LIVE, fogAt } from "@/game/book";
-import { bagGoods, canSeeService, craftsAtTile, isCraftStation, isGateTile, SERVICE_GOLD, SERVICE_LABEL, SERVICE_WAIT, serviceJobOf, serviceLine, stallLine, stallOrderOf, STALL_PRICES } from "@/game/market";
+import { bagGoods, canReadBoard, canSeeService, craftsAtTile, isCraftStation, isGateTile, SERVICE_GOLD, SERVICE_LABEL, SERVICE_WAIT, serviceJobOf, serviceLine, stallLine, stallOrderOf, STALL_PRICES, streetNotices } from "@/game/market";
 import { occupantAt } from "@/game/fight";
-import { canFoundVillage, canPutLiveName, clusterHint, hamletTitle, hasOwnYard, namesTouchingYard, villageOf } from "@/game/pact";
+import { canFoundVillage, canPlaceBoard, canPutLiveName, clusterHint, hamletTitle, hasOwnYard, namesTouchingYard, villageOf } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
 import { canDigReason, fillPay } from "@/game/pit";
 import { useGame, meetIsIgnored } from "@/game/store";
@@ -633,6 +633,12 @@ function PlacePane({ tile, here, near }: { tile: Tile; here: boolean; near: bool
     }
     return <StallBody tile={tile} />;
   }
+  if (tile.building === "board") {
+    if (!near) {
+      return <p className="mt-4 text-sm text-muted-foreground">Подойди к доске.</p>;
+    }
+    return <BoardBody tile={tile} />;
+  }
   if (!here) {
     return <p className="mt-4 text-sm text-muted-foreground">Зайди внутрь — встань на клетку.</p>;
   }
@@ -658,7 +664,6 @@ function PlacePane({ tile, here, near }: { tile: Tile; here: boolean; near: bool
   if (tile.building === "field") return <FieldBody tile={tile} />;
   if (tile.building === "pen" || tile.building === "stable") return <PenBody tile={tile} />;
   if (tile.building === "well") return <WellBody />;
-  if (tile.building === "board") return <BoardBody />;
   if (tile.building === "mine" || tile.building === "adit") return <MineBody tile={tile} />;
   if (tile.building === "tower") return <TowerBody tile={tile} />;
   if (tile.building === "net") {
@@ -1248,14 +1253,54 @@ function WellBody() {
   );
 }
 
-function BoardBody() {
+function BoardBody({ tile }: { tile: Tile }) {
+  const g = useGame();
+  useEffect(() => {
+    g.lookBoard(tile.x, tile.y);
+  }, [tile.x, tile.y]);
+  const live = fogAt(g.world, tile.x, tile.y) === FOG_LIVE;
+  const near = Math.max(Math.abs(g.character.x - tile.x), Math.abs(g.character.y - tile.y)) <= 1;
+  const readable = canReadBoard(tile, g.character.x, g.character.y, fogAt(g.world, tile.x, tile.y));
+  const name = tile.village;
+  const rows = readable && name ? streetNotices(g.world, name) : [];
+
+  if (!live) {
+    return <p className="mt-4 text-sm text-muted-foreground">В тумане доски нет. Подойди ближе.</p>;
+  }
+  if (!near) {
+    return <p className="mt-4 text-sm text-muted-foreground">Подойди к доске.</p>;
+  }
+  if (!name) {
+    return <p className="mt-4 text-sm text-muted-foreground">Доска без имени. Это не биржа двора и не стакан мира.</p>;
+  }
+  if (rows.length === 0) {
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">
+          «{name}». Ордера и услуги этой улицы. Вещь на прилавке, не здесь.
+        </p>
+        <p className="text-sm text-muted-foreground">Пусто.</p>
+      </div>
+    );
+  }
   return (
-    <div className="mt-3">
-      <p className="text-[13px] text-muted-foreground">Заказы недели. Сдают здесь, не из сумки.</p>
-      <Jobs />
+    <div className="mt-4 flex flex-col gap-2">
+      <p className="text-[13px] text-muted-foreground">
+        «{name}». Берут у прилавка или услуги, не с доски.
+      </p>
+      {rows.map((row) => (
+        <Sticker
+          key={`${row.kind}-${row.x}-${row.y}`}
+          title={row.line}
+          sub={row.kind === "order" ? "прилавок · пойти" : "услуга · пойти"}
+          ico={<Ico i={row.kind === "order" ? ICO.gold : ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => g.goTo(row.x, row.y)}
+        />
+      ))}
     </div>
   );
 }
+
 
 function MineBody({ tile }: { tile: Tile }) {
   const g = useGame();
@@ -1457,7 +1502,7 @@ function BuildPane({ tile }: { tile: Tile }) {
           {(tile.plot || tile.owned
             ? ([
                 ["Жильё", ["shack", "house", "shed", "camp"]],
-                ["Станки и столы", ["bench", "forge", "oven", "smoke", "herbs", "coalpit", "stall", "adit"]],
+                ["Станки и столы", ["bench", "forge", "oven", "smoke", "herbs", "coalpit", "stall", "board", "adit"]],
                 ["Двор", ["field", "well", "pen", "stable", "tower", "jail"]],
               ] as const)
             : ([
@@ -1494,6 +1539,24 @@ function BuildPane({ tile }: { tile: Tile }) {
               </div>
             </div>
           ))}
+          {canPlaceBoard(tile, isYours(tile)) && !tile.plot && (
+            <div>
+              <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">Имя</p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-1.5 h-11"
+                onClick={() => {
+                  g.setBuildKind("board");
+                  g.doBuild(tile.x, tile.y);
+                  g.closeInspect();
+                }}
+              >
+                {BUILDING_LABEL.board}
+                <span className="ml-1 text-[10px] text-muted-foreground">{BUILD_COST.board.wood} дер.</span>
+              </Button>
+            </div>
+          )}
         </>
       )}
     </div>
