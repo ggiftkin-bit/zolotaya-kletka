@@ -97,12 +97,13 @@ export const SELL_PACK: Partial<Record<ItemId, { n: number; gold: number }>> = {
   clay: { n: 6, gold: 1 },
   herb: { n: 10, gold: 1 },
   food: { n: 4, gold: 1 },
+  grain: { n: 4, gold: 1 },
   fish: { n: 3, gold: 1 },
   ore: { n: 2, gold: 1 },
   coal: { n: 3, gold: 1 },
 };
 
-const WINTER_PLUS = new Set<ItemId>(["food", "fish", "bread", "smoked", "coal"]);
+const WINTER_PLUS = new Set<ItemId>(["food", "grain", "fish", "bread", "smoked", "coal"]);
 
 /** Что лавка платит за штуку готового. Сырьё из пачки здесь 0. */
 export const SELL_GOLD: Record<ItemId, number> = {
@@ -136,6 +137,8 @@ export const SELL_GOLD: Record<ItemId, number> = {
   wadded: 2,
   helm: 5,
   brick: 1,
+  grain: 0,
+  flour: 1,
 };
 
 /** Покупка в лавке. Не ×2 к сдаче. */
@@ -170,6 +173,8 @@ export const BUY_GOLD: Record<ItemId, number> = {
   wadded: 8,
   helm: 16,
   brick: 3,
+  grain: 1,
+  flour: 3,
 };
 
 export function goldTxt(n: number): string {
@@ -283,6 +288,8 @@ export function makeTrader(week: number): Trader {
   demand.wheel = 4;
   demand.lock = 3;
   demand.brick = 4;
+  demand.grain = 8;
+  demand.flour = 4;
   const wares = zInv();
   wares.food = 8;
   wares.fish = 4;

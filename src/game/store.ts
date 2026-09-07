@@ -3,6 +3,7 @@ import {
   BUILD_OK,
   CAPACITY,
   DAYS_PER_WEEK,
+  FIELD_CROP,
   GATHER_YIELD,
   ITEMS,
   ITEM_LABEL,
@@ -3045,6 +3046,7 @@ function resolveBuild(s: GameState, c0: Character, tile: NonNullable<ReturnType<
   tile.matter = defaultMatter(kind);
   tile.hp = MATTER_HP[tile.matter];
   tile.burned = false;
+  if (kind === "field") tile.resource = FIELD_CROP;
   const c = bumpSkill(c0, "build", 0.2);
   useGame.setState({
     character: c,
@@ -4459,12 +4461,12 @@ function sowField() {
     speak("Уже всходит.", tile.x, tile.y, "всходит", "ok");
     return;
   }
-  if (s.character.inventory.food < 1) {
-    speak("Нужно зерно — 1 еда.", tile.x, tile.y, "нет зерна", "bad");
+  if ((s.character.inventory[FIELD_CROP] ?? 0) < 1) {
+    speak("Нужно зерно — 1 зерно.", tile.x, tile.y, "нет зерна", "bad");
     return;
   }
-  const inv = { ...s.character.inventory, food: s.character.inventory.food - 1 };
-  tile.resource = "food";
+  const inv = { ...s.character.inventory, [FIELD_CROP]: (s.character.inventory[FIELD_CROP] ?? 0) - 1 };
+  tile.resource = FIELD_CROP;
   tile.amount = isWatered(s.world, tile) ? 4 : 2;
   tile.scarred = false;
   tile.regen = 0;

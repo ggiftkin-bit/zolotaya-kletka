@@ -9,7 +9,7 @@ export function personLevel(skills: Skills): number {
 export const BUILD_HINT: Record<Exclude<BuildingKind, "none">, string> = {
   shack: "сон, верёвка, копьё, удочка",
   house: "крепкий сон, сундук",
-  field: "растёт еда",
+  field: "растёт зерно",
   pen: "коровы, молоко",
   stable: "лошади",
   well: "вода вокруг",
@@ -20,7 +20,7 @@ export const BUILD_HINT: Record<Exclude<BuildingKind, "none">, string> = {
   tower: "смотрит ночь, не стреляет",
   bench: "доска · плотник",
   forge: "слиток, топор, кирка, замок · кузнец",
-  oven: "хлеб · пекарь",
+  oven: "мука · любой, хлеб · пекарь",
   smoke: "копчёное · рыбак",
   herbs: "настой · целитель",
   stall: "прилавок у калитки",

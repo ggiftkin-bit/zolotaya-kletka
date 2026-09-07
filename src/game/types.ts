@@ -146,7 +146,9 @@ export type ItemId =
   | "bar_shield"
   | "wadded"
   | "helm"
-  | "brick";
+  | "brick"
+  | "grain"
+  | "flour";
 
 export type WearKind = "axe" | "pick" | "spear" | "shovel" | "club" | "knife";
 

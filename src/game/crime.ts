@@ -1,6 +1,7 @@
 import { JAIL_MS } from "./pace";
 import { plotBounds, setYardGateLock, yardStrength } from "./fence";
 import { asPile, pileTake } from "./pile";
+import { FIELD_CROP } from "./constants";
 import type { Character, Dummy, ItemId, Tile, World } from "./types";
 import { tileAt } from "./worldgen";
 
@@ -69,7 +70,7 @@ export function lootFrom(tile: Tile): { item: ItemId; n: number } | null {
     return { item: first, n };
   }
   if (tile.building === "field" && tile.amount > 0) {
-    return { item: "food", n: Math.min(tile.amount, 2) };
+    return { item: tile.resource ?? FIELD_CROP, n: Math.min(tile.amount, 2) };
   }
   return null;
 }

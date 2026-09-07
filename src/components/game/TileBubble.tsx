@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BIOME_LABEL, ITEM_LABEL, ITEMS } from "@/game/constants";
+import { BIOME_LABEL, FIELD_CROP, ITEM_LABEL, ITEMS } from "@/game/constants";
 import { CRAFTS, canDoCraft } from "@/game/craft";
 import { BUILD_COST, BUILDING_LABEL, CART_GOLD, CART_WOOD, LOCK_GOLD, WAGON_GOLD, caravanBuy, caravanSell, goldTxt, sellLot } from "@/game/economy";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, waterHint } from "@/game/life";
@@ -1213,7 +1213,7 @@ function FieldBody({ tile }: { tile: Tile }) {
       )}
       {tile.amount <= 0 && (
         <Button className="h-12" variant="secondary" onClick={() => g.sowField()}>
-          Засеять · 1 еда · крестьянин
+          Засеять · 1 {ITEM_LABEL[FIELD_CROP]} · крестьянин
         </Button>
       )}
     </div>

@@ -84,6 +84,8 @@ export const ITEM_ICO: Record<ItemId, number> = {
   wadded: 0,
   helm: ICO.ore,
   brick: ICO.stone,
+  grain: ICO.food,
+  flour: ICO.food,
 };
 
 export function ExtraIco({ i, className, alt }: { i: number; className?: string; alt?: string }) {
@@ -137,6 +139,7 @@ export function ItemPic({ id, className }: { id: ItemId; className?: string }) {
   if (id === "wadded") return <GearPic i={GEAR_ICO.rope} className={className} alt="" />;
   if (id === "helm") return <Ico i={ICO.ore} className={className} alt="" />;
   if (id === "brick") return <Ico i={ICO.stone} className={className} alt="" />;
+  if (id === "grain" || id === "flour") return <Ico i={ICO.food} className={className} alt="" />;
   return <Ico i={ITEM_ICO[id]} className={className} alt="" />;
 }
 

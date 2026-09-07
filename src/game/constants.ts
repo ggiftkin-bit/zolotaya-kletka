@@ -1,7 +1,7 @@
 import type { Biome, BuildingKind, Inventory, ItemId, Profession, Season, Transport, Weather } from "./types";
 
 /** Альфа. 0 всегда. Вторая цифра — новая механика. Третья — доработка. */
-export const GAME_VERSION = "0.13.0";
+export const GAME_VERSION = "0.14.0";
 
 /** Заливка паттерном (вода, луг, мох, камень, песок). false — плоские BIOME_FILL. */
 export const FILL_TEX = true;
@@ -45,6 +45,8 @@ export const ITEMS: ItemId[] = [
   "wadded",
   "helm",
   "brick",
+  "grain",
+  "flour",
 ];
 
 export const ITEM_WEIGHT: Record<ItemId, number> = {
@@ -78,6 +80,8 @@ export const ITEM_WEIGHT: Record<ItemId, number> = {
   wadded: 1.8,
   helm: 2.0,
   brick: 1.2,
+  grain: 0.4,
+  flour: 0.3,
 };
 
 export const CAPACITY: Record<Transport, number> = {
@@ -149,6 +153,8 @@ export const ITEM_LABEL: Record<ItemId, string> = {
   wadded: "стёганка",
   helm: "шлем",
   brick: "кирпич",
+  grain: "зерно",
+  flour: "мука",
 };
 
 export const TRANSPORT_LABEL: Record<Transport, string> = {
@@ -220,6 +226,8 @@ export const GATHER_YIELD: Record<ItemId, number> = {
   wadded: 0,
   helm: 0,
   brick: 0,
+  grain: 1,
+  flour: 0,
 };
 
 export const GATHER_TABLE: Partial<Record<Biome, { item: ItemId; yield: number }>> = {
@@ -231,6 +239,9 @@ export const GATHER_TABLE: Partial<Record<Biome, { item: ItemId; yield: number }
   ford: { item: "fish", yield: 2 },
   swamp: { item: "herb", yield: 1 },
 };
+
+/** Урожай клетки field. Дикая пашня остаётся едой. */
+export const FIELD_CROP: ItemId = "grain";
 
 export const SEASON_WEATHER: Record<Season, Weather[]> = {
   spring: ["clear", "rain", "rain", "clear"],

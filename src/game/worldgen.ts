@@ -1,5 +1,5 @@
 import { createNoise2D } from "simplex-noise";
-import { MAP_H, MAP_W, zeroInv } from "./constants";
+import { FIELD_CROP, MAP_H, MAP_W, zeroInv } from "./constants";
 import { allDarkFog, allOnesVer, maskLiveFog } from "./book";
 import { makeHerd } from "./life";
 import { HAMLETS, PLAYER_FIELD } from "./pact";
@@ -369,7 +369,7 @@ function stampHamlet(
     if (field && field.building === "none") {
       field.building = "field";
       field.amount = 6;
-      field.resource = "food";
+      field.resource = FIELD_CROP;
     }
   }
 }
@@ -505,7 +505,7 @@ export function migrateStations(world: World) {
 export function stampMeadowHerb(tiles: Tile[]) {
   for (const t of tiles) {
     if (t.building === "field") {
-      if (t.resource === "herb") t.resource = "food";
+      if (t.resource === "herb" || t.resource === "food") t.resource = FIELD_CROP;
       continue;
     }
     const blocked =

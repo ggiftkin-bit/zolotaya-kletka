@@ -1,4 +1,4 @@
-import { DAYS_PER_WEEK, SEASON_WEATHER, TICK_SEC, TICKS_PER_DAY, WEEKS_PER_SEASON } from "./constants";
+import { DAYS_PER_WEEK, FIELD_CROP, SEASON_WEATHER, TICK_SEC, TICKS_PER_DAY, WEEKS_PER_SEASON } from "./constants";
 import type { WorldClock } from "./book";
 import { isWatered } from "./life";
 import type { Season, Tile, Weather, World } from "./types";
@@ -7,6 +7,7 @@ import type { Season, Tile, Weather, World } from "./types";
 export const REGROW_WAIT: Record<string, number> = {
   wood: 4,
   food: 2,
+  grain: 2,
   herb: 2,
   fish: 1,
   stone: 7,
@@ -18,6 +19,7 @@ export const REGROW_WAIT: Record<string, number> = {
 const REGROW_CAP: Record<string, number> = {
   wood: 8,
   food: 6,
+  grain: 6,
   herb: 4,
   fish: 6,
   stone: 6,
@@ -123,7 +125,7 @@ export function growTile(world: World, t: Tile, season: Season) {
     return;
   }
   const cap = REGROW_CAP[t.resource] ?? 4;
-  const winterStop = season === "winter" && (t.resource === "wood" || t.resource === "food" || t.resource === "herb");
+  const winterStop = season === "winter" && (t.resource === "wood" || t.resource === "food" || t.resource === "grain" || t.resource === "herb");
   if (winterStop) return;
 
   if (t.amount <= 0 && t.scarred) {
@@ -164,7 +166,7 @@ export function growTile(world: World, t: Tile, season: Season) {
 
 function growField(world: World, t: Tile, season: Season) {
   if (season === "winter") return;
-  t.resource = "food";
+  t.resource = FIELD_CROP;
   if (t.amount <= 0) {
     t.regen = (t.regen ?? 2) - 1;
     if (t.regen > 0) return;
