@@ -1208,7 +1208,21 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
       if (!liveJob) return { ok: false as const, hint: "нет услуги", conflicts: asConflict(), written: [], credit: 0 };
       if (liveJob.by === userId) return { ok: false as const, hint: "свою услугу снимай сам", conflicts: [], written: [], credit: 0 };
       if (liveJob.take) return { ok: false as const, hint: "уже взяли", conflicts: asConflict(), written: [], credit: 0 };
-      if (reach > 1) return { ok: false as const, hint: "подойди", conflicts: [], written: [], credit: 0 };
+      if (reach > 1) {
+        const vg = liveTile.village;
+        let atBoard = false;
+        if (vg) {
+          const near = await sql.query<{ slim: unknown }>(
+            `select slim from tile where world_id = $1 and x between $2 and $3 and y between $4 and $5`,
+            [WORLD_ID, data.pawn.x - 1, data.pawn.x + 1, data.pawn.y - 1, data.pawn.y + 1],
+          );
+          atBoard = near.some((r) => {
+            const sl = asSlim(r.slim);
+            return sl.bd === "board" && sl.vg === vg;
+          });
+        }
+        if (!atBoard) return { ok: false as const, hint: "подойди", conflicts: [], written: [], credit: 0 };
+      }
       if (liveJob.kind === "bring") {
         const need = liveJob.n ?? 1;
         const it = liveJob.item;

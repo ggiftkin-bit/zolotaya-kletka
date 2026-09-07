@@ -6,7 +6,7 @@ import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, waterHint } from "@/game/life";
 import { LIFE_INDEX } from "@/game/art";
 import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/places";
 import { FOG_DARK, FOG_LIVE, fogAt } from "@/game/book";
-import { bagGoods, bringDestLine, bringDests, BRING_GOODS, BRING_N, canReadBoard, canSeeService, craftsAtTile, isCraftStation, isGateTile, SERVICE_DO, SERVICE_GOLD, SERVICE_LABEL, serviceJobOf, serviceLine, stallLine, stallOrderOf, STALL_PRICES, streetNotices } from "@/game/market";
+import { bagGoods, bringDestLine, bringDests, BRING_GOODS, BRING_N, canPostFromBoard, canReadBoard, canSeeService, craftsAtTile, firstOwnGate, firstOwnShed, isCraftStation, isGateTile, SERVICE_DO, SERVICE_GOLD, SERVICE_LABEL, serviceJobOf, serviceLine, stallLine, stallOrderOf, STALL_PRICES, streetNotices } from "@/game/market";
 import { occupantAt } from "@/game/fight";
 import { canFoundVillage, canPlaceBoard, canPutLiveName, clusterHint, hamletTitle, hasOwnYard, namesTouchingYard, villageOf } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
@@ -1353,6 +1353,9 @@ function BoardBody({ tile }: { tile: Tile }) {
   const readable = canReadBoard(tile, g.character.x, g.character.y, fogAt(g.world, tile.x, tile.y));
   const name = tile.village;
   const rows = readable && name ? streetNotices(g.world, name) : [];
+  const mine = isYours(tile);
+  const canHang = mine && canPostFromBoard(tile, mine, g.character.x, g.character.y);
+  const [tab, setTab] = useState<"list" | "hang">("list");
 
   if (!live) {
     return <p className="mt-4 text-sm text-muted-foreground">В тумане доски нет. Подойди ближе.</p>;
@@ -1360,33 +1363,267 @@ function BoardBody({ tile }: { tile: Tile }) {
   if (!near) {
     return <p className="mt-4 text-sm text-muted-foreground">Подойди к доске.</p>;
   }
+
+  const tabs = canHang ? (
+    <div className="mt-3 flex gap-1">
+      <Button variant={tab === "list" ? "default" : "outline"} className="h-10 flex-1" onClick={() => setTab("list")}>
+        Висят
+      </Button>
+      <Button variant={tab === "hang" ? "default" : "outline"} className="h-10 flex-1" onClick={() => setTab("hang")}>
+        Повесить
+      </Button>
+    </div>
+  ) : null;
+
+  if (tab === "hang" && canHang) {
+    return (
+      <div>
+        {tabs}
+        <HangFromBoard tile={tile} />
+      </div>
+    );
+  }
+
   if (!name) {
-    return <p className="mt-4 text-sm text-muted-foreground">Доска без имени. Это не биржа двора и не стакан мира.</p>;
+    return (
+      <div>
+        {tabs}
+        <p className="mt-4 text-sm text-muted-foreground">Доска без имени. Лист пуст — саму доску ставят. Повесить можно на свою клетку.</p>
+      </div>
+    );
   }
   if (rows.length === 0) {
     return (
-      <div className="mt-4 flex flex-col gap-2">
-        <p className="text-[13px] text-muted-foreground">
-          «{name}». Ордера и услуги этой улицы. Вещь на прилавке, не здесь.
-        </p>
-        <p className="text-sm text-muted-foreground">Пусто.</p>
+      <div>
+        {tabs}
+        <div className="mt-4 flex flex-col gap-2">
+          <p className="text-[13px] text-muted-foreground">
+            «{name}». Ордера и услуги этой улицы.
+          </p>
+          <p className="text-sm text-muted-foreground">Пусто.</p>
+        </div>
       </div>
     );
   }
   return (
+    <div>
+      {tabs}
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">
+          «{name}». Берут здесь или у цели.
+        </p>
+        {rows.map((row) => {
+          const jobTile = row.kind === "service" ? tileAt(g.world, row.x, row.y) : null;
+          const job = jobTile ? serviceJobOf(jobTile) : null;
+          const takeHere = !!(job && job.by !== "you" && !job.take);
+          return (
+            <Sticker
+              key={`${row.kind}-${row.x}-${row.y}`}
+              title={row.line}
+              sub={row.kind === "order" ? "прилавок · пойти" : takeHere ? "услуга · взять" : "услуга · пойти"}
+              ico={<Ico i={row.kind === "order" ? ICO.gold : ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
+              onClick={() => {
+                if (takeHere) g.takeServiceAt(row.x, row.y);
+                else g.goTo(row.x, row.y);
+              }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function HangFromBoard({ tile }: { tile: Tile }) {
+  const g = useGame();
+  const [kind, setKind] = useState<"watch" | "haul" | "craft" | "build" | "bring" | null>(null);
+  const [haulItem, setHaulItem] = useState<ItemId | null>(null);
+  const [bringItem, setBringItem] = useState<ItemId | null>(null);
+  const [bringN, setBringN] = useState<number | null>(null);
+  const [dest, setDest] = useState<Tile | null>(null);
+  const [craftId, setCraftId] = useState<string | null>(null);
+  const [buildKind, setBuildKind] = useState<BuildingKind | null>(null);
+  const gate = firstOwnGate(g.world);
+  const shed = firstOwnShed(g.world);
+  const goods = bagGoods(g.character);
+  const dests = bringDests(g.world, tile);
+  const stations = g.world.tiles.filter((t) => isYours(t) && craftsAtTile(t).length > 0).slice(0, 8);
+  const plots = g.world.tiles.filter((t) => isYours(t) && t.plot && t.building === "none").slice(0, 8);
+
+  const goldPick = (onPick: (n: number) => void) => (
     <div className="mt-4 flex flex-col gap-2">
-      <p className="text-[13px] text-muted-foreground">
-        «{name}». Берут у прилавка или услуги, не с доски.
-      </p>
-      {rows.map((row) => (
+      <p className="text-[13px] text-muted-foreground">Цена словом. Золото сразу в книгу.</p>
+      {SERVICE_GOLD.map((n) => (
         <Sticker
-          key={`${row.kind}-${row.x}-${row.y}`}
-          title={row.line}
-          sub={row.kind === "order" ? "прилавок · пойти" : "услуга · пойти"}
-          ico={<Ico i={row.kind === "order" ? ICO.gold : ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
-          onClick={() => g.goTo(row.x, row.y)}
+          key={n}
+          title={goldTxt(n)}
+          ico={<Ico i={ICO.gold} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => onPick(n)}
         />
       ))}
+      <Button variant="outline" className="h-12" onClick={() => setDest(null)}>
+        Назад
+      </Button>
+    </div>
+  );
+
+  const destBtns = (need: Tile[], onPick: (t: Tile) => void) => (
+    <div className="mt-4 flex flex-col gap-2">
+      <p className="text-[13px] text-muted-foreground">Куда. Тык клетки или к калитке / на склад.</p>
+      {gate && (
+        <Sticker title="к калитке" sub={bringDestLine(gate)} ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => onPick(gate)} />
+      )}
+      {shed && (
+        <Sticker title="на склад" sub={bringDestLine(shed)} ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => onPick(shed)} />
+      )}
+      {need.map((d) => (
+        <Sticker
+          key={`${d.x},${d.y}`}
+          title={bringDestLine(d)}
+          sub={`${d.x},${d.y}`}
+          ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => onPick(d)}
+        />
+      ))}
+      <Button variant="outline" className="h-12" onClick={() => { setKind(null); setHaulItem(null); setBringItem(null); setBringN(null); setCraftId(null); setBuildKind(null); }}>
+        Назад
+      </Button>
+    </div>
+  );
+
+  if (kind === "watch" && dest) {
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">Постой. Срок на дело, не на вывеску.</p>
+        {SERVICE_DO.map((sec) => (
+          <div key={sec} className="flex flex-col gap-1">
+            {SERVICE_GOLD.map((n) => (
+              <Sticker
+                key={`${sec}-${n}`}
+                title={`${sec / 60} мин · ${goldTxt(n)}`}
+                ico={<Ico i={ICO.gold} className="size-11 overflow-hidden rounded-[12px]" />}
+                onClick={() => g.postWatch(n, sec, dest.x, dest.y)}
+              />
+            ))}
+          </div>
+        ))}
+        <Button variant="outline" className="h-12" onClick={() => setDest(null)}>Назад</Button>
+      </div>
+    );
+  }
+  if (kind === "watch") return destBtns(gate ? [gate] : dests.filter(isGateTile), setDest);
+
+  if (kind === "haul" && haulItem && dest) {
+    return goldPick((n) => {
+      g.postHaul(haulItem, n, dest.x, dest.y);
+      setHaulItem(null);
+      setDest(null);
+      setKind(null);
+    });
+  }
+  if (kind === "haul" && haulItem) return destBtns(dests.filter((d) => isGateTile(d) || d.building === "stall"), setDest);
+  if (kind === "haul") {
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">Вещь из сумки. Отвезут на цель.</p>
+        {goods.length === 0 ? <p className="text-sm text-muted-foreground">Сумка пуста.</p> : goods.map((k) => (
+          <Sticker key={k} title={ITEM_LABEL[k]} sub={`в сумке ×${g.character.inventory[k]}`} ico={<ItemPic id={k} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => setHaulItem(k)} />
+        ))}
+        <Button variant="outline" className="h-12" onClick={() => setKind(null)}>Назад</Button>
+      </div>
+    );
+  }
+
+  if (kind === "bring" && bringItem && bringN != null && dest) {
+    return goldPick((n) => {
+      g.postBring(bringItem, bringN, dest.x, dest.y, n, true);
+      setBringItem(null);
+      setBringN(null);
+      setDest(null);
+      setKind(null);
+    });
+  }
+  if (kind === "bring" && bringItem && bringN != null) return destBtns(dests, setDest);
+  if (kind === "bring" && bringItem) {
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">{ITEM_LABEL[bringItem]}. Сколько: 1–8.</p>
+        {BRING_N.map((n) => (
+          <Sticker key={n} title={`×${n}`} ico={<ItemPic id={bringItem} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => setBringN(n)} />
+        ))}
+        <Button variant="outline" className="h-12" onClick={() => setBringItem(null)}>Назад</Button>
+      </div>
+    );
+  }
+  if (kind === "bring") {
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">Что привезти. Несёт исполнитель.</p>
+        {BRING_GOODS.map((k) => (
+          <Sticker key={k} title={ITEM_LABEL[k]} ico={<ItemPic id={k} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => setBringItem(k)} />
+        ))}
+        <Button variant="outline" className="h-12" onClick={() => setKind(null)}>Назад</Button>
+      </div>
+    );
+  }
+
+  if (kind === "craft" && craftId && dest) {
+    return goldPick((n) => {
+      g.postCraft(craftId as Parameters<typeof g.postCraft>[0], n, dest.x, dest.y);
+      setCraftId(null);
+      setDest(null);
+      setKind(null);
+    });
+  }
+  if (kind === "craft" && craftId) return destBtns(stations, setDest);
+  if (kind === "craft") {
+    const all = stations.flatMap((st) => craftsAtTile(st).map((d) => ({ d, st })));
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">Рецепт своего станка.</p>
+        {all.length === 0 ? <p className="text-sm text-muted-foreground">Нет станка.</p> : all.map(({ d }) => (
+          <Sticker key={d.id} title={d.label} sub={d.hint} ico={<ItemPic id={d.out} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => setCraftId(d.id)} />
+        ))}
+        <Button variant="outline" className="h-12" onClick={() => setKind(null)}>Назад</Button>
+      </div>
+    );
+  }
+
+  if (kind === "build" && buildKind && dest) {
+    return goldPick((n) => {
+      g.postBuild(buildKind, n, dest.x, dest.y);
+      setBuildKind(null);
+      setDest(null);
+      setKind(null);
+    });
+  }
+  if (kind === "build" && buildKind) return destBtns(plots, setDest);
+  if (kind === "build") {
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">Построй на пустой клетке двора.</p>
+        {BUILDINGS.map((b) => (
+          <Sticker
+            key={b}
+            title={BUILDING_LABEL[b]}
+            sub={`${BUILD_COST[b].wood ? `${BUILD_COST[b].wood} дер.` : ""}${BUILD_COST[b].wood && BUILD_COST[b].stone ? " · " : ""}${BUILD_COST[b].stone ? `${BUILD_COST[b].stone} кам.` : ""}`}
+            ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
+            onClick={() => setBuildKind(b)}
+          />
+        ))}
+        <Button variant="outline" className="h-12" onClick={() => setKind(null)}>Назад</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 flex flex-col gap-2">
+      <p className="text-[13px] text-muted-foreground">Род → что → сколько → куда → золото. Заказ на цель.</p>
+      <Sticker title={SERVICE_LABEL.watch} sub="у калитки" ico={<Ico i={ICO.boots} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => setKind("watch")} />
+      <Sticker title={SERVICE_LABEL.haul} sub="из сумки на цель" ico={<Ico i={ICO.wood} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => setKind("haul")} />
+      <Sticker title={SERVICE_LABEL.bring} sub="своё на склад или калитку" ico={<Ico i={ICO.wood} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => setKind("bring")} />
+      <Sticker title={SERVICE_LABEL.craft} sub="рецепт станка" ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => setKind("craft")} />
+      <Sticker title={SERVICE_LABEL.build} sub="пустой плот" ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => setKind("build")} />
     </div>
   );
 }

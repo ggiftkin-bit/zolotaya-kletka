@@ -180,6 +180,36 @@ export function canPostService(tile: Tile, mine: boolean): boolean {
   return false;
 }
 
+export function canPostFromBoard(board: Tile, mine: boolean, px: number, py: number): boolean {
+  if (!mine || board.burned || board.building !== "board") return false;
+  return chebyshev(px, py, board.x, board.y) <= 1;
+}
+
+function atXY(world: World, x: number, y: number): Tile | null {
+  if (x < 0 || y < 0 || x >= world.width || y >= world.height) return null;
+  return world.tiles[y * world.width + x] ?? null;
+}
+
+export function nearVillageBoard(world: World, px: number, py: number, village: string): boolean {
+  if (!village) return false;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const t = atXY(world, px + dx, py + dy);
+      if (t?.building === "board" && t.village === village) return true;
+    }
+  }
+  return false;
+}
+
+export function canBringTarget(dest: Tile, destMine: boolean): boolean {
+  if (!destMine || dest.burned) return false;
+  if (dest.building === "board") return false;
+  if (dest.building === "shed") return true;
+  if (isGateTile(dest)) return true;
+  if (dest.plot) return true;
+  return false;
+}
+
 export function canSeeService(tile: Tile, mine: boolean): boolean {
   return !!serviceJobOf(tile) || canPostService(tile, mine);
 }
@@ -296,12 +326,18 @@ export function planPostBring(
   gold: number,
 ): { ok: true; job: ServiceJob; gold: number } | { ok: false; hint: string } {
   if (!mine) return { ok: false, hint: "Свою услугу клади у себя." };
-  if (!isGateTile(tile) && tile.building !== "stall") return { ok: false, hint: "Привези — у калитки или прилавка." };
   if (serviceJobOf(tile)) return { ok: false, hint: "Сначала сними услугу." };
   if (!isItemId(item)) return { ok: false, hint: "Этого не просят." };
   const count = Math.floor(n);
   if (count < 1 || count > 8) return { ok: false, hint: "Число: 1–8." };
-  if (!canBringDest(tile, dest, dest.owner === "you" || (!dest.owner && !!dest.owned))) return { ok: false, hint: "Куда: свой двор, склад или калитка." };
+  const destMine = dest.owner === "you" || (!dest.owner && !!dest.owned);
+  const onDest = tile.x === dest.x && tile.y === dest.y;
+  if (onDest) {
+    if (!canBringTarget(dest, destMine)) return { ok: false, hint: "Куда: свой двор, склад или калитка." };
+  } else {
+    if (!isGateTile(tile) && tile.building !== "stall") return { ok: false, hint: "Привези — у калитки или прилавка." };
+    if (!canBringDest(tile, dest, destMine)) return { ok: false, hint: "Куда: свой двор, склад или калитка." };
+  }
   const pay = payGold(purse, gold);
   if (!pay.ok) return pay;
   return {
@@ -321,13 +357,8 @@ export function planPostBring(
 }
 
 export function canBringDest(hang: Tile, dest: Tile, destMine: boolean): boolean {
-  if (!destMine || dest.burned) return false;
   if (dest.x === hang.x && dest.y === hang.y) return false;
-  if (dest.building === "board") return false;
-  if (dest.building === "shed") return true;
-  if (isGateTile(dest)) return true;
-  if (dest.plot) return true;
-  return false;
+  return canBringTarget(dest, destMine);
 }
 
 export function bringDests(world: World, hang: Tile, owner = "you"): Tile[] {
@@ -348,6 +379,22 @@ export function bringDestLine(dest: Tile): string {
   if (dest.building === "house" || dest.building === "shack") return BUILDING_LABEL[dest.building];
   if (dest.plot) return "двор";
   return `${dest.x},${dest.y}`;
+}
+
+export function firstOwnGate(world: World, owner = "you"): Tile | null {
+  const mine = (t: Tile) => t.owner === owner || (!t.owner && !!t.owned && owner === "you");
+  for (const t of world.tiles) {
+    if (mine(t) && isGateTile(t)) return t;
+  }
+  return null;
+}
+
+export function firstOwnShed(world: World, owner = "you"): Tile | null {
+  const mine = (t: Tile) => t.owner === owner || (!t.owner && !!t.owned && owner === "you");
+  for (const t of world.tiles) {
+    if (mine(t) && t.building === "shed") return t;
+  }
+  return null;
 }
 
 export function planPostBuild(
@@ -402,12 +449,17 @@ export function planTakeService(
   busy: Character["busy"],
   now: number,
   inv?: Inventory,
+  world?: World,
 ): { ok: true; job: ServiceJob } | { ok: false; hint: string } {
   const job = serviceJobOf(tile);
   if (!job) return { ok: false, hint: "Нет услуги." };
   if (mine || job.by === "you") return { ok: false, hint: "Свою услугу снимай, не бери." };
   if (job.take) return { ok: false, hint: "Уже взяли." };
-  if (chebyshev(px, py, tile.x, tile.y) > 1) return { ok: false, hint: "Подойди." };
+  if (chebyshev(px, py, tile.x, tile.y) > 1) {
+    if (!world || !tile.village || !nearVillageBoard(world, px, py, tile.village)) {
+      return { ok: false, hint: "Подойди." };
+    }
+  }
   if (busy && busy.until > Date.now()) return { ok: false, hint: "Сначала доделай своё дело." };
   if (job.kind === "bring") {
     const need = job.n ?? 1;

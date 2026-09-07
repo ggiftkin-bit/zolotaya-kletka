@@ -111,6 +111,7 @@ import {
   planTake,
   planTakeService,
   SERVICE_LABEL,
+  canPostFromBoard,
   serviceBusyUntil,
   serviceJobOf,
   serviceLine,
@@ -560,12 +561,13 @@ type Actions = {
   putStall: (item: ItemId, gold: number) => void;
   dropStall: () => void;
   takeStall: () => void;
-  postWatch: (gold: number, waitSec: number) => void;
-  postHaul: (item: ItemId, gold: number) => void;
-  postBring: (item: ItemId, n: number, destX: number, destY: number, gold: number) => void;
-  postCraft: (craft: CraftKind, gold: number) => void;
-  postBuild: (kind: BuildingKind, gold: number) => void;
+  postWatch: (gold: number, waitSec: number, destX?: number, destY?: number) => void;
+  postHaul: (item: ItemId, gold: number, destX?: number, destY?: number) => void;
+  postBring: (item: ItemId, n: number, destX: number, destY: number, gold: number, onDest?: boolean) => void;
+  postCraft: (craft: CraftKind, gold: number, destX?: number, destY?: number) => void;
+  postBuild: (kind: BuildingKind, gold: number, destX?: number, destY?: number) => void;
   takeService: () => void;
+  takeServiceAt: (x: number, y: number) => void;
   dropService: () => void;
   startMeet: (foeId: string) => void;
   meetPass: (foeId?: string) => void;
@@ -1239,12 +1241,13 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   putStall: (item, gold) => putStall(item, gold),
   dropStall: () => dropStall(),
   takeStall: () => takeStall(),
-  postWatch: (gold, waitSec) => postWatch(gold, waitSec),
-  postHaul: (item, gold) => postHaul(item, gold),
-  postBring: (item, n, destX, destY, gold) => postBring(item, n, destX, destY, gold),
-  postCraft: (craft, gold) => postCraft(craft, gold),
-  postBuild: (kind, gold) => postBuild(kind, gold),
+  postWatch: (gold, waitSec, destX, destY) => postWatch(gold, waitSec, destX, destY),
+  postHaul: (item, gold, destX, destY) => postHaul(item, gold, destX, destY),
+  postBring: (item, n, destX, destY, gold, onDest) => postBring(item, n, destX, destY, gold, onDest),
+  postCraft: (craft, gold, destX, destY) => postCraft(craft, gold, destX, destY),
+  postBuild: (kind, gold, destX, destY) => postBuild(kind, gold, destX, destY),
   takeService: () => takeService(),
+  takeServiceAt: (x, y) => takeServiceAt(x, y),
   dropService: () => dropService(),
   startMeet: (foeId) => startMeet(foeId),
   meetPass: (foeId) => meetPass(foeId),
@@ -4795,16 +4798,33 @@ function finishService(kind: "done" | "fail", early?: "arrive" | "work") {
   });
 }
 
-function postWatch(gold: number, waitSec: number) {
+function serviceSpot(destX?: number, destY?: number): { dest: Tile; fromBoard: boolean } | null {
+  const s = useGame.getState();
+  const here = serviceHere();
+  if (destX != null && destY != null) {
+    const dest = tileAt(s.world, destX, destY);
+    if (!dest) return null;
+    if (here?.building === "board") {
+      if (!canPostFromBoard(here, isYours(here), s.character.x, s.character.y)) return null;
+      return { dest, fromBoard: true };
+    }
+    return { dest, fromBoard: false };
+  }
+  if (!here) return null;
+  return { dest: here, fromBoard: false };
+}
+
+function postWatch(gold: number, waitSec: number, destX?: number, destY?: number) {
   const s = useGame.getState();
   if (serviceBlocked()) return;
-  const tile = serviceHere();
-  if (!tile) return;
-  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
+  const spot = serviceSpot(destX, destY);
+  if (!spot) return;
+  const tile = spot.dest;
+  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE && !spot.fromBoard) {
     speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
     return;
   }
-  if (!canReachStall(s.character.x, s.character.y, tile)) {
+  if (!spot.fromBoard && !canReachStall(s.character.x, s.character.y, tile)) {
     speak("Подойди.", tile.x, tile.y, "подойди", "bad");
     return;
   }
@@ -4827,16 +4847,17 @@ function postWatch(gold: number, waitSec: number) {
   });
 }
 
-function postHaul(item: ItemId, gold: number) {
+function postHaul(item: ItemId, gold: number, destX?: number, destY?: number) {
   const s = useGame.getState();
   if (serviceBlocked()) return;
-  const tile = serviceHere();
-  if (!tile) return;
-  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
+  const spot = serviceSpot(destX, destY);
+  if (!spot) return;
+  const tile = spot.dest;
+  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE && !spot.fromBoard) {
     speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
     return;
   }
-  if (!canReachStall(s.character.x, s.character.y, tile)) {
+  if (!spot.fromBoard && !canReachStall(s.character.x, s.character.y, tile)) {
     speak("Подойди.", tile.x, tile.y, "подойди", "bad");
     return;
   }
@@ -4860,24 +4881,30 @@ function postHaul(item: ItemId, gold: number) {
   });
 }
 
-function postBring(item: ItemId, n: number, destX: number, destY: number, gold: number) {
+function postBring(item: ItemId, n: number, destX: number, destY: number, gold: number, onDest = false) {
   const s = useGame.getState();
   if (serviceBlocked()) return;
-  const tile = serviceHere();
-  if (!tile) return;
-  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
-    speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
-    return;
-  }
-  if (!canReachStall(s.character.x, s.character.y, tile)) {
-    speak("Подойди.", tile.x, tile.y, "подойди", "bad");
-    return;
-  }
   const dest = tileAt(s.world, destX, destY);
   if (!dest) {
-    speak("Куда: свой двор, склад или калитка.", tile.x, tile.y, "нет", "bad");
+    speak("Куда: свой двор, склад или калитка.", s.character.x, s.character.y, "нет", "bad");
     return;
   }
+  const hang = onDest ? dest : serviceHere();
+  if (!hang) return;
+  const fromBoard = hang.building === "board" || onDest;
+  if (fromBoard && hang.building === "board" && !canPostFromBoard(hang, isYours(hang), s.character.x, s.character.y)) {
+    speak("Подойди к доске.", hang.x, hang.y, "подойди", "bad");
+    return;
+  }
+  if (!fromBoard && fogAt(s.world, hang.x, hang.y) !== FOG_LIVE) {
+    speak("В тумане услуги нет.", hang.x, hang.y, "туман", "bad");
+    return;
+  }
+  if (!fromBoard && !canReachStall(s.character.x, s.character.y, hang)) {
+    speak("Подойди.", hang.x, hang.y, "подойди", "bad");
+    return;
+  }
+  const tile = onDest ? dest : hang;
   const plan = planPostBring(tile, isYours(tile), s.character.gold, item, n, dest, gold);
   if (!plan.ok) {
     speak(plan.hint, tile.x, tile.y, "нет", "bad");
@@ -4897,16 +4924,17 @@ function postBring(item: ItemId, n: number, destX: number, destY: number, gold: 
   });
 }
 
-function postCraft(craft: CraftKind, gold: number) {
+function postCraft(craft: CraftKind, gold: number, destX?: number, destY?: number) {
   const s = useGame.getState();
   if (serviceBlocked()) return;
-  const tile = serviceHere();
-  if (!tile) return;
-  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
+  const spot = serviceSpot(destX, destY);
+  if (!spot) return;
+  const tile = spot.dest;
+  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE && !spot.fromBoard) {
     speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
     return;
   }
-  if (!canReachStall(s.character.x, s.character.y, tile)) {
+  if (!spot.fromBoard && !canReachStall(s.character.x, s.character.y, tile)) {
     speak("Подойди.", tile.x, tile.y, "подойди", "bad");
     return;
   }
@@ -4933,16 +4961,17 @@ function postCraft(craft: CraftKind, gold: number) {
   });
 }
 
-function postBuild(kind: BuildingKind, gold: number) {
+function postBuild(kind: BuildingKind, gold: number, destX?: number, destY?: number) {
   const s = useGame.getState();
   if (serviceBlocked()) return;
-  const tile = serviceHere();
-  if (!tile) return;
-  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
+  const spot = serviceSpot(destX, destY);
+  if (!spot) return;
+  const tile = spot.dest;
+  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE && !spot.fromBoard) {
     speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
     return;
   }
-  if (!canReachStall(s.character.x, s.character.y, tile)) {
+  if (!spot.fromBoard && !canReachStall(s.character.x, s.character.y, tile)) {
     speak("Подойди.", tile.x, tile.y, "подойди", "bad");
     return;
   }
@@ -4970,14 +4999,26 @@ function postBuild(kind: BuildingKind, gold: number) {
 
 function takeService() {
   const s = useGame.getState();
-  if (serviceBlocked()) return;
   const tile = serviceHere();
   if (!tile) return;
+  takeServiceOn(tile);
+}
+
+function takeServiceAt(x: number, y: number) {
+  const s = useGame.getState();
+  const tile = tileAt(s.world, x, y);
+  if (!tile) return;
+  takeServiceOn(tile);
+}
+
+function takeServiceOn(tile: Tile) {
+  const s = useGame.getState();
+  if (serviceBlocked()) return;
   if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
     speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
     return;
   }
-  const plan = planTakeService(tile, isYours(tile), s.character.x, s.character.y, s.character.busy, Date.now(), s.character.inventory);
+  const plan = planTakeService(tile, isYours(tile), s.character.x, s.character.y, s.character.busy, Date.now(), s.character.inventory, s.world);
   if (!plan.ok) {
     speak(plan.hint, tile.x, tile.y, "нет", "bad");
     return;
