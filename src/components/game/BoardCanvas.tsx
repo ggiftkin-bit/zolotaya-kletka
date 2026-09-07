@@ -1508,7 +1508,7 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
 
   if (tile.road !== "none") paintRoad(ctx, tile, world, x, y);
 
-  if (tile.owned && !tile.plot) {
+  if (tile.owned && !tile.plot && tile.building === "none") {
     ctx.fillStyle = "#6b3a2a";
     ctx.beginPath();
     ctx.moveTo(x + TILE - 8, y + 6);

@@ -95,7 +95,60 @@ export function setEdge(world: World, ax: number, ay: number, bx: number, by: nu
   }
 }
 
-export function stampYard(world: World, x0: number, y0: number, x1: number, y1: number, gateX: number, gateY: number) {
+/** Клетка, на которой лежит ребро, есть на карте. Юг и восток двора могут выйти за край. */
+function edgeWritable(world: World, ax: number, ay: number, bx: number, by: number): boolean {
+  if (bx === ax && by === ay - 1) return !!tileAt(world, ax, ay);
+  if (bx === ax && by === ay + 1) return !!tileAt(world, ax, ay + 1);
+  if (by === ay && bx === ax - 1) return !!tileAt(world, ax, ay);
+  if (by === ay && bx === ax + 1) return !!tileAt(world, ax + 1, ay);
+  return false;
+}
+
+function pickYardGate(
+  world: World,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  gateX: number,
+  gateY: number,
+): [number, number, number, number] | null {
+  const gx = Math.min(x1, Math.max(x0, gateX));
+  const gy = Math.min(y1, Math.max(y0, gateY));
+  let best: [number, number, number, number] | null = null;
+  let bestD = Infinity;
+  const tryEdge = (ax: number, ay: number, bx: number, by: number) => {
+    if (!edgeWritable(world, ax, ay, bx, by)) return;
+    const d = Math.abs(ax - gateX) + Math.abs(ay - gateY);
+    if (d < bestD) {
+      bestD = d;
+      best = [ax, ay, bx, by];
+    }
+  };
+  tryEdge(gx, y0, gx, y0 - 1);
+  tryEdge(gx, y1, gx, y1 + 1);
+  tryEdge(x0, gy, x0 - 1, gy);
+  tryEdge(x1, gy, x1 + 1, gy);
+  return best;
+}
+
+export function yardHasGate(world: World, x0: number, y0: number, x1: number, y1: number): boolean {
+  for (let x = x0; x <= x1; x++) {
+    if (fenceOn(tileAt(world, x, y0), "n") === "gate") return true;
+    if (fenceOn(tileAt(world, x, y1 + 1), "n") === "gate") return true;
+  }
+  for (let y = y0; y <= y1; y++) {
+    if (fenceOn(tileAt(world, x0, y), "w") === "gate") return true;
+    if (fenceOn(tileAt(world, x1 + 1, y), "w") === "gate") return true;
+  }
+  return false;
+}
+
+/** Периметр без калитки не пишем. Нет ребра под калитку — двор не трогаем. */
+export function stampYard(world: World, x0: number, y0: number, x1: number, y1: number, gateX: number, gateY: number): boolean {
+  const already = yardHasGate(world, x0, y0, x1, y1);
+  const gate = already ? null : pickYardGate(world, x0, y0, x1, y1, gateX, gateY);
+  if (!already && !gate) return false;
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
       const t = tileAt(world, x, y);
@@ -107,33 +160,18 @@ export function stampYard(world: World, x0: number, y0: number, x1: number, y1: 
   }
   for (let x = x0; x <= x1; x++) {
     const top = tileAt(world, x, y0);
-    if (top) top.fenceN = "wood";
+    if (top && top.fenceN !== "gate") top.fenceN = "wood";
     const bot = tileAt(world, x, y1 + 1);
-    if (bot) bot.fenceN = "wood";
+    if (bot && bot.fenceN !== "gate") bot.fenceN = "wood";
   }
   for (let y = y0; y <= y1; y++) {
     const left = tileAt(world, x0, y);
-    if (left) left.fenceW = "wood";
+    if (left && left.fenceW !== "gate") left.fenceW = "wood";
     const right = tileAt(world, x1 + 1, y);
-    if (right) right.fenceW = "wood";
+    if (right && right.fenceW !== "gate") right.fenceW = "wood";
   }
-  const gx = Math.min(x1, Math.max(x0, gateX));
-  const gy = Math.min(y1, Math.max(y0, gateY));
-  let best: [number, number, number, number] | null = null;
-  let bestD = 99;
-  const tryEdge = (ax: number, ay: number, bx: number, by: number) => {
-    const d = Math.abs(ax - gateX) + Math.abs(ay - gateY);
-    if (d < bestD) {
-      bestD = d;
-      best = [ax, ay, bx, by];
-    }
-  };
-  tryEdge(gx, y0, gx, y0 - 1);
-  tryEdge(gx, y1, gx, y1 + 1);
-  tryEdge(x0, gy, x0 - 1, gy);
-  tryEdge(x1, gy, x1 + 1, gy);
-  if (best) setEdge(world, best[0], best[1], best[2], best[3], "gate");
-  void gy;
+  if (gate) setEdge(world, gate[0], gate[1], gate[2], gate[3], "gate");
+  return yardHasGate(world, x0, y0, x1, y1);
 }
 
 export function plotBounds(world: World, x: number, y: number) {
@@ -211,7 +249,7 @@ export function clearYard(world: World, x0: number, y0: number, x1: number, y1: 
       if (!t) continue;
       t.plot = false;
       t.gateLock = false;
-      if (t.building === "none") t.owned = false;
+      t.owned = false;
     }
   }
   for (let x = x0; x <= x1; x++) {

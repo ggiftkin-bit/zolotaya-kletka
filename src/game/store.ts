@@ -38,7 +38,7 @@ import { requestLook } from "./cam";
 import { findPath, pathTotal } from "./path";
 import { canDigReason, fillNeedLine, fillPay, giveOrPile, takePaid } from "./pit";
 import { asPile, dumpAllOn, pileAdd, pileEmpty, pileSet, pullNeed, applyNeedPull } from "./pile";
-import { canCrossDiag, MAX_PLOT, clearYard, normRect, plotBounds, putGate, setYardGateLock, stampYard, upgradeYard, yardWoodCost } from "./fence";
+import { canCrossDiag, MAX_PLOT, clearYard, normRect, plotBounds, putGate, setYardGateLock, stampYard, upgradeYard, yardHasGate, yardWoodCost } from "./fence";
 import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, NO_STRENGTH, SKIP_GOLD, deathFee, energyPeriod, formatWait, splitBodyWater } from "./pace";
 import { applyCatch, harmCells, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, markCrime, ownerOf, plotCells, punish, rollCaught, stealChance, takeLoot, unlockKind, fenceBurnCells } from "./crime";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
@@ -1815,7 +1815,10 @@ function finishYard(ax: number, ay: number, bx: number, by: number) {
     speak("Нет сил ставить забор. Отдых сверху.", bx, by, "нет сил", "bad");
     return;
   }
-  stampYard(s.world, x0, y0, x1, y1, s.character.x, s.character.y);
+  if (!stampYard(s.world, x0, y0, x1, y1, s.character.x, s.character.y) || !yardHasGate(s.world, x0, y0, x1, y1)) {
+    speak("Нужна калитка.", bx, by, "калитка", "bad");
+    return;
+  }
   const inv = { ...s.character.inventory, wood: s.character.inventory.wood - wood };
   let c = bumpSkill(
     { ...s.character, inventory: inv, energy: Math.max(0, s.character.energy - 2) },
