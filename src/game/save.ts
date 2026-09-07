@@ -1,6 +1,6 @@
 import { MAP_H, MAP_W, zeroInv } from "./constants";
 import { asPile, pileEmpty } from "./pile";
-import type { BuildingKind, FenceKind, Inventory, ItemId, Matter, RoadKind, Tile, GameState } from "./types";
+import type { BuildingKind, FenceKind, Inventory, ItemId, Matter, RoadKind, Tile, GameState, ServiceJob, ServiceKind } from "./types";
 import { defaultMatter, MATTER_HP } from "./work";
 
 const KEY = "zolotaya-kletka-v8";
@@ -45,6 +45,20 @@ export type SlimTile = {
   pi?: 1;
   bk?: 1;
   or?: { i: ItemId; n: number; g: number };
+  sv?: {
+    k: ServiceKind;
+    g: number;
+    u: number;
+    by: string;
+    tk?: string;
+    i?: ItemId;
+    n?: number;
+    dx?: number;
+    dy?: number;
+    bd?: BuildingKind;
+    ck?: string;
+    cg?: Partial<Record<ItemId, number>>;
+  };
 };
 
 function emptyChest(): Inventory {
@@ -58,6 +72,53 @@ function fatOrder(raw: SlimTile["or"] | undefined): Tile["order"] {
   const gold = raw.g;
   if (!item || typeof n !== "number" || n <= 0 || typeof gold !== "number" || gold <= 0) return null;
   return { item, n, gold };
+}
+
+function slimCargo(c?: Partial<Record<ItemId, number>>): Partial<Record<ItemId, number>> | undefined {
+  if (!c) return undefined;
+  const o: Partial<Record<ItemId, number>> = {};
+  let n = 0;
+  (Object.keys(c) as ItemId[]).forEach((k) => {
+    const v = c[k];
+    if (v && v > 0) {
+      o[k] = Math.floor(v);
+      n += 1;
+    }
+  });
+  return n ? o : undefined;
+}
+
+function fatService(raw: SlimTile["sv"] | undefined): ServiceJob | null {
+  if (!raw || typeof raw !== "object") return null;
+  const kind = raw.k;
+  if (kind !== "watch" && kind !== "haul" && kind !== "build" && kind !== "craft") return null;
+  if (!raw.by || typeof raw.g !== "number" || raw.g <= 0 || typeof raw.u !== "number") return null;
+  const job: ServiceJob = { kind, gold: Math.floor(raw.g), until: raw.u, by: raw.by };
+  if (raw.tk) job.take = raw.tk;
+  if (raw.i) job.item = raw.i;
+  if (typeof raw.n === "number" && raw.n > 0) job.n = Math.floor(raw.n);
+  if (typeof raw.dx === "number") job.destX = raw.dx;
+  if (typeof raw.dy === "number") job.destY = raw.dy;
+  if (raw.bd) job.build = raw.bd;
+  if (raw.ck) job.craft = raw.ck;
+  const cg = slimCargo(raw.cg);
+  if (cg) job.cargo = cg;
+  return job;
+}
+
+function slimService(job: ServiceJob | null | undefined): SlimTile["sv"] | undefined {
+  if (!job || job.gold <= 0) return undefined;
+  const o: NonNullable<SlimTile["sv"]> = { k: job.kind, g: job.gold, u: job.until, by: job.by };
+  if (job.take) o.tk = job.take;
+  if (job.item) o.i = job.item;
+  if (job.n && job.n > 0) o.n = job.n;
+  if (typeof job.destX === "number") o.dx = job.destX;
+  if (typeof job.destY === "number") o.dy = job.destY;
+  if (job.build) o.bd = job.build;
+  if (job.craft) o.ck = job.craft;
+  const cg = slimCargo(job.cargo);
+  if (cg) o.cg = cg;
+  return o;
 }
 
 function slimChest(c?: Inventory | null): Partial<Inventory> | undefined {
@@ -113,6 +174,8 @@ export function slimTile(t: Tile): SlimTile {
   if (t.pit) o.pi = 1;
   if (t.bank) o.bk = 1;
   if (t.order && t.order.n > 0 && t.order.gold > 0) o.or = { i: t.order.item, n: t.order.n, g: t.order.gold };
+  const sv = slimService(t.service);
+  if (sv) o.sv = sv;
   return o;
 }
 
@@ -159,6 +222,7 @@ export function fatTile(raw: Partial<Tile> & { b?: Tile["biome"] }, x: number, y
     pit: !!(raw.pit ?? slim.pi),
     bank: !!(raw.bank ?? slim.bk),
     order: fatOrder(slim.or),
+    service: fatService(slim.sv),
   };
 }
 

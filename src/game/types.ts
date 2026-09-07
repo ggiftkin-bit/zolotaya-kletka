@@ -27,7 +27,9 @@ export type BusyKind =
   | "fill"
   | "road"
   | "lock"
-  | "burn";
+  | "burn"
+  | "watch"
+  | "haul";
 
 export type Busy = {
   kind: BusyKind;
@@ -40,6 +42,8 @@ export type Busy = {
   road?: "dirt" | "stone" | "bridge";
   lock?: "chest" | "gate";
   hired?: boolean;
+  /** Услуга двух почт. Не руки за 16. */
+  service?: boolean;
 };
 
 export type Weather = "clear" | "rain" | "snow";
@@ -162,6 +166,24 @@ export type StallOrder = {
   gold: number;
 };
 
+export type ServiceKind = "watch" | "haul" | "build" | "craft";
+
+/** Контракт двух почт. Золото и сырьё в эскро клетки, не в воздухе. */
+export type ServiceJob = {
+  kind: ServiceKind;
+  gold: number;
+  until: number;
+  by: string;
+  take?: string;
+  item?: ItemId;
+  n?: number;
+  destX?: number;
+  destY?: number;
+  build?: BuildingKind;
+  craft?: string;
+  cargo?: Partial<Record<ItemId, number>>;
+};
+
 export type Tile = {
   x: number;
   y: number;
@@ -203,6 +225,8 @@ export type Tile = {
   bank: boolean;
   /** Витрина прилавка. Вещь в эскро на клетке, не в воздухе. */
   order: StallOrder | null;
+  /** Услуга двух почт. Золото в книге с первого тыка. */
+  service: ServiceJob | null;
 };
 
 export type Inventory = Record<ItemId, number>;

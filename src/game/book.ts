@@ -60,12 +60,14 @@ export function publishOwner(owner: string | undefined, selfId: string): string 
   return owner;
 }
 
-/** Хозяин клетки и хозяин телеги: в книге id, на экране свой — «you». */
+/** Хозяин клетки, телеги и услуги: в книге id, на экране свой — «you». */
 export function wireSlim(slim: SlimTile, selfId: string, mode: "publish" | "localize"): SlimTile {
   const map = mode === "publish" ? publishOwner : localizeOwner;
   const on = slim.on != null ? map(slim.on, selfId) : slim.on;
   const wg = slim.wg != null ? map(slim.wg, selfId) : slim.wg;
-  if (on === slim.on && wg === slim.wg) return slim;
+  const svBy = slim.sv?.by != null ? map(slim.sv.by, selfId) : slim.sv?.by;
+  const svTk = slim.sv?.tk != null ? map(slim.sv.tk, selfId) : slim.sv?.tk;
+  if (on === slim.on && wg === slim.wg && svBy === slim.sv?.by && svTk === slim.sv?.tk) return slim;
   const next = { ...slim };
   if (on !== slim.on) {
     if (on) next.on = on;
@@ -74,6 +76,12 @@ export function wireSlim(slim: SlimTile, selfId: string, mode: "publish" | "loca
   if (wg !== slim.wg) {
     if (wg) next.wg = wg;
     else delete next.wg;
+  }
+  if (slim.sv && (svBy !== slim.sv.by || svTk !== slim.sv.tk)) {
+    next.sv = { ...slim.sv };
+    if (svBy) next.sv.by = svBy;
+    if (svTk) next.sv.tk = svTk;
+    else delete next.sv.tk;
   }
   return next;
 }

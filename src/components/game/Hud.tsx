@@ -338,6 +338,17 @@ export function Hud() {
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 p-2 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
           <div className="pointer-events-auto mx-auto max-w-lg">
             {busy && !bag && !help && !food && (
+              (busy.kind === "watch" || busy.kind === "haul" || busy.service) ? (
+              <div className="mb-1.5 grid grid-cols-1 gap-1">
+                <button
+                  type="button"
+                  onClick={() => g.cancelBusy()}
+                  className="h-11 min-w-0 rounded-[16px] border border-border bg-panel px-1.5 text-[12px] leading-tight shadow-panel"
+                >
+                  бросить
+                </button>
+              </div>
+              ) : (
               <div className="mb-1.5 grid grid-cols-3 gap-1">
                 <button
                   type="button"
@@ -361,6 +372,7 @@ export function Hud() {
                   бросить
                 </button>
               </div>
+              )
             )}
           {g.travel && !bag && !help && !food && !held && (
               <button

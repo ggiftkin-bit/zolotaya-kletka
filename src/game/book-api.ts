@@ -7,7 +7,10 @@ import { slimTile, fatTile, type SlimTile } from "./save";
 import { GROW_CATCHUP_TICKS, GROW_WRITE_BATCH, TICK_MS, stepWorldClock, tickGrow } from "./grow";
 import type { Season, Tile } from "./types";
 import { generateWorld } from "./worldgen";
-import { isItemId } from "./market";
+import { isItemId, settleService, serviceJobOf } from "./market";
+import { defaultMatter, MATTER_HP } from "./work";
+import { pileAdd } from "./pile";
+import type { ItemId, ServiceJob } from "./types";
 import {
   FOG_FETCH,
   WORLD_ID,
@@ -262,6 +265,126 @@ async function writePawn(
        updated_at = now()`,
     [WORLD_ID, userId, pawn.name, pawn.color, pawn.x, pawn.y, JSON.stringify(body)],
   );
+}
+
+async function creditDue(sql: Sql, userId: string, gold: number) {
+  if (!userId || userId === "you" || gold <= 0) return;
+  await sql.query(
+    `update pawn
+     set body = jsonb_set(
+           coalesce(body, '{}'::jsonb),
+           '{due}',
+           to_jsonb(coalesce((body->>'due')::int, 0) + $3::int),
+           true
+         ),
+         updated_at = now()
+     where world_id = $1 and user_id = $2`,
+    [WORLD_ID, userId, gold],
+  );
+}
+
+async function creditItems(sql: Sql, userId: string, cargo: Partial<Record<ItemId, number>>) {
+  const keys = (Object.keys(cargo) as ItemId[]).filter((k) => (cargo[k] ?? 0) > 0);
+  if (!userId || userId === "you" || !keys.length) return false;
+  const row = await readPawn(sql, userId);
+  if (!row?.body) return false;
+  const inv = { ...(row.body.inventory ?? {}) };
+  for (const k of keys) inv[k] = (inv[k] ?? 0) + (cargo[k] ?? 0);
+  await writePawn(sql, userId, row, { ...row.body, inventory: inv });
+  return true;
+}
+
+async function clearBusy(sql: Sql, userId: string) {
+  if (!userId || userId === "you") return;
+  const row = await readPawn(sql, userId);
+  if (!row?.body?.busy) return;
+  await writePawn(sql, userId, row, { ...row.body, busy: null });
+}
+
+function slimHasService(slim: SlimTile): boolean {
+  return !!(slim.sv && slim.sv.by && slim.sv.g > 0);
+}
+
+async function applyServiceSettle(
+  sql: Sql,
+  row: TileRow,
+  job: ServiceJob,
+  result: Exclude<ReturnType<typeof settleService>, { wait: true }>,
+  actor: string,
+): Promise<number | null> {
+  const tile = fatTile(asSlim(row.slim), row.x, row.y);
+  tile.service = null;
+  if (!result.ok) {
+    if (!result.toPosterBag) {
+      for (const k of Object.keys(result.cargo) as ItemId[]) {
+        const n = result.cargo[k] ?? 0;
+        if (n > 0) pileAdd(tile, k, n);
+      }
+    } else if (result.refundTo) {
+      await creditItems(sql, result.refundTo, result.cargo);
+    }
+    if (result.refundTo) await creditDue(sql, result.refundTo, job.gold);
+  } else {
+    if (result.out) {
+      if (result.toPosterBag && job.by) {
+        const ok = await creditItems(sql, job.by, { [result.out.item]: result.out.n });
+        if (!ok) pileAdd(tile, result.out.item, result.out.n);
+      } else {
+        pileAdd(tile, result.out.item, result.out.n);
+      }
+    }
+    if (result.build && tile.building === "none") {
+      tile.building = result.build;
+      tile.matter = defaultMatter(result.build);
+      tile.hp = MATTER_HP[tile.matter];
+      tile.burned = false;
+    }
+    if (result.payTo) await creditDue(sql, result.payTo, job.gold);
+  }
+  if (job.take) await clearBusy(sql, job.take);
+  const slim = slimTile(tile);
+  const upd = await sql.query<{ ver: number }>(
+    `update tile set slim = $4::jsonb, ver = ver + 1, updated_at = now(), updated_by = $5
+     where world_id = $1 and x = $2 and y = $3 and ver = $6
+     returning ver`,
+    [WORLD_ID, row.x, row.y, JSON.stringify(slim), actor, row.ver],
+  );
+  if (!upd[0]) return null;
+  await sql.query(
+    `insert into deed (world_id, user_id, kind, x, y, payload)
+     values ($1, $2, $3, $4, $5, $6::jsonb)`,
+    [WORLD_ID, actor, result.ok ? "service-done" : "service-fail", row.x, row.y, JSON.stringify({ gold: job.gold, k: job.kind })],
+  );
+  return upd[0].ver;
+}
+
+async function settleAround(sql: Sql, px: number, py: number, actor: string) {
+  const rows = await sql.query<TileRow>(
+    `select x, y, slim, ver, updated_at::text as updated_at
+     from tile
+     where world_id = $1
+       and greatest(abs(x - $2), abs(y - $3)) <= $4
+       and slim ? 'sv'`,
+    [WORLD_ID, px, py, FOG_FETCH],
+  );
+  const now = Date.now();
+  for (const row of rows) {
+    const tile = fatTile(asSlim(row.slim), row.x, row.y);
+    const job = serviceJobOf(tile);
+    if (!job) continue;
+    const exec = job.take ? await readPawn(sql, job.take) : null;
+    const poster = await readPawn(sql, job.by);
+    const result = settleService(
+      job,
+      now,
+      row.x,
+      row.y,
+      exec ? { x: exec.x, y: exec.y } : null,
+      poster ? { x: poster.x, y: poster.y } : null,
+    );
+    if (result.wait) continue;
+    await applyServiceSettle(sql, row, job, result, actor);
+  }
 }
 
 function slimOrder(slim: SlimTile): { item: import("./types").ItemId; n: number; gold: number } | null {
@@ -561,6 +684,7 @@ export const openWorldBook = createServerFn({ method: "POST" })
     }
     const px = pawn?.x ?? data.x ?? 48;
     const py = pawn?.y ?? data.y ?? 48;
+    await settleAround(sql, px, py, context.userId);
     const spot = await loadSpot(sql, px, py, context.userId);
     await imprintSpot(sql, context.userId, px, py);
     const fight = await loadOpenFight(sql, context.userId);
@@ -604,7 +728,9 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
     for (const t of data.tiles) {
       const upd = await sql.query<{ ver: number }>(
         `update tile t
-         set slim = ($5::jsonb - 'or') || case when t.slim ? 'or' then jsonb_build_object('or', t.slim->'or') else '{}'::jsonb end,
+         set slim = ($5::jsonb - 'or' - 'sv')
+           || case when t.slim ? 'or' then jsonb_build_object('or', t.slim->'or') else '{}'::jsonb end
+           || case when t.slim ? 'sv' then jsonb_build_object('sv', t.slim->'sv') else '{}'::jsonb end,
              ver = t.ver + 1, updated_at = now(), updated_by = $6
          where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
          returning ver`,
@@ -694,7 +820,10 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
        ),
        upd as (
          update tile as t
-         set slim = i.slim, ver = t.ver + 1, updated_at = now(), updated_by = $3
+         set slim = (i.slim - 'or' - 'sv')
+           || case when t.slim ? 'or' then jsonb_build_object('or', t.slim->'or') else '{}'::jsonb end
+           || case when t.slim ? 'sv' then jsonb_build_object('sv', t.slim->'sv') else '{}'::jsonb end,
+             ver = t.ver + 1, updated_at = now(), updated_by = $3
          from incoming i
          where t.world_id = $1 and t.x = i.x and t.y = i.y and t.ver = i.ver
            and not exists (select 1 from mismatch)
@@ -785,6 +914,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       }
     }
     const clock = await advanceWorldClock(sql, context.userId);
+    await settleAround(sql, data.x, data.y, context.userId);
     const liveRows = await sql.query<TileRow>(
       `select x, y, slim, ver, updated_at::text as updated_at
        from tile
@@ -959,7 +1089,9 @@ export const writeStallDeed = createServerFn({ method: "POST" })
     }
     const upd = await sql.query<{ ver: number }>(
       `update tile t
-       set slim = $5::jsonb, ver = t.ver + 1, updated_at = now(), updated_by = $6
+       set slim = ($5::jsonb - 'sv')
+         || case when t.slim ? 'sv' then jsonb_build_object('sv', t.slim->'sv') else '{}'::jsonb end,
+           ver = t.ver + 1, updated_at = now(), updated_by = $6
        where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
          and t.slim->>'bd' = 'stall'
        returning ver`,
@@ -974,6 +1106,125 @@ export const writeStallDeed = createServerFn({ method: "POST" })
       `insert into deed (world_id, user_id, kind, x, y, payload)
        values ($1, $2, $3, $4, $5, $6::jsonb)`,
       [WORLD_ID, userId, data.kind, t.x, t.y, JSON.stringify({ item: incoming?.item ?? liveOrder?.item, gold: incoming?.gold ?? liveOrder?.gold })],
+    );
+    await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
+    return { ok: true as const, written: [{ x: t.x, y: t.y, ver: upd[0].ver }], credit: merged.credit };
+  });
+
+export const writeServiceDeed = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: unknown) =>
+    z
+      .object({
+        kind: z.enum(["service-post", "service-cancel", "service-take", "service-done", "service-fail"]),
+        tile: tileInSchema,
+        pawn: pawnInSchema,
+        early: z.enum(["arrive", "work"]).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const userId = context.userId;
+    const t = data.tile;
+    const curRows = await sql.query<TileRow>(
+      `select x, y, slim, ver, updated_at::text as updated_at from tile where world_id = $1 and x = $2 and y = $3`,
+      [WORLD_ID, t.x, t.y],
+    );
+    const cur = curRows[0];
+    const asConflict = () =>
+      cur
+        ? [{ x: cur.x, y: cur.y, slim: asSlim(cur.slim), ver: cur.ver, updatedAt: cur.updated_at }]
+        : [];
+    if (!cur) {
+      return { ok: false as const, hint: "клетка уже другая", conflicts: [] as TilePacket[], written: [], credit: 0 };
+    }
+    if (cur.ver !== t.ver) {
+      return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0 };
+    }
+    const liveTile = fatTile(asSlim(cur.slim), t.x, t.y);
+    const liveJob = serviceJobOf(liveTile);
+    const nextTile = fatTile(asSlim(t.slim), t.x, t.y);
+    const nextJob = serviceJobOf(nextTile);
+    const reach = Math.max(Math.abs(data.pawn.x - t.x), Math.abs(data.pawn.y - t.y));
+
+    if (data.kind === "service-post") {
+      if (liveJob) return { ok: false as const, hint: "сначала сними услугу", conflicts: asConflict(), written: [], credit: 0 };
+      if (!nextJob || nextJob.by !== userId) return { ok: false as const, hint: "нет услуги", conflicts: [], written: [], credit: 0 };
+      if (nextJob.gold < 1) return { ok: false as const, hint: "цена словом", conflicts: [], written: [], credit: 0 };
+    } else if (data.kind === "service-cancel") {
+      if (!liveJob || liveJob.by !== userId) return { ok: false as const, hint: "чужая услуга", conflicts: [], written: [], credit: 0 };
+      if (liveJob.take) return { ok: false as const, hint: "уже взяли", conflicts: [], written: [], credit: 0 };
+      if (nextJob) return { ok: false as const, hint: "сначала сними", conflicts: [], written: [], credit: 0 };
+    } else if (data.kind === "service-take") {
+      if (!liveJob) return { ok: false as const, hint: "нет услуги", conflicts: asConflict(), written: [], credit: 0 };
+      if (liveJob.by === userId) return { ok: false as const, hint: "свою услугу снимай сам", conflicts: [], written: [], credit: 0 };
+      if (liveJob.take) return { ok: false as const, hint: "уже взяли", conflicts: asConflict(), written: [], credit: 0 };
+      if (reach > 1) return { ok: false as const, hint: "подойди", conflicts: [], written: [], credit: 0 };
+      if (!nextJob || nextJob.take !== userId) return { ok: false as const, hint: "нет услуги", conflicts: [], written: [], credit: 0 };
+    } else if (data.kind === "service-done" || data.kind === "service-fail") {
+      if (!liveJob) return { ok: false as const, hint: "нет услуги", conflicts: asConflict(), written: [], credit: 0 };
+      const actor = liveJob.take === userId || liveJob.by === userId;
+      if (!actor) return { ok: false as const, hint: "не твоё дело", conflicts: [], written: [], credit: 0 };
+      if (data.kind === "service-done" && liveJob.take !== userId) {
+        return { ok: false as const, hint: "не твоё дело", conflicts: [], written: [], credit: 0 };
+      }
+      if (data.kind === "service-done" && liveJob.kind === "watch" && reach > 0) {
+        return { ok: false as const, hint: "стой на клетке", conflicts: [], written: [], credit: 0 };
+      }
+      if (data.kind === "service-done" && liveJob.kind === "haul") {
+        const dx = liveJob.destX ?? t.x;
+        const dy = liveJob.destY ?? t.y;
+        if (Math.max(Math.abs(data.pawn.x - dx), Math.abs(data.pawn.y - dy)) > 0 && data.early !== "arrive") {
+          return { ok: false as const, hint: "не дошёл", conflicts: [], written: [], credit: 0 };
+        }
+      }
+      const cargo = liveJob.cargo ?? (liveJob.item && (liveJob.n ?? 0) > 0 ? { [liveJob.item]: liveJob.n ?? 1 } : {});
+      const execPos = { x: data.pawn.x, y: data.pawn.y };
+      const posterRow = await readPawn(sql, liveJob.by);
+      const posterPos = posterRow ? { x: posterRow.x, y: posterRow.y } : null;
+      const result =
+        data.kind === "service-fail"
+          ? { wait: false as const, ok: false, refundTo: liveJob.by, cargo, toPosterBag: false }
+          : settleService(liveJob, Date.now(), t.x, t.y, execPos, posterPos, data.early);
+      if (data.kind === "service-done" && result.wait) {
+        return { ok: false as const, hint: "ещё рано", conflicts: [], written: [], credit: 0 };
+      }
+      const settled = result as Exclude<typeof result, { wait: true }>;
+      if (data.kind === "service-done" && !settled.ok) {
+        return { ok: false as const, hint: "не достоял", conflicts: [], written: [], credit: 0 };
+      }
+      const ver = await applyServiceSettle(sql, cur, liveJob, settled, userId);
+      if (ver == null) {
+        return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0 };
+      }
+      const merged = await mergeBookBody(sql, userId, data.pawn.body);
+      await writePawn(sql, userId, data.pawn, { ...merged.body, busy: null });
+      await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
+      return { ok: true as const, written: [{ x: t.x, y: t.y, ver }], credit: merged.credit };
+    }
+
+    const upd = await sql.query<{ ver: number }>(
+      `update tile t
+       set slim = $5::jsonb, ver = t.ver + 1, updated_at = now(), updated_by = $6
+       where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
+       returning ver`,
+      [WORLD_ID, t.x, t.y, t.ver, JSON.stringify(t.slim), userId],
+    );
+    if (!upd[0]) {
+      return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0 };
+    }
+
+    const merged = await mergeBookBody(sql, userId, data.pawn.body);
+    const body = {
+      ...merged.body,
+      busy: data.kind === "service-take" ? merged.body.busy : merged.body.busy,
+    };
+    await writePawn(sql, userId, data.pawn, body);
+    await sql.query(
+      `insert into deed (world_id, user_id, kind, x, y, payload)
+       values ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [WORLD_ID, userId, data.kind, t.x, t.y, JSON.stringify({ k: liveJob?.kind ?? nextJob?.kind, gold: liveJob?.gold ?? nextJob?.gold })],
     );
     await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
     return { ok: true as const, written: [{ x: t.x, y: t.y, ver: upd[0].ver }], credit: merged.credit };

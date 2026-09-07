@@ -646,6 +646,7 @@ function cloneWorld(world: World): World {
       bank: !!t.bank,
       regen: t.regen ?? 0,
       order: t.order ? { ...t.order } : null,
+      service: t.service ? { ...t.service, cargo: t.service.cargo ? { ...t.service.cargo } : undefined } : null,
     })),
   };
 }
@@ -718,6 +719,7 @@ function buildWorld(seed: string): World {
         pit: false,
         bank: false,
         order: null,
+        service: null,
       };
     }
   }

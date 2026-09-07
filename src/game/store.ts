@@ -36,7 +36,7 @@ import {
 import { requestLook } from "./cam";
 import { findPath, pathTotal } from "./path";
 import { canDigReason, fillNeedLine, fillPay, giveOrPile, takePaid } from "./pit";
-import { asPile, dumpAllOn, pileAdd, pileEmpty } from "./pile";
+import { asPile, dumpAllOn, pileAdd, pileEmpty, pileSet } from "./pile";
 import { canCrossDiag, MAX_PLOT, clearYard, normRect, plotBounds, putGate, setYardGateLock, stampYard, upgradeYard, yardWoodCost } from "./fence";
 import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, NO_STRENGTH, SKIP_GOLD, deathFee, energyPeriod, formatWait, splitBodyWater } from "./pace";
 import { applyCatch, harmCells, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, markCrime, ownerOf, plotCells, punish, rollCaught, stealChance, takeLoot, unlockKind, fenceBurnCells } from "./crime";
@@ -95,8 +95,25 @@ import { chebyshev, dummyHome, foeById, gearSlot, ghostLiveFoe, leaveChance, mak
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, FOG_LIVE, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
-import { bindBookStore, commitHarm, commitStall, flushBook, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
-import { canReachStall, planDrop, planPut, planTake, stallLine } from "./market";
+import { bindBookStore, commitHarm, commitService, commitStall, flushBook, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
+import {
+  applyCargoPile,
+  canReachStall,
+  planCancelService,
+  planDrop,
+  planPostBuild,
+  planPostCraft,
+  planPostHaul,
+  planPostWatch,
+  planPut,
+  planTake,
+  planTakeService,
+  SERVICE_LABEL,
+  serviceJobOf,
+  serviceLine,
+  settleService,
+  stallLine,
+} from "./market";
 
 let worldAcc = 0;
 
@@ -299,8 +316,12 @@ function walkTo(x: number, y: number) {
     return;
   }
   if (isBusy(c) && !c.busy?.hired) {
-    speak(`Занят: ${BUSY_LABEL[c.busy!.kind]}. Жди, брось или найми руки.`, c.x, c.y, BUSY_LABEL[c.busy!.kind], "bad");
-    return;
+    const b = c.busy!;
+    const toJob = (b.kind === "haul" || b.kind === "watch") && b.x === x && b.y === y;
+    if (!toJob) {
+      speak(`Занят: ${BUSY_LABEL[c.busy!.kind]}. Жди, брось или найми руки.`, c.x, c.y, BUSY_LABEL[c.busy!.kind], "bad");
+      return;
+    }
   }
   const path = findPath(s.world, c.x, c.y, x, y, ctxOf(s));
   if (!path) {
@@ -533,6 +554,12 @@ type Actions = {
   putStall: (item: ItemId, gold: number) => void;
   dropStall: () => void;
   takeStall: () => void;
+  postWatch: (gold: number, waitSec: number) => void;
+  postHaul: (item: ItemId, gold: number) => void;
+  postCraft: (craft: CraftKind, gold: number) => void;
+  postBuild: (kind: BuildingKind, gold: number) => void;
+  takeService: () => void;
+  dropService: () => void;
   startMeet: (foeId: string) => void;
   meetPass: (foeId?: string) => void;
   meetHit: () => void;
@@ -1201,6 +1228,12 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   putStall: (item, gold) => putStall(item, gold),
   dropStall: () => dropStall(),
   takeStall: () => takeStall(),
+  postWatch: (gold, waitSec) => postWatch(gold, waitSec),
+  postHaul: (item, gold) => postHaul(item, gold),
+  postCraft: (craft, gold) => postCraft(craft, gold),
+  postBuild: (kind, gold) => postBuild(kind, gold),
+  takeService: () => takeService(),
+  dropService: () => dropService(),
   startMeet: (foeId) => startMeet(foeId),
   meetPass: (foeId) => meetPass(foeId),
   meetHit: () => meetHit(),
@@ -1427,7 +1460,13 @@ function advanceTravel(now: number) {
       ].slice(-10),
     });
     void pullSpot();
-    const landed = occupantAt(useGame.getState().dummies ?? [], useGame.getState().others ?? [], x, y);
+    const after = useGame.getState();
+    const jobBusy = after.character.busy;
+    if (jobBusy?.kind === "haul" && jobBusy.x === x && jobBusy.y === y) {
+      finishService("done", "arrive");
+      return;
+    }
+    const landed = occupantAt(after.dummies ?? [], after.others ?? [], x, y);
     if (landed && landed.life === "alive" && meetIgnore !== `${x},${y},${landed.id}`) {
       useGame.setState({ inspect: { x, y }, selected: { x, y } });
     }
@@ -2926,13 +2965,18 @@ function resolveBusy() {
   else if (b.kind === "catch") resolveCatch(s, c0, tile);
   else if (b.kind === "fish") resolveFish(s, c0, tile);
   else if (b.kind === "chop" || b.kind === "mine" || b.kind === "forage") resolveGather(s, c0, tile, b.item);
-  else if (b.kind === "build") resolveBuild(s, c0, tile, b.build);
-  else if (b.kind === "craft") resolveCraft(s, c0, tile, b.craft);
-  else if (b.kind === "road") resolveRoad(s, c0, tile, b.road);
+  else if (b.kind === "build") {
+    if (b.service) finishService("done", "work");
+    else resolveBuild(s, c0, tile, b.build);
+  } else if (b.kind === "craft") {
+    if (b.service) finishService("done", "work");
+    else resolveCraft(s, c0, tile, b.craft);
+  } else if (b.kind === "road") resolveRoad(s, c0, tile, b.road);
   else if (b.kind === "dig") resolveDig(s, c0, tile);
   else if (b.kind === "fill") resolveFill(s, c0, tile);
   else if (b.kind === "lock") resolveLock(s, c0, tile, b.lock);
   else if (b.kind === "burn") resolveBurn(s, c0, tile);
+  else if (b.kind === "watch" || b.kind === "haul") finishService("done");
   else useGame.setState({ character: c0 });
 }
 
@@ -3216,6 +3260,10 @@ function cancelBusy() {
   const s = useGame.getState();
   const b = s.character.busy;
   if (!b) return;
+  if (isServiceBusy(b)) {
+    finishService("fail");
+    return;
+  }
   cancelNotice("busy");
   const tile = tileAt(s.world, b.x, b.y);
   if ((b.kind === "hunt" || b.kind === "catch") && tile?.herd && Math.random() < 0.4) {
@@ -3245,6 +3293,10 @@ function skipBusy() {
     return;
   }
   if (!s.character.busy) return;
+  if (isServiceBusy(s.character.busy)) {
+    speak("Это услуга живого. Брось — золото заказчику.", s.character.x, s.character.y, "услуга", "bad");
+    return;
+  }
   if (s.character.gold < SKIP_GOLD) {
     speak(`Ускорить дело — ${goldTxt(SKIP_GOLD)}.`, s.character.x, s.character.y, "мало золота", "bad");
     return;
@@ -3263,6 +3315,10 @@ function hireBusy() {
     return;
   }
   if (!s.character.busy) return;
+  if (isServiceBusy(s.character.busy)) {
+    speak("Это услуга живого. Не руки за 16.", s.character.x, s.character.y, "услуга", "bad");
+    return;
+  }
   if (s.character.busy.hired) {
     speak("Руки уже работают. Можно отойти.", s.character.x, s.character.y, "наняты", "ok");
     return;
@@ -4568,6 +4624,287 @@ function takeStall() {
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `−${goldTxt(plan.pay)}`, tone: "gold" as const }].slice(-10),
   });
   void commitStall("stall-take", { x: tile.x, y: tile.y }, prior).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function isServiceBusy(b: Character["busy"]): boolean {
+  return !!b && (b.kind === "watch" || b.kind === "haul" || !!b.service);
+}
+
+function serviceHere(): Tile | null {
+  const s = useGame.getState();
+  const at = s.inspect ?? { x: s.character.x, y: s.character.y };
+  return tileAt(s.world, at.x, at.y);
+}
+
+function serviceBlocked(): boolean {
+  return stallBlocked();
+}
+
+function finishService(kind: "done" | "fail", early?: "arrive" | "work") {
+  const s = useGame.getState();
+  const b = s.character.busy;
+  if (!b) return;
+  cancelNotice("busy");
+  const tile = tileAt(s.world, b.x, b.y);
+  const job = tile ? serviceJobOf(tile) : null;
+  if (!tile || !job) {
+    useGame.setState({ character: { ...s.character, busy: null } });
+    return;
+  }
+  const prior = s.character;
+  const exec = { x: s.character.x, y: s.character.y };
+  const poster = job.by === "you" ? exec : null;
+  const cargo = job.cargo ?? (job.item && (job.n ?? 0) > 0 ? { [job.item]: job.n ?? 1 } : {});
+  const result =
+    kind === "fail"
+      ? { wait: false as const, ok: false, refundTo: job.by, cargo, toPosterBag: false }
+      : settleService(job, Date.now(), tile.x, tile.y, exec, poster, early);
+  if (kind === "done" && result.wait) return;
+  const settled = result as Exclude<typeof result, { wait: true }>;
+  tile.service = null;
+  let c: Character = { ...s.character, busy: null };
+  if (!settled.ok) {
+    applyCargoPile(tile, settled.cargo);
+  } else if (settled.out) {
+    if (settled.toPosterBag && job.by === "you") {
+      const given = giveOrPile({ ...c.inventory }, c.transport, tile, settled.out.item, settled.out.n);
+      c = { ...c, inventory: given.inv };
+    } else {
+      pileAdd(tile, settled.out.item, settled.out.n);
+    }
+  }
+  if (settled.ok && settled.build && tile.building === "none") {
+    tile.building = settled.build;
+    tile.matter = defaultMatter(settled.build);
+    tile.hp = MATTER_HP[tile.matter];
+    tile.burned = false;
+  }
+  const line = settled.ok
+    ? `Услуга: ${SERVICE_LABEL[job.kind]} · ${goldTxt(job.gold)}.`
+    : "Срыв услуги. Золото заказчику.";
+  useGame.setState({
+    character: c,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, line),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: settled.ok ? goldTxt(job.gold) : "срыв", tone: settled.ok ? ("gold" as const) : ("bad" as const) }].slice(-10),
+  });
+  void commitService(kind === "done" ? "service-done" : "service-fail", { x: tile.x, y: tile.y }, prior, early).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function postWatch(gold: number, waitSec: number) {
+  const s = useGame.getState();
+  if (serviceBlocked()) return;
+  const tile = serviceHere();
+  if (!tile) return;
+  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
+    speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
+    return;
+  }
+  if (!canReachStall(s.character.x, s.character.y, tile)) {
+    speak("Подойди.", tile.x, tile.y, "подойди", "bad");
+    return;
+  }
+  const plan = planPostWatch(tile, isYours(tile), s.character.gold, gold, waitSec, Date.now());
+  if (!plan.ok) {
+    speak(plan.hint, tile.x, tile.y, "нет", "bad");
+    return;
+  }
+  const prior = s.character;
+  tile.service = plan.job;
+  const c = { ...s.character, gold: plan.gold };
+  useGame.setState({
+    character: c,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, `Услуга: ${serviceLine(plan.job)}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: serviceLine(plan.job), tone: "gold" as const }].slice(-10),
+  });
+  void commitService("service-post", { x: tile.x, y: tile.y }, prior).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function postHaul(item: ItemId, gold: number) {
+  const s = useGame.getState();
+  if (serviceBlocked()) return;
+  const tile = serviceHere();
+  if (!tile) return;
+  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
+    speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
+    return;
+  }
+  if (!canReachStall(s.character.x, s.character.y, tile)) {
+    speak("Подойди.", tile.x, tile.y, "подойди", "bad");
+    return;
+  }
+  const plan = planPostHaul(tile, isYours(tile), s.character.inventory, s.character.gold, item, gold, Date.now());
+  if (!plan.ok) {
+    speak(plan.hint, tile.x, tile.y, "нет", "bad");
+    return;
+  }
+  const prior = s.character;
+  tile.service = plan.job;
+  let c = { ...s.character, gold: plan.gold, inventory: plan.inv };
+  if (c.hand && (c.inventory[c.hand] ?? 0) <= 0) c.hand = null;
+  useGame.setState({
+    character: c,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, `Услуга: ${serviceLine(plan.job)}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: serviceLine(plan.job), tone: "gold" as const }].slice(-10),
+  });
+  void commitService("service-post", { x: tile.x, y: tile.y }, prior).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function postCraft(craft: CraftKind, gold: number) {
+  const s = useGame.getState();
+  if (serviceBlocked()) return;
+  const tile = serviceHere();
+  if (!tile) return;
+  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
+    speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
+    return;
+  }
+  if (!canReachStall(s.character.x, s.character.y, tile)) {
+    speak("Подойди.", tile.x, tile.y, "подойди", "bad");
+    return;
+  }
+  const plan = planPostCraft(tile, isYours(tile), s.character.inventory, s.character.gold, craft, gold, Date.now());
+  if (!plan.ok) {
+    speak(plan.hint, tile.x, tile.y, "нет", "bad");
+    return;
+  }
+  const prior = s.character;
+  tile.service = plan.job;
+  pileSet(tile, plan.pile);
+  let c = { ...s.character, gold: plan.gold, inventory: plan.inv };
+  if (c.hand && (c.inventory[c.hand] ?? 0) <= 0) c.hand = null;
+  useGame.setState({
+    character: c,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, `Услуга: ${serviceLine(plan.job)}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: serviceLine(plan.job), tone: "gold" as const }].slice(-10),
+  });
+  void commitService("service-post", { x: tile.x, y: tile.y }, prior).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function postBuild(kind: BuildingKind, gold: number) {
+  const s = useGame.getState();
+  if (serviceBlocked()) return;
+  const tile = serviceHere();
+  if (!tile) return;
+  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
+    speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
+    return;
+  }
+  if (!canReachStall(s.character.x, s.character.y, tile)) {
+    speak("Подойди.", tile.x, tile.y, "подойди", "bad");
+    return;
+  }
+  const plan = planPostBuild(tile, isYours(tile), s.character.inventory, s.character.gold, kind, gold, Date.now());
+  if (!plan.ok) {
+    speak(plan.hint, tile.x, tile.y, "нет", "bad");
+    return;
+  }
+  const prior = s.character;
+  tile.service = plan.job;
+  pileSet(tile, plan.pile);
+  let c = { ...s.character, gold: plan.gold, inventory: plan.inv };
+  if (c.hand && (c.inventory[c.hand] ?? 0) <= 0) c.hand = null;
+  useGame.setState({
+    character: c,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, `Услуга: ${serviceLine(plan.job)}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: serviceLine(plan.job), tone: "gold" as const }].slice(-10),
+  });
+  void commitService("service-post", { x: tile.x, y: tile.y }, prior).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function takeService() {
+  const s = useGame.getState();
+  if (serviceBlocked()) return;
+  const tile = serviceHere();
+  if (!tile) return;
+  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
+    speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
+    return;
+  }
+  const plan = planTakeService(tile, isYours(tile), s.character.x, s.character.y, s.character.busy);
+  if (!plan.ok) {
+    speak(plan.hint, tile.x, tile.y, "нет", "bad");
+    return;
+  }
+  const prior = s.character;
+  const job = plan.job;
+  tile.service = job;
+  const now = Date.now();
+  let busy: NonNullable<Character["busy"]>;
+  if (job.kind === "watch") {
+    busy = makeBusy("watch", tile.x, tile.y, job.until, { service: true });
+  } else if (job.kind === "haul") {
+    busy = makeBusy("haul", job.destX ?? tile.x, job.destY ?? tile.y, job.until, { item: job.item, service: true });
+  } else if (job.kind === "craft") {
+    const def = CRAFTS.find((d) => d.id === job.craft);
+    const wet = isWatered(s.world, tile);
+    const slow = !!def && (def.bench === "forge" || def.bench === "oven") && !wet;
+    const ms = craftMs((def?.energy ?? 1) + (slow ? 1 : 0), slow, s.character);
+    busy = makeBusy("craft", tile.x, tile.y, now + ms, { craft: job.craft, item: job.item, service: true });
+  } else {
+    const ms = job.build ? buildMs(job.build, s.character) : workMs("build", null, s.character);
+    busy = makeBusy("build", tile.x, tile.y, now + ms, { build: job.build, service: true });
+  }
+  useGame.setState({ world: { ...s.world, tiles: s.world.tiles } });
+  startBusy(
+    s.character,
+    busy,
+    `Беру услугу: ${serviceLine(job)}.`,
+    tile.x,
+    tile.y,
+    SERVICE_LABEL[job.kind],
+  );
+  void commitService("service-take", { x: tile.x, y: tile.y }, prior).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function dropService() {
+  const s = useGame.getState();
+  if (serviceBlocked()) return;
+  const tile = serviceHere();
+  if (!tile) return;
+  const plan = planCancelService(tile, isYours(tile));
+  if (!plan.ok) {
+    speak(plan.hint, tile.x, tile.y, "нет", "bad");
+    return;
+  }
+  const prior = s.character;
+  const job = plan.job;
+  tile.service = null;
+  let inv = { ...s.character.inventory };
+  const cargo = job.cargo ?? (job.item && (job.n ?? 0) > 0 ? { [job.item]: job.n ?? 1 } : {});
+  for (const k of Object.keys(cargo) as ItemId[]) {
+    const n = cargo[k] ?? 0;
+    if (n > 0) {
+      const given = giveOrPile(inv, s.character.transport, tile, k, n);
+      inv = given.inv;
+    }
+  }
+  const c = { ...s.character, gold: s.character.gold + job.gold, inventory: inv };
+  useGame.setState({
+    character: c,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, "Снял услугу. Золото и сырьё снова тут."),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "снял", tone: "ok" as const }].slice(-10),
+  });
+  void commitService("service-cancel", { x: tile.x, y: tile.y }, prior).then((ok) => {
     if (!ok) void pullSpot(true);
   });
 }

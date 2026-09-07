@@ -27,6 +27,8 @@ export const BUSY_LABEL: Record<BusyKind, string> = {
   road: "кладу путь",
   lock: "взлом",
   burn: "поджог",
+  watch: "постой",
+  haul: "везу",
 };
 
 export const TOOL_LIFE = {

@@ -6,7 +6,7 @@ import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, waterHint } from "@/game/life";
 import { LIFE_INDEX } from "@/game/art";
 import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/places";
 import { FOG_DARK, FOG_LIVE, fogAt } from "@/game/book";
-import { bagGoods, stallLine, stallOrderOf, STALL_PRICES } from "@/game/market";
+import { bagGoods, canSeeService, craftsAtTile, isCraftStation, isGateTile, SERVICE_GOLD, SERVICE_LABEL, SERVICE_WAIT, serviceJobOf, serviceLine, stallLine, stallOrderOf, STALL_PRICES } from "@/game/market";
 import { occupantAt } from "@/game/fight";
 import { canFoundVillage, clusterHint, hamletTitle, hasOwnYard } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
@@ -44,7 +44,7 @@ const BUILDINGS: Exclude<BuildingKind, "none" | "workshop" | "shop" | "board" | 
   "net",
 ];
 
-type Pane = "pick" | "place" | "gather" | "build" | "yard";
+type Pane = "pick" | "place" | "gather" | "build" | "yard" | "service";
 
 export function TileBubble() {
   const g = useGame();
@@ -100,7 +100,9 @@ function Sheet({ tile }: { tile: Tile }) {
           ? "Строить"
           : pane === "yard"
             ? "Двор"
-            : tile.bank && tile.building === "none"
+            : pane === "service"
+              ? "Услуга"
+              : tile.bank && tile.building === "none"
               ? "берег"
               : tile.pit
                 ? "яма"
@@ -184,6 +186,7 @@ function Sheet({ tile }: { tile: Tile }) {
       {pane === "gather" && <GatherPane tile={tile} loot={loot} />}
       {pane === "build" && <BuildPane tile={tile} />}
       {pane === "yard" && <YardPane tile={tile} />}
+      {pane === "service" && <ServiceBody tile={tile} />}
     </div>
   );
 }
@@ -383,6 +386,14 @@ function PickPane({
           sub={placeHint(tile)}
           ico={<Ico i={tile.caravan || tile.building === "shop" || tile.building === "stall" ? ICO.gold : ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
           onClick={() => onPane("place")}
+        />
+      )}
+      {near && fogAt(g.world, tile.x, tile.y) === FOG_LIVE && canSeeService(tile, isYours(tile)) && (
+        <Sticker
+          title="Услуга"
+          sub={serviceJobOf(tile) ? serviceLine(serviceJobOf(tile)!) : "постой, отвези, сделай, построй"}
+          ico={<Ico i={ICO.gold} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => onPane("service")}
         />
       )}
       {loot.length === 1 && (
@@ -902,6 +913,235 @@ function StallBody({ tile }: { tile: Tile }) {
             onClick={() => setPick(k)}
           />
         ))
+      )}
+    </div>
+  );
+}
+
+function ServiceBody({ tile }: { tile: Tile }) {
+  const g = useGame();
+  const live = fogAt(g.world, tile.x, tile.y) === FOG_LIVE;
+  const mine = isYours(tile);
+  const job = live ? serviceJobOf(tile) : null;
+  const [kind, setKind] = useState<"watch" | "haul" | "craft" | "build" | null>(null);
+  const [haulItem, setHaulItem] = useState<ItemId | null>(null);
+  const [craftId, setCraftId] = useState<string | null>(null);
+  const [buildKind, setBuildKind] = useState<BuildingKind | null>(null);
+  const goods = bagGoods(g.character);
+  const crafts = craftsAtTile(tile);
+  const canWatch = isGateTile(tile) || tile.building === "stall";
+  const canHaul = canWatch;
+  const canCraft = isCraftStation(tile);
+  const canBuild = !!tile.plot && tile.building === "none";
+
+  if (!live) {
+    return <p className="mt-4 text-sm text-muted-foreground">В тумане услуги нет. Подойди ближе.</p>;
+  }
+
+  if (job) {
+    const mineJob = job.by === "you";
+    const mineTake = job.take === "you";
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">
+          {mineJob
+            ? job.take
+              ? "Взяли. Ждут дело или срыв."
+              : "Твоя услуга. Золото уже в книге."
+            : mineTake
+              ? "Твоё дело. Стой или довези."
+              : job.take
+                ? "Уже взяли."
+                : "Чужая услуга. Возьми, если стоишь рядом."}
+        </p>
+        <p className="font-display text-2xl leading-none">{serviceLine(job)}</p>
+        {mineJob && !job.take ? (
+          <Button className="h-12 w-full text-base" onClick={() => g.dropService()}>
+            Снять · золото обратно
+          </Button>
+        ) : !mineJob && !job.take ? (
+          <Button className="h-12 w-full text-base" onClick={() => g.takeService()}>
+            Взять · {goldTxt(job.gold)}
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (!mine) {
+    return <p className="mt-4 text-sm text-muted-foreground">Пусто. Чужую услугу кладут сами.</p>;
+  }
+
+  const goldPick = (onPick: (n: number) => void) => (
+    <div className="mt-4 flex flex-col gap-2">
+      <p className="text-[13px] text-muted-foreground">Цена словом. Золото сразу в книгу.</p>
+      {SERVICE_GOLD.map((n) => (
+        <Sticker
+          key={n}
+          title={goldTxt(n)}
+          ico={<Ico i={ICO.gold} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => onPick(n)}
+        />
+      ))}
+      <Button variant="outline" className="h-12" onClick={() => { setKind(null); setHaulItem(null); setCraftId(null); setBuildKind(null); }}>
+        Назад
+      </Button>
+    </div>
+  );
+
+  if (kind === "watch") {
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">Постой у калитки. Срок и золото.</p>
+        {SERVICE_WAIT.map((sec) => (
+          <div key={sec} className="flex flex-col gap-1">
+            <p className="text-[12px] text-muted-foreground">{sec / 60} мин</p>
+            {SERVICE_GOLD.map((n) => (
+              <Sticker
+                key={`${sec}-${n}`}
+                title={`${sec / 60} мин · ${goldTxt(n)}`}
+                ico={<Ico i={ICO.gold} className="size-11 overflow-hidden rounded-[12px]" />}
+                onClick={() => g.postWatch(n, sec)}
+              />
+            ))}
+          </div>
+        ))}
+        <Button variant="outline" className="h-12" onClick={() => setKind(null)}>
+          Назад
+        </Button>
+      </div>
+    );
+  }
+
+  if (kind === "haul" && !haulItem) {
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">Вещь из сумки. Отвезут сюда.</p>
+        {goods.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Сумка пуста.</p>
+        ) : (
+          goods.map((k) => (
+            <Sticker
+              key={k}
+              title={ITEM_LABEL[k]}
+              sub={`в сумке ×${g.character.inventory[k]}`}
+              ico={<ItemPic id={k} className="size-11 overflow-hidden rounded-[12px]" />}
+              onClick={() => setHaulItem(k)}
+            />
+          ))
+        )}
+        <Button variant="outline" className="h-12" onClick={() => setKind(null)}>
+          Назад
+        </Button>
+      </div>
+    );
+  }
+
+  if (kind === "haul" && haulItem) {
+    return goldPick((n) => {
+      g.postHaul(haulItem, n);
+      setHaulItem(null);
+      setKind(null);
+    });
+  }
+
+  if (kind === "craft" && !craftId) {
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">Рецепт станка. Сырьё сразу в книгу.</p>
+        {crafts.length === 0 ? (
+          <p className="text-sm text-muted-foreground">На этом станке рецептов нет.</p>
+        ) : (
+          crafts.map((d) => (
+            <Sticker
+              key={d.id}
+              title={d.label}
+              sub={d.hint}
+              ico={<ItemPic id={d.out} className="size-11 overflow-hidden rounded-[12px]" />}
+              onClick={() => setCraftId(d.id)}
+            />
+          ))
+        )}
+        <Button variant="outline" className="h-12" onClick={() => setKind(null)}>
+          Назад
+        </Button>
+      </div>
+    );
+  }
+
+  if (kind === "craft" && craftId) {
+    return goldPick((n) => {
+      g.postCraft(craftId as Parameters<typeof g.postCraft>[0], n);
+      setCraftId(null);
+      setKind(null);
+    });
+  }
+
+  if (kind === "build" && !buildKind) {
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">Построй на этой клетке. Материал в книгу.</p>
+        {BUILDINGS.map((b) => (
+          <Sticker
+            key={b}
+            title={BUILDING_LABEL[b]}
+            sub={`${BUILD_COST[b].wood ? `${BUILD_COST[b].wood} дер.` : ""}${BUILD_COST[b].wood && BUILD_COST[b].stone ? " · " : ""}${BUILD_COST[b].stone ? `${BUILD_COST[b].stone} кам.` : ""}`}
+            ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
+            onClick={() => setBuildKind(b)}
+          />
+        ))}
+        <Button variant="outline" className="h-12" onClick={() => setKind(null)}>
+          Назад
+        </Button>
+      </div>
+    );
+  }
+
+  if (kind === "build" && buildKind) {
+    return goldPick((n) => {
+      g.postBuild(buildKind, n);
+      setBuildKind(null);
+      setKind(null);
+    });
+  }
+
+  return (
+    <div className="mt-4 flex flex-col gap-2">
+      <p className="text-[13px] text-muted-foreground">Контракт двух почт. Не витрина ордера.</p>
+      {canWatch && (
+        <Sticker
+          title={SERVICE_LABEL.watch}
+          sub="стоит на клетке до срока"
+          ico={<Ico i={ICO.boots} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => setKind("watch")}
+        />
+      )}
+      {canHaul && (
+        <Sticker
+          title={SERVICE_LABEL.haul}
+          sub="вещь из сумки сюда"
+          ico={<Ico i={ICO.wood} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => setKind("haul")}
+        />
+      )}
+      {canCraft && (
+        <Sticker
+          title={SERVICE_LABEL.craft}
+          sub="рецепт этого станка"
+          ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => setKind("craft")}
+        />
+      )}
+      {canBuild && (
+        <Sticker
+          title={SERVICE_LABEL.build}
+          sub="на пустой клетке двора"
+          ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
+          onClick={() => setKind("build")}
+        />
+      )}
+      {!canWatch && !canHaul && !canCraft && !canBuild && (
+        <p className="text-sm text-muted-foreground">Здесь услугу не кладут. Калитка, прилавок, станок или пустой двор.</p>
       )}
     </div>
   );
