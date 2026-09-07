@@ -110,6 +110,7 @@ import {
   planTake,
   planTakeService,
   SERVICE_LABEL,
+  serviceBusyUntil,
   serviceJobOf,
   serviceLine,
   settleService,
@@ -4911,7 +4912,7 @@ function takeService() {
     speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
     return;
   }
-  const plan = planTakeService(tile, isYours(tile), s.character.x, s.character.y, s.character.busy);
+  const plan = planTakeService(tile, isYours(tile), s.character.x, s.character.y, s.character.busy, Date.now());
   if (!plan.ok) {
     speak(plan.hint, tile.x, tile.y, "нет", "bad");
     return;
@@ -4922,9 +4923,9 @@ function takeService() {
   const now = Date.now();
   let busy: NonNullable<Character["busy"]>;
   if (job.kind === "watch") {
-    busy = makeBusy("watch", tile.x, tile.y, job.until, { service: true });
+    busy = makeBusy("watch", tile.x, tile.y, serviceBusyUntil(job, now), { service: true });
   } else if (job.kind === "haul") {
-    busy = makeBusy("haul", job.destX ?? tile.x, job.destY ?? tile.y, job.until, { item: job.item, service: true });
+    busy = makeBusy("haul", job.destX ?? tile.x, job.destY ?? tile.y, serviceBusyUntil(job, now), { item: job.item, service: true });
   } else if (job.kind === "craft") {
     const def = CRAFTS.find((d) => d.id === job.craft);
     const wet = isWatered(s.world, tile);

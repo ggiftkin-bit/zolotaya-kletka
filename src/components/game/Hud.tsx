@@ -270,7 +270,9 @@ export function Hud() {
             : still
               ? `Сутки без хода · ${formatWait(g.character.stillUntil - now)}`
               : busy
-                ? `${BUSY_LABEL[busy.kind]} ещё ${formatWait(busy.until - now)}`
+                ? busy.kind === "haul"
+                  ? BUSY_LABEL[busy.kind]
+                  : `${BUSY_LABEL[busy.kind]} ещё ${formatWait(busy.until - now)}`
                 : g.travel
                   ? `идёшь ${walkLeft} с`
               : g.hint

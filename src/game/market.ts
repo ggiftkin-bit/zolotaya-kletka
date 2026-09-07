@@ -15,7 +15,10 @@ export type StallOrder = {
 export const STALL_PRICES = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20] as const;
 
 export const SERVICE_GOLD = [2, 4, 8, 12] as const;
-export const SERVICE_WAIT = [60, 120, 180] as const;
+/** Постой: стоять 15 / 30 / 60 мин стены. Не срок вывески. */
+export const SERVICE_DO = [15 * 60, 30 * 60, 60 * 60] as const;
+/** Отвези: Busy пока не дошёл. Стена не срывает. */
+const HAUL_BUSY_MS = 24 * 60 * 60 * 1000;
 
 export const SERVICE_LABEL: Record<ServiceKind, string> = {
   watch: "постой",
@@ -126,21 +129,25 @@ export function isMineService(job: ServiceJob): boolean {
 }
 
 export function serviceLine(job: ServiceJob, now = Date.now()): string {
-  const left = Math.max(0, job.until - now);
-  const sec = Math.ceil(left / 1000);
-  const when = sec >= 60 ? `${Math.ceil(sec / 60)} мин` : `${sec} с`;
   const who = job.take ? (job.take === "you" ? " · твоё дело" : " · взяли") : "";
+  let when = "";
+  if (!job.take) {
+    if (job.kind === "watch" && job.doSec) when = ` · ${Math.round(job.doSec / 60)} мин`;
+  } else if (job.until > now) {
+    const sec = Math.ceil((job.until - now) / 1000);
+    when = ` · ${sec >= 60 ? `${Math.ceil(sec / 60)} мин` : `${sec} с`}`;
+  }
   if (job.kind === "haul" && job.item) {
-    return `${SERVICE_LABEL.haul} ${ITEM_LABEL[job.item]}${job.n && job.n > 1 ? ` ×${job.n}` : ""} · ${goldTxt(job.gold)} · ${when}${who}`;
+    return `${SERVICE_LABEL.haul} ${ITEM_LABEL[job.item]}${job.n && job.n > 1 ? ` ×${job.n}` : ""} · ${goldTxt(job.gold)}${when}${who}`;
   }
   if (job.kind === "craft") {
     const def = CRAFTS.find((d) => d.id === job.craft);
-    return `${SERVICE_LABEL.craft} ${def?.label ?? "ремесло"} · ${goldTxt(job.gold)} · ${when}${who}`;
+    return `${SERVICE_LABEL.craft} ${def?.label ?? "ремесло"} · ${goldTxt(job.gold)}${when}${who}`;
   }
   if (job.kind === "build" && job.build) {
-    return `${SERVICE_LABEL.build} ${BUILDING_LABEL[job.build]} · ${goldTxt(job.gold)} · ${when}${who}`;
+    return `${SERVICE_LABEL.build} ${BUILDING_LABEL[job.build]} · ${goldTxt(job.gold)}${when}${who}`;
   }
-  return `${SERVICE_LABEL[job.kind]} · ${goldTxt(job.gold)} · ${when}${who}`;
+  return `${SERVICE_LABEL[job.kind]} · ${goldTxt(job.gold)}${when}${who}`;
 }
 
 export function canPostService(tile: Tile, mine: boolean): boolean {
@@ -174,13 +181,13 @@ export function planPostWatch(
   if (!mine) return { ok: false, hint: "Свою услугу клади у своей калитки." };
   if (!isGateTile(tile) && tile.building !== "stall") return { ok: false, hint: "Постой — у калитки или прилавка." };
   if (serviceJobOf(tile)) return { ok: false, hint: "Сначала сними услугу." };
-  if (!SERVICE_WAIT.includes(waitSec as (typeof SERVICE_WAIT)[number])) return { ok: false, hint: "Срок: 1, 2 или 3 мин." };
+  if (!SERVICE_DO.includes(waitSec as (typeof SERVICE_DO)[number])) return { ok: false, hint: "Срок: 15, 30 или 60 мин." };
   const pay = payGold(purse, gold);
   if (!pay.ok) return pay;
   return {
     ok: true,
     gold: pay.gold,
-    job: { kind: "watch", gold: pay.pay, until: now + waitSec * 1000, by: "you", destX: tile.x, destY: tile.y },
+    job: { kind: "watch", gold: pay.pay, until: 0, doSec: waitSec, by: "you", destX: tile.x, destY: tile.y },
   };
 }
 
@@ -207,7 +214,7 @@ export function planPostHaul(
     job: {
       kind: "haul",
       gold: pay.pay,
-      until: now + 180 * 1000,
+      until: 0,
       by: "you",
       item,
       n: 1,
@@ -246,7 +253,7 @@ export function planPostCraft(
     job: {
       kind: "craft",
       gold: pay.pay,
-      until: now + 120 * 1000,
+      until: 0,
       by: "you",
       craft: def.id,
       item: def.out,
@@ -292,7 +299,7 @@ export function planPostBuild(
     job: {
       kind: "build",
       gold: pay.pay,
-      until: now + 90 * 1000,
+      until: 0,
       by: "you",
       build: kind,
       destX: tile.x,
@@ -308,6 +315,7 @@ export function planTakeService(
   px: number,
   py: number,
   busy: Character["busy"],
+  now: number,
 ): { ok: true; job: ServiceJob } | { ok: false; hint: string } {
   const job = serviceJobOf(tile);
   if (!job) return { ok: false, hint: "Нет услуги." };
@@ -315,7 +323,24 @@ export function planTakeService(
   if (job.take) return { ok: false, hint: "Уже взяли." };
   if (chebyshev(px, py, tile.x, tile.y) > 1) return { ok: false, hint: "Подойди." };
   if (busy && busy.until > Date.now()) return { ok: false, hint: "Сначала доделай своё дело." };
-  return { ok: true, job: { ...job, take: "you" } };
+  return { ok: true, job: stampTake(job, "you", now) };
+}
+
+/** Срок на until только в момент «Взять». Вывеска без часа. */
+export function stampTake(job: ServiceJob, who: string, now: number): ServiceJob {
+  const next: ServiceJob = { ...job, take: who };
+  if (job.kind === "watch") {
+    const sec = SERVICE_DO.includes(job.doSec as (typeof SERVICE_DO)[number]) ? job.doSec! : SERVICE_DO[1];
+    next.until = now + sec * 1000;
+  }
+  return next;
+}
+
+/** Busy на столе. Постой — until с «Взять». Отвези — пока не дошёл. */
+export function serviceBusyUntil(job: ServiceJob, now: number): number {
+  if (job.kind === "watch") return Math.max(job.until, now + 1000);
+  if (job.kind === "haul") return now + HAUL_BUSY_MS;
+  return job.until > now ? job.until : now;
 }
 
 export function planCancelService(
@@ -353,7 +378,7 @@ function atCell(p: { x: number; y: number } | null, x: number, y: number, reach 
   return chebyshev(p.x, p.y, x, y) <= reach;
 }
 
-/** Книга после срока или по факту: достоял — плата, ушёл — золото и сырьё заказчику. */
+/** Книга: вывеска не горит. Срок — только взятое дело. */
 export function settleService(
   job: ServiceJob,
   now: number,
@@ -369,8 +394,7 @@ export function settleService(
   const posterHere = atCell(poster, destX, destY, 0);
 
   if (!job.take) {
-    if (now < job.until) return { wait: true };
-    return { wait: false, ok: false, refundTo: job.by, cargo, toPosterBag: false };
+    return { wait: true };
   }
 
   if (early === "arrive" && job.kind === "haul" && atCell(exec, destX, destY, 0)) {
@@ -398,48 +422,15 @@ export function settleService(
     return { wait: false, ok: true, payTo: job.take, cargo: {}, toPosterBag: false, build: job.build };
   }
 
-  if (now < job.until) return { wait: true };
-
   if (job.kind === "watch") {
+    if (!job.until || now < job.until) return { wait: true };
     if (atCell(exec, tileX, tileY, 0)) {
       return { wait: false, ok: true, payTo: job.take, cargo: {}, toPosterBag: false };
     }
     return { wait: false, ok: false, refundTo: job.by, cargo: {}, toPosterBag: false };
   }
-  if (job.kind === "haul") {
-    if (atCell(exec, destX, destY, 0)) {
-      return {
-        wait: false,
-        ok: true,
-        payTo: job.take,
-        cargo,
-        toPosterBag: posterHere,
-        out: job.item ? { item: job.item, n: job.n ?? 1 } : undefined,
-      };
-    }
-    return { wait: false, ok: false, refundTo: job.by, cargo, toPosterBag: false };
-  }
-  if (job.kind === "craft") {
-    if (atCell(exec, tileX, tileY, 1)) {
-      const def = CRAFTS.find((d) => d.id === job.craft);
-      return {
-        wait: false,
-        ok: true,
-        payTo: job.take,
-        cargo: {},
-        toPosterBag: posterHere,
-        out: def ? { item: def.out, n: def.n } : undefined,
-      };
-    }
-    return { wait: false, ok: false, refundTo: job.by, cargo, toPosterBag: false };
-  }
-  if (job.kind === "build") {
-    if (atCell(exec, tileX, tileY, 1)) {
-      return { wait: false, ok: true, payTo: job.take, cargo: {}, toPosterBag: false, build: job.build };
-    }
-    return { wait: false, ok: false, refundTo: job.by, cargo, toPosterBag: false };
-  }
-  return { wait: false, ok: false, refundTo: job.by, cargo, toPosterBag: false };
+
+  return { wait: true };
 }
 
 export function applyCargoPile(tile: Tile, cargo: Partial<Record<ItemId, number>>) {

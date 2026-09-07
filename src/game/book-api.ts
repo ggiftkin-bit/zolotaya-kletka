@@ -7,7 +7,7 @@ import { slimTile, fatTile, type SlimTile } from "./save";
 import { GROW_CATCHUP_TICKS, GROW_WRITE_BATCH, TICK_MS, stepWorldClock, tickGrow } from "./grow";
 import type { Season, Tile } from "./types";
 import { generateWorld } from "./worldgen";
-import { isItemId, settleService, serviceJobOf } from "./market";
+import { isItemId, settleService, serviceJobOf, stampTake } from "./market";
 import { isHamletOwner, isLivingOwner } from "./pact";
 import { defaultMatter, MATTER_HP } from "./work";
 import { pileAdd } from "./pile";
@@ -1158,6 +1158,10 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
       if (liveJob) return { ok: false as const, hint: "сначала сними услугу", conflicts: asConflict(), written: [], credit: 0 };
       if (!nextJob || nextJob.by !== userId) return { ok: false as const, hint: "нет услуги", conflicts: [], written: [], credit: 0 };
       if (nextJob.gold < 1) return { ok: false as const, hint: "цена словом", conflicts: [], written: [], credit: 0 };
+      const posted: ServiceJob = { ...nextJob, until: 0 };
+      delete posted.take;
+      nextTile.service = posted;
+      t.slim = slimTile(nextTile);
     } else if (data.kind === "service-cancel") {
       if (!liveJob || liveJob.by !== userId) return { ok: false as const, hint: "чужая услуга", conflicts: [], written: [], credit: 0 };
       if (liveJob.take) return { ok: false as const, hint: "уже взяли", conflicts: [], written: [], credit: 0 };
@@ -1168,6 +1172,8 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
       if (liveJob.take) return { ok: false as const, hint: "уже взяли", conflicts: asConflict(), written: [], credit: 0 };
       if (reach > 1) return { ok: false as const, hint: "подойди", conflicts: [], written: [], credit: 0 };
       if (!nextJob || nextJob.take !== userId) return { ok: false as const, hint: "нет услуги", conflicts: [], written: [], credit: 0 };
+      nextTile.service = stampTake(liveJob, userId, Date.now());
+      t.slim = slimTile(nextTile);
     } else if (data.kind === "service-done" || data.kind === "service-fail") {
       if (!liveJob) return { ok: false as const, hint: "нет услуги", conflicts: asConflict(), written: [], credit: 0 };
       const actor = liveJob.take === userId || liveJob.by === userId;

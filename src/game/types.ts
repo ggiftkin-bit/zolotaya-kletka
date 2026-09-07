@@ -175,9 +175,12 @@ export type ServiceKind = "watch" | "haul" | "build" | "craft";
 export type ServiceJob = {
   kind: ServiceKind;
   gold: number;
+  /** 0 — вывеска без часа. Срок на until только после «Взять». */
   until: number;
   by: string;
   take?: string;
+  /** Постой: 15/30/60 мин. Живёт в заказе, на until садится при «Взять». */
+  doSec?: number;
   item?: ItemId;
   n?: number;
   destX?: number;

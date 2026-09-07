@@ -6,7 +6,7 @@ import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, waterHint } from "@/game/life";
 import { LIFE_INDEX } from "@/game/art";
 import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/places";
 import { FOG_DARK, FOG_LIVE, fogAt } from "@/game/book";
-import { bagGoods, canReadBoard, canSeeService, craftsAtTile, isCraftStation, isGateTile, SERVICE_GOLD, SERVICE_LABEL, SERVICE_WAIT, serviceJobOf, serviceLine, stallLine, stallOrderOf, STALL_PRICES, streetNotices } from "@/game/market";
+import { bagGoods, canReadBoard, canSeeService, craftsAtTile, isCraftStation, isGateTile, SERVICE_DO, SERVICE_GOLD, SERVICE_LABEL, serviceJobOf, serviceLine, stallLine, stallOrderOf, STALL_PRICES, streetNotices } from "@/game/market";
 import { occupantAt } from "@/game/fight";
 import { canFoundVillage, canPlaceBoard, canPutLiveName, clusterHint, hamletTitle, hasOwnYard, namesTouchingYard, villageOf } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
@@ -1016,8 +1016,8 @@ function ServiceBody({ tile }: { tile: Tile }) {
   if (kind === "watch") {
     return (
       <div className="mt-4 flex flex-col gap-2">
-        <p className="text-[13px] text-muted-foreground">Постой у калитки. Срок и золото.</p>
-        {SERVICE_WAIT.map((sec) => (
+        <p className="text-[13px] text-muted-foreground">Постой у калитки. Срок на дело, не на вывеску.</p>
+        {SERVICE_DO.map((sec) => (
           <div key={sec} className="flex flex-col gap-1">
             <p className="text-[12px] text-muted-foreground">{sec / 60} мин</p>
             {SERVICE_GOLD.map((n) => (

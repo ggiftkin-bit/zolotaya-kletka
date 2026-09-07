@@ -58,6 +58,7 @@ export type SlimTile = {
     bd?: BuildingKind;
     ck?: string;
     cg?: Partial<Record<ItemId, number>>;
+    d?: number;
   };
 };
 
@@ -103,6 +104,7 @@ function fatService(raw: SlimTile["sv"] | undefined): ServiceJob | null {
   if (raw.ck) job.craft = raw.ck;
   const cg = slimCargo(raw.cg);
   if (cg) job.cargo = cg;
+  if (typeof raw.d === "number" && raw.d > 0) job.doSec = Math.floor(raw.d);
   return job;
 }
 
@@ -118,6 +120,7 @@ function slimService(job: ServiceJob | null | undefined): SlimTile["sv"] | undef
   if (job.craft) o.ck = job.craft;
   const cg = slimCargo(job.cargo);
   if (cg) o.cg = cg;
+  if (job.doSec && job.doSec > 0) o.d = job.doSec;
   return o;
 }
 
