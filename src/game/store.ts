@@ -47,6 +47,7 @@ import { stampVillage, leaveVillage, hamletTitle, hasOwnYard, isOutsideYard, set
 import { cargoWeight, loadRatio, pailKg, stepEnergy, wornKg } from "./travel";
 import { atBench, CRAFTS, EAT_ORDER, EAT_SAT, PROF_BLURB, type CraftKind } from "./craft";
 import { markDepleted, tickGrow, REGROW_WAIT } from "./grow";
+import { fillStock, planBuyFromStock, planDonate, planGift, planSellToStock, seedStock } from "./office";
 import { lootOn, canOpenPlace } from "./places";
 import { cancelNotice, ensureNotify, maybePingHidden, scheduleNotice } from "./notify";
 import {
@@ -79,6 +80,7 @@ import type {
   Character,
   Dummy,
   Floater,
+  GiftId,
   Meet,
   GameState,
   Inventory,
@@ -96,7 +98,7 @@ import { chebyshev, dummyHome, foeById, gearSlot, ghostLiveFoe, leaveChance, mak
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, FOG_LIVE, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
-import { bindBookStore, commitHarm, commitService, commitStall, commitVillage, flushBook, lookStreet, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
+import { bindBookStore, commitHarm, commitOffice, commitService, commitStall, commitVillage, flushBook, lookStreet, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
 import {
   applyCargoPile,
   canReachStall,
@@ -231,6 +233,7 @@ function makeCharacter(name: string, color: string): Character {
     bagWear: {},
     pacts: {},
     village: "",
+    gifts: {},
   };
 }
 
@@ -481,6 +484,8 @@ type Actions = {
   setProfession: (p: Profession) => void;
   eat: (item: ItemId) => void;
   sellToCaravan: (item: ItemId, qty: number) => void;
+  buyGift: (id: GiftId) => void;
+  donateTable: () => void;
   takeJob: (id: string) => void;
   grant: (kind: "wood" | "stone" | "cart" | "horse" | "gold" | "wagon" | "lock") => void;
   stepSim: (dt: number) => void;
@@ -618,6 +623,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   tickAt: Date.now(),
   jobs: [],
   trader: makeTrader(1),
+  stock: seedStock(),
   plotMark: null,
   log: [],
   started: false,
@@ -702,6 +708,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         world,
         jobs: saved.jobs ?? [],
         trader: saved.trader ?? makeTrader(saved.week ?? 1),
+        stock: fillStock(saved.stock),
         hover: null,
         preview: saved.travel?.path ?? null,
         floaters: [],
@@ -807,6 +814,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       tickAt: Date.now(),
       jobs: makeJobs(1),
       trader: makeTrader(1),
+      stock: seedStock(),
       plotMark: null,
       started: true,
       floaters: [],
@@ -1023,43 +1031,36 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       set({ log: pushLog(s.log, "Лавка на тракте — дойди до повозки.") });
       return;
     }
-    const inv = { ...s.character.inventory };
-    const n = Math.min(qty, inv[item]);
-    if (n <= 0) {
-      set({ log: pushLog(s.log, "Нечего сдавать.") });
+    const plan = planSellToStock(
+      s.stock,
+      s.character.inventory,
+      item,
+      qty,
+      s.season,
+      s.character.profession === "trader",
+    );
+    if (!plan.ok) {
+      speak(plan.hint, here.x, here.y, plan.hint, "bad");
       return;
     }
-    const quota = s.trader.demand[item] ?? 0;
-    if (quota <= 0) {
-      speak(
-        `Лавка больше не берёт ${ITEM_LABEL[item]} на этой неделе. Приходи после смены недели.`,
-        here.x,
-        here.y,
-        "сыты",
-        "bad",
-      );
-      return;
-    }
-    const take = Math.min(n, quota);
-    const quote = sellQuote(item, take, s.season, s.character.profession === "trader");
-    if (quote.take <= 0 || quote.gold <= 0) {
-      speak("Мало для лавки.", here.x, here.y, "мало для лавки", "bad");
-      return;
-    }
-    inv[item] -= quote.take;
-    const gold = s.character.gold + quote.gold;
-    let c = { ...s.character, inventory: inv, gold };
+    const prior = s.character;
+    const priorStock = s.stock;
+    const gold = s.character.gold + plan.gold;
+    let c = { ...s.character, inventory: plan.inv, gold };
     c = bumpSkill(c, "trade", 0.15);
-    const demand = { ...s.trader.demand, [item]: quota - quote.take };
-    const last = `Купил ${quote.take} ${ITEM_LABEL[item]} за ${goldTxt(quote.gold)}. Ещё берёт ${demand[item]}.`;
+    const last = `Купил ${plan.take} ${ITEM_LABEL[item]} за ${goldTxt(plan.gold)}. Склад ${plan.next[item]}.`;
     set({
       character: c,
-      trader: { ...s.trader, demand, last },
+      stock: plan.next,
+      trader: { ...s.trader, last },
       log: pushLog(s.log, `Лавка: ${last}`),
       floaters: [
         ...s.floaters,
-        { id: ++floaterSeq, x: here.x, y: here.y, text: `+${goldTxt(quote.gold)}`, tone: "gold" as const },
+        { id: ++floaterSeq, x: here.x, y: here.y, text: `+${goldTxt(plan.gold)}`, tone: "gold" as const },
       ].slice(-10),
+    });
+    void commitOffice("stock-sell", prior, priorStock, { item, qty: plan.take }).then((ok) => {
+      if (!ok) void pullSpot(true);
     });
   },
 
@@ -1178,6 +1179,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   storeItem: (item, qty) => storeItem(item, qty),
   takeChest: (item, qty) => takeChest(item, qty),
   buyFromTrader: (item, qty) => buyFromTrader(item, qty),
+  buyGift: (id) => buyGift(id),
+  donateTable: () => donateTable(),
   restHere: () => restHere(),
   sleepHere: () => sleepHere(),
   cookHere: () => cookHere(),
@@ -2387,29 +2390,73 @@ function buyFromTrader(item: ItemId, qty: number) {
     speak("Лавка на тракте — дойди до повозки.", s.character.x, s.character.y, "нет лавки", "bad");
     return;
   }
-  const have = s.trader.wares[item] ?? 0;
-  const n = Math.min(qty, have);
-  if (n <= 0) {
-    speak(`В лавке кончилось: ${ITEM_LABEL[item]}. На неделе подвезут.`, tile.x, tile.y, "нет товара", "bad");
+  const plan = planBuyFromStock(s.stock, s.character.gold, item, qty, s.season);
+  if (!plan.ok) {
+    speak(plan.hint, tile.x, tile.y, plan.hint, "bad");
     return;
   }
-  const unit = caravanSell(item, s.season);
-  const cost = unit * n;
-  if (s.character.gold < cost) {
-    speak(`Нужно ${goldTxt(cost)}, есть ${goldTxt(s.character.gold)}.`, tile.x, tile.y, "мало золота", "bad");
-    return;
-  }
-  const given = giveOrPile({ ...s.character.inventory }, s.character.transport, tile, item, n);
-  const wares = { ...s.trader.wares, [item]: have - n };
-  let c = { ...s.character, inventory: given.inv, gold: s.character.gold - cost };
+  const prior = s.character;
+  const priorStock = s.stock;
+  const given = giveOrPile({ ...s.character.inventory }, s.character.transport, tile, item, plan.n);
+  let c = { ...s.character, inventory: given.inv, gold: s.character.gold - plan.cost };
   c = bumpSkill(c, "trade", 0.1);
-  const last = `Продал тебе ${n} ${ITEM_LABEL[item]} за ${goldTxt(unit)} шт. Осталось ${wares[item]}.`;
+  const last = `Продал тебе ${plan.n} ${ITEM_LABEL[item]} за ${goldTxt(plan.cost)}. Склад ${plan.next[item]}.`;
   useGame.setState({
     character: c,
-    trader: { ...s.trader, wares, last },
+    stock: plan.next,
+    trader: { ...s.trader, last },
     world: { ...s.world, tiles: s.world.tiles },
     log: pushLog(s.log, given.piled ? `Лавка: ${last} Лишнее на клетке.` : `Лавка: ${last}`),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `−${goldTxt(cost)}`, tone: "gold" as const }].slice(-10),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `−${goldTxt(plan.cost)}`, tone: "gold" as const }].slice(-10),
+  });
+  void commitOffice("stock-buy", prior, priorStock, { item, qty: plan.n }).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function buyGift(id: GiftId) {
+  const s = useGame.getState();
+  const tile = hereTile();
+  if (!tile?.caravan) {
+    speak("Контора — у лавки на тракте.", s.character.x, s.character.y, "нет лавки", "bad");
+    return;
+  }
+  const plan = planGift(s.character.gold, s.character.gifts, id);
+  if (!plan.ok) {
+    speak(plan.hint, tile.x, tile.y, plan.hint, "bad");
+    return;
+  }
+  const prior = s.character;
+  const c = { ...s.character, gold: s.character.gold - plan.gold, gifts: plan.next };
+  useGame.setState({
+    character: c,
+    log: pushLog(s.log, `Контора: заказан · ${id}. Выдаст админ.`),
+    hint: { text: "заказан — выдаст админ", tone: "gold" },
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `−${goldTxt(plan.gold)}`, tone: "gold" as const }].slice(-10),
+  });
+  void commitOffice("gift", prior, s.stock, { gift: id }).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function donateTable() {
+  const s = useGame.getState();
+  const tile = hereTile();
+  if (!tile?.caravan) {
+    speak("Поддержать стол — у лавки на тракте.", s.character.x, s.character.y, "нет лавки", "bad");
+    return;
+  }
+  const plan = planDonate();
+  const prior = s.character;
+  const c = { ...s.character, gold: s.character.gold + plan.gold };
+  useGame.setState({
+    character: c,
+    log: pushLog(s.log, `Поддержал стол. +${goldTxt(plan.gold)} на эту почту.`),
+    hint: { text: `+${goldTxt(plan.gold)}`, tone: "gold" },
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${goldTxt(plan.gold)}`, tone: "gold" as const }].slice(-10),
+  });
+  void commitOffice("donate", prior, s.stock).then((ok) => {
+    if (!ok) void pullSpot(true);
   });
 }
 

@@ -7,6 +7,7 @@ import { LIFE_INDEX } from "@/game/art";
 import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/places";
 import { FOG_DARK, FOG_LIVE, fogAt } from "@/game/book";
 import { bagGoods, bringDestLine, bringDests, BRING_GOODS, BRING_N, canPostFromBoard, canReadBoard, canSeeService, craftsAtTile, firstOwnGate, firstOwnShed, isCraftStation, isGateTile, SERVICE_DO, SERVICE_GOLD, SERVICE_LABEL, serviceJobOf, serviceLine, stallLine, stallOrderOf, STALL_PRICES, streetNotices } from "@/game/market";
+import { DONATE_GOLD, GIFTS, giftOrdered, LIVE_STOCK, stockOf } from "@/game/office";
 import { occupantAt } from "@/game/fight";
 import { canFoundVillage, canPlaceBoard, canPutLiveName, clusterHint, hamletTitle, hasOwnYard, namesTouchingYard, villageOf } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
@@ -806,14 +807,23 @@ function WorkshopBody({ tile }: { tile: Tile }) {
 
 function LavkaBody({ tile }: { tile: Tile }) {
   const g = useGame();
+  const [door, setDoor] = useState<"lavka" | "office">("lavka");
   const haveWagon =
     g.character.wagon ||
     g.character.transport === "wagon" ||
     tile.wagon === "you" ||
     g.world.tiles.some((t) => t.wagon === "you");
+  if (door === "office") {
+    return <OfficeBody onBack={() => setDoor("lavka")} />;
+  }
   return (
     <div className="mt-3">
       <p className="text-[13px] text-muted-foreground">{g.trader.last}</p>
+      <div className="mt-1.5">
+        <Button size="sm" className="h-11 w-full" variant="secondary" onClick={() => setDoor("office")}>
+          Контора
+        </Button>
+      </div>
       <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">Ход</p>
       <div className="mt-1.5 flex gap-1.5">
         {(g.character.carts ?? 0) < 1 ? (
@@ -850,8 +860,10 @@ function LavkaBody({ tile }: { tile: Tile }) {
         </Button>
       </div>
       <TradeLists
-        demand={g.trader.demand}
-        wares={g.trader.wares}
+        demand={Object.fromEntries(LIVE_STOCK.map((k) => [k, 1])) as Partial<Record<ItemId, number>>}
+        wares={Object.fromEntries(LIVE_STOCK.map((k) => [k, stockOf(g.stock, k)])) as Partial<Record<ItemId, number>>}
+        stock={g.stock}
+        catalog={LIVE_STOCK}
         onSell={(k, n) => g.sellToCaravan(k, n)}
         onBuy={(k) => g.buyFromTrader(k, 1)}
         traderBonus={g.character.profession === "trader"}
@@ -859,6 +871,38 @@ function LavkaBody({ tile }: { tile: Tile }) {
       />
       <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">Биржа у лавки</p>
       <Jobs />
+    </div>
+  );
+}
+
+function OfficeBody({ onBack }: { onBack: () => void }) {
+  const g = useGame();
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      <Button className="h-11" variant="outline" onClick={onBack}>
+        ← Лавка
+      </Button>
+      <p className="font-display text-2xl leading-none">Контора</p>
+      <p className="text-[13px] text-muted-foreground">Приз в сумку не кладётся. Выдаст админ.</p>
+      {GIFTS.map((prize) => {
+        const ordered = giftOrdered(g.character.gifts, prize.id);
+        return (
+          <Button
+            key={prize.id}
+            className="h-12 w-full justify-between px-3 text-base"
+            variant={ordered ? "outline" : "secondary"}
+            onClick={() => g.buyGift(prize.id)}
+          >
+            <span>{prize.label}</span>
+            <span className="text-[12px] text-muted-foreground">
+              {ordered ? "заказан — выдаст админ" : goldTxt(prize.gold)}
+            </span>
+          </Button>
+        );
+      })}
+      <Button className="h-12 w-full text-base" onClick={() => g.donateTable()}>
+        Поддержать стол · +{goldTxt(DONATE_GOLD)}
+      </Button>
     </div>
   );
 }
@@ -1686,6 +1730,8 @@ function Jobs() {
 function TradeLists({
   demand,
   wares,
+  stock,
+  catalog,
   onSell,
   onBuy,
   traderBonus,
@@ -1693,24 +1739,31 @@ function TradeLists({
 }: {
   demand: Partial<Record<ItemId, number>>;
   wares: Partial<Record<ItemId, number>>;
+  stock?: Partial<Record<ItemId, number>>;
+  catalog?: ItemId[];
   onSell: (k: ItemId, n: number) => void;
   onBuy: (k: ItemId) => void;
   traderBonus: boolean;
   season: "spring" | "summer" | "autumn" | "winter";
 }) {
   const inv = useGame((s) => s.character.inventory);
+  const sellItems = catalog ?? ITEMS.filter((k) => (demand[k] ?? 0) > 0);
+  const buyItems = catalog ?? ITEMS.filter((k) => (wares[k] ?? 0) > 0);
   return (
     <>
       <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">У тебя / сдать</p>
       <ul className="mt-1 space-y-1">
-        {ITEMS.filter((k) => (demand[k] ?? 0) > 0).map((k) => {
+        {sellItems.map((k) => {
             const lot = sellLot(k);
             const pay = caravanBuy(k, season, traderBonus);
+            const n = stock ? stockOf(stock, k) : (demand[k] ?? 0);
             return (
           <li key={k} className="flex items-center justify-between gap-2">
             <span className="text-sm">
-              {ITEM_LABEL[k]} · у тебя {inv[k] ?? 0} ·{" "}
-              {lot > 1 ? `пачка ${lot} · ${goldTxt(pay)}` : `сдать за ${goldTxt(pay)}`}
+              {ITEM_LABEL[k]} · у тебя {inv[k] ?? 0}
+              {stock ? ` · склад ${n}` : ""}
+              {" "}
+              · {lot > 1 ? `пачка ${lot} · ${goldTxt(pay)}` : `сдать за ${goldTxt(pay)}`}
             </span>
             <Button
               size="sm"
@@ -1723,23 +1776,26 @@ function TradeLists({
           </li>
             );
         })}
-        {ITEMS.every((k) => (demand[k] ?? 0) <= 0) && (
+        {sellItems.length === 0 && (
           <li className="text-sm text-muted-foreground">Сейчас ничего не берут.</li>
         )}
       </ul>
       <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">Купить</p>
       <ul className="mt-1 space-y-1">
-        {ITEMS.filter((k) => (wares[k] ?? 0) > 0).map((k) => (
+        {buyItems.map((k) => {
+          const n = stock ? stockOf(stock, k) : (wares[k] ?? 0);
+          return (
           <li key={`w-${k}`} className="flex items-center justify-between gap-2">
             <span className="text-sm">
-              {ITEM_LABEL[k]} · {wares[k]} · купить за {goldTxt(caravanSell(k, season))}
+              {ITEM_LABEL[k]} · {stock ? `склад ${n}` : n} · купить за {goldTxt(caravanSell(k, season))}
             </span>
             <Button size="sm" variant="outline" className="h-10" onClick={() => onBuy(k)}>
               купить
             </Button>
           </li>
-        ))}
-        {ITEMS.every((k) => (wares[k] ?? 0) <= 0) && (
+          );
+        })}
+        {buyItems.length === 0 && (
           <li className="text-sm text-muted-foreground">Полки пусты.</li>
         )}
       </ul>

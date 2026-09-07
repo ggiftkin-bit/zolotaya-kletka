@@ -151,6 +151,8 @@ export type ItemId =
   | "grain"
   | "flour";
 
+export type GiftId = "gift_pin" | "gift_mug" | "gift_nft";
+
 export type WearKind = "axe" | "pick" | "spear" | "shovel" | "club" | "knife";
 
 export type AnimalKind = "hare" | "deer" | "horse" | "cow";
@@ -328,6 +330,8 @@ export type Character = {
   bagWear?: Partial<Record<WearKind, number>>;
   pacts: Record<string, "friend" | "feud">;
   village: string;
+  /** Призы конторы. Не вещь сумки. */
+  gifts?: Partial<Record<GiftId, "ordered">>;
 };
 
 export type Floater = {
@@ -423,6 +427,8 @@ export type GameState = {
   tickAt: number;
   jobs: JobPost[];
   trader: Trader;
+  /** Склад тракта. Книга держит, не неделя лавки. */
+  stock: Partial<Record<ItemId, number>>;
   plotMark: { x: number; y: number } | null;
   log: string[];
   started: boolean;

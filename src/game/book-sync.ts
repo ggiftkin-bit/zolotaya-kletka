@@ -16,12 +16,13 @@ import {
   type BookFight,
   type WorldClock,
 } from "./book";
-import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, readStreetNotices, strikeBookFight, writeHarmDeed, writeServiceDeed, writeStallDeed, writeVillageDeed, writeWorldDeed } from "./book-api";
+import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, readStreetNotices, strikeBookFight, writeHarmDeed, writeOfficeDeed, writeServiceDeed, writeStallDeed, writeVillageDeed, writeWorldDeed } from "./book-api";
 import { rememberLiveFoe } from "./fight";
 import { makeJobs, makeTrader } from "./economy";
+import { fillStock } from "./office";
 import { TICKS_PER_DAY } from "./constants";
 import { loadGame, saveGame, type SlimTile } from "./save";
-import type { Character, GameState, OtherPawn } from "./types";
+import type { Character, GameState, GiftId, ItemId, OtherPawn } from "./types";
 import { spawnPoint } from "./worldgen";
 
 type StoreSlice = {
@@ -178,6 +179,7 @@ export async function openBookFromServer(): Promise<boolean> {
       others: shot.others,
       jobs: makeJobs(shot.clock.week),
       trader: makeTrader(shot.clock.week),
+      stock: fillStock(shot.stock),
       ...applyClock(shot.clock, prev),
     };
     if (shot.pawn) {
@@ -381,6 +383,46 @@ export async function commitStall(kind: "stall-put" | "stall-drop" | "stall-take
   }
 }
 
+export async function commitOffice(
+  kind: "stock-sell" | "stock-buy" | "gift" | "donate",
+  prior?: Character,
+  priorStock?: GameState["stock"],
+  extra?: { item?: ItemId; qty?: number; gift?: GiftId },
+) {
+  if (!store) return false;
+  const s = store.get();
+  if (s.started) saveGame(s);
+  if (!s.bookOn || !s.started) return true;
+  try {
+    const res = await writeOfficeDeed({
+      data: {
+        kind,
+        pawn: pawnPayload(s.character),
+        item: extra?.item,
+        qty: extra?.qty,
+        gift: extra?.gift,
+      },
+    });
+    if (!res) return false;
+    if (res.ok) {
+      store.set({ stock: fillStock(res.stock) });
+      applyCredit(res.credit);
+      return true;
+    }
+    const patch: Partial<GameState> = {};
+    if (prior) patch.character = prior;
+    if (priorStock) patch.stock = priorStock;
+    store.set(patch);
+    store.speak?.(res.hint || "нет", s.character.x, s.character.y, res.hint || "нет", "bad");
+    saveGame(store.get());
+    return false;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg !== "Unauthorized") console.warn("[книга] контора", err);
+    return false;
+  }
+}
+
 export async function commitService(
   kind: "service-post" | "service-cancel" | "service-take" | "service-done" | "service-fail",
   cell: { x: number; y: number },
@@ -570,6 +612,7 @@ export async function beatBook(_force = false) {
       world,
       others: res.others,
       bookAt: res.since,
+      stock: res.stock ? fillStock(res.stock) : store.get().stock,
       ...applyClock(res.clock, live),
     });
     applyCredit(res.credit);

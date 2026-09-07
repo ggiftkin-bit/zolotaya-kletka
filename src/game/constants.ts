@@ -1,7 +1,7 @@
 import type { Biome, BuildingKind, Inventory, ItemId, Profession, Season, Transport, Weather } from "./types";
 
 /** Альфа. 0 всегда. Вторая цифра — новая механика. Третья — доработка. */
-export const GAME_VERSION = "0.15.3";
+export const GAME_VERSION = "0.16.0";
 
 /** Заливка паттерном (вода, луг, мох, камень, песок). false — плоские BIOME_FILL. */
 export const FILL_TEX = true;

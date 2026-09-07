@@ -64,7 +64,7 @@ export function placeTitle(tile: Tile) {
 }
 
 export function placeHint(tile: Tile) {
-  if (tile.caravan) return "Тачка 20 золота, телега 48, замок 16. Сырьё пачкой. На тракте, не в сумке.";
+  if (tile.caravan) return "Тачка 20 золота, телега 48, замок 16. Сырьё пачкой. Дверь — контора.";
   switch (tile.building) {
     case "shack":
       return "Сон, очаг, простое ремесло. Сундук. Замок — кузнец или лавка.";

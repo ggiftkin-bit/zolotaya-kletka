@@ -333,6 +333,7 @@ export function saveGame(state: GameState): boolean {
     selected: state.selected,
     jobs: state.jobs,
     trader: state.trader,
+    stock: state.stock,
     plotMark: state.plotMark,
     travel: state.travel,
     clockAt: state.clockAt ?? Date.now(),

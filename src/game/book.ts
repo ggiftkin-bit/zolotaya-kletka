@@ -2,7 +2,7 @@ import { ENERGY_MAX, splitBodyWater } from "./pace";
 import { emptySkills } from "./economy";
 import { MAP_H, MAP_W, zeroInv } from "./constants";
 import { fatTile, slimTile, type SlimTile } from "./save";
-import type { Busy, Character, FenceKind, Inventory, OtherPawn, Season, Skills, Tile, Transport, Weather, World } from "./types";
+import type { Busy, Character, FenceKind, GiftId, Inventory, ItemId, OtherPawn, Season, Skills, Tile, Transport, Weather, World } from "./types";
 
 export type { OtherPawn };
 
@@ -150,6 +150,8 @@ export type PawnBody = {
   village: string;
   /** Золото с чужой покупки, пока стол был закрыт. Сервер складывает в gold при записи. */
   due?: number;
+  /** Призы конторы. Не вещь сумки. */
+  gifts?: Partial<Record<GiftId, "ordered">>;
 };
 
 export type PawnRow = {
@@ -170,6 +172,8 @@ export type BookSnapshot = {
   others: OtherPawn[];
   fight: BookFight | null;
   since: string;
+  /** Склад тракта. Нет поля — клиент сеет 40. */
+  stock?: Partial<Record<ItemId, number>>;
 };
 
 export function chebyshev(ax: number, ay: number, bx: number, by: number) {
@@ -351,11 +355,12 @@ export function packPawn(c: Character): PawnBody {
     bagWear: c.bagWear ?? {},
     pacts: c.pacts,
     village: c.village,
+    gifts: c.gifts ?? {},
   };
 }
 
 export function unpackPawn(row: PawnRow): Character {
-  const packed = (row.body && typeof row.body === "object" ? row.body : {}) as Partial<Character> & { due?: number };
+  const packed = (row.body && typeof row.body === "object" ? row.body : {}) as Partial<Character> & { due?: number; gifts?: Character["gifts"] };
   const inv = { ...emptyInv(), ...(packed.inventory ?? {}) };
   return {
     name: row.name || "Испытатель",
@@ -399,6 +404,7 @@ export function unpackPawn(row: PawnRow): Character {
     bagWear: packed.bagWear ?? {},
     pacts: packed.pacts ?? {},
     village: packed.village ?? "",
+    gifts: packed.gifts ?? {},
   };
 }
 

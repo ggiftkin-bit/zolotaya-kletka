@@ -8,6 +8,7 @@ import { GROW_CATCHUP_TICKS, GROW_WRITE_BATCH, TICK_MS, stepWorldClock, tickGrow
 import type { Season, Tile } from "./types";
 import { generateWorld } from "./worldgen";
 import { isItemId, settleService, serviceJobOf, stampTake } from "./market";
+import { fillStock, isGiftId, planBuyFromStock, planDonate, planGift, planSellToStock, stockOf, STOCK_CAP, STOCK_START } from "./office";
 import { isHamletOwner, isLivingOwner } from "./pact";
 import { defaultMatter, MATTER_HP } from "./work";
 import { pileAdd } from "./pile";
@@ -441,6 +442,20 @@ function slimOrder(slim: SlimTile): { item: import("./types").ItemId; n: number;
   return { item: raw.i, n: Math.floor(raw.n), gold: Math.floor(raw.g) };
 }
 
+async function ensureStock(sql: Sql): Promise<Partial<Record<ItemId, number>>> {
+  const rows = await sql.query<{ stock: unknown }>(`select stock from world where id = $1`, [WORLD_ID]);
+  const raw = rows[0]?.stock;
+  const filled = fillStock(raw);
+  const empty = !raw || typeof raw !== "object" || Object.keys(raw as object).length === 0;
+  if (empty) {
+    await sql.query(`update world set stock = $2::jsonb, updated_at = now() where id = $1`, [
+      WORLD_ID,
+      JSON.stringify(filled),
+    ]);
+  }
+  return filled;
+}
+
 async function readWorld(sql: Sql): Promise<WorldRow> {
   const rows = await sql.query<WorldRow>(
     "select seed, season, year, week, day, tick_of_day, phase, weather, clock, clock_at from world where id = $1",
@@ -736,6 +751,7 @@ export const openWorldBook = createServerFn({ method: "POST" })
     const spot = await loadSpot(sql, px, py, context.userId);
     await imprintSpot(sql, context.userId, px, py);
     const fight = await loadOpenFight(sql, context.userId);
+    const stock = await ensureStock(sql);
     return {
       ok: true,
       born,
@@ -754,6 +770,7 @@ export const openWorldBook = createServerFn({ method: "POST" })
       others: withFightOther(spot.others, fight, context.userId),
       fight,
       since: nowIso(),
+      stock,
     };
   });
 
@@ -999,6 +1016,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
     const others: OtherPawn[] = otherRows.map(pawnAsOther);
     await imprintSpot(sql, context.userId, data.x, data.y);
     const fight = await loadOpenFight(sql, context.userId);
+    const stock = await ensureStock(sql);
     return {
       ok: true as const,
       clock,
@@ -1008,6 +1026,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       fight,
       since: nowIso(),
       credit,
+      stock,
     };
   });
 
@@ -1152,6 +1171,127 @@ export const writeStallDeed = createServerFn({ method: "POST" })
     );
     await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
     return { ok: true as const, written: [{ x: t.x, y: t.y, ver: upd[0].ver }], credit: merged.credit };
+  });
+
+export const writeOfficeDeed = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: unknown) =>
+    z
+      .object({
+        kind: z.enum(["stock-sell", "stock-buy", "gift", "donate"]),
+        pawn: pawnInSchema,
+        item: z.string().optional(),
+        qty: z.number().optional(),
+        gift: z.string().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const userId = context.userId;
+    const clock = asClock(await readWorld(sql));
+    const season = clock.season;
+    const stock = await ensureStock(sql);
+    const row = await readPawn(sql, userId);
+    const dbBody = row?.body;
+    const dbGold = (dbBody?.gold ?? data.pawn.body.gold ?? 0) + dueOf(dbBody);
+    const trader = (dbBody?.profession ?? data.pawn.body.profession) === "trader";
+    const gifts = { ...(dbBody?.gifts ?? data.pawn.body.gifts ?? {}) };
+
+    const fail = (hint: string) => ({ ok: false as const, hint, stock, credit: 0 });
+
+    if (data.kind === "donate") {
+      const plan = planDonate();
+      const fight = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
+      const body = { ...fight, gold: dbGold + plan.gold, due: 0, gifts };
+      await writePawn(sql, userId, data.pawn, body);
+      await sql.query(
+        `insert into deed (world_id, user_id, kind, x, y, payload)
+         values ($1, $2, $3, $4, $5, $6::jsonb)`,
+        [WORLD_ID, userId, "office-donate", data.pawn.x, data.pawn.y, JSON.stringify({ gold: plan.gold })],
+      );
+      return { ok: true as const, stock, credit: 0 };
+    }
+
+    if (data.kind === "gift") {
+      const id = data.gift ?? "";
+      if (!isGiftId(id)) return fail("Нет такого приза.");
+      const plan = planGift(dbGold, gifts, id);
+      if (!plan.ok) return fail(plan.hint);
+      const fight = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
+      const body = { ...fight, gold: dbGold - plan.gold, due: 0, gifts: plan.next };
+      await writePawn(sql, userId, data.pawn, body);
+      await sql.query(
+        `insert into deed (world_id, user_id, kind, x, y, payload)
+         values ($1, $2, $3, $4, $5, $6::jsonb)`,
+        [WORLD_ID, userId, "office-gift", data.pawn.x, data.pawn.y, JSON.stringify({ id, gold: plan.gold })],
+      );
+      return { ok: true as const, stock, credit: 0 };
+    }
+
+    const item = data.item ?? "";
+    if (!isItemId(item)) return fail("Лавка это не берёт.");
+    const qty = Math.max(1, Math.floor(data.qty ?? 1));
+
+    if (data.kind === "stock-sell") {
+      const probe = { [item]: qty } as import("./types").Inventory;
+      const plan = planSellToStock(stock, probe, item, qty, season, trader);
+      if (!plan.ok) return fail(plan.hint);
+      const have = stockOf(stock, item);
+      const nextCount = have + plan.take;
+      const upd = await sql.query<{ stock: unknown }>(
+        `update world
+         set stock = jsonb_set(coalesce(stock, '{}'::jsonb), ARRAY[$2::text], to_jsonb($4::int), true),
+             updated_at = now()
+         where id = $1
+           and coalesce((stock->>$2)::int, $5) = $3
+           and coalesce((stock->>$2)::int, $5) <= $6
+         returning stock`,
+        [WORLD_ID, item, have, nextCount, STOCK_START, STOCK_CAP],
+      );
+      if (!upd[0]) {
+        const now = await ensureStock(sql);
+        const again = stockOf(now, item);
+        return fail(again > STOCK_CAP ? "склад полон" : "склад уже другой");
+      }
+      const fight = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
+      const body = { ...fight, inventory: data.pawn.body.inventory, gold: data.pawn.body.gold, due: 0, gifts };
+      await writePawn(sql, userId, data.pawn, body);
+      await sql.query(
+        `insert into deed (world_id, user_id, kind, x, y, payload)
+         values ($1, $2, $3, $4, $5, $6::jsonb)`,
+        [WORLD_ID, userId, "stock-sell", data.pawn.x, data.pawn.y, JSON.stringify({ item, n: plan.take, gold: plan.gold })],
+      );
+      return { ok: true as const, stock: fillStock(upd[0].stock), credit: 0 };
+    }
+
+    const plan = planBuyFromStock(stock, dbGold, item, qty, season);
+    if (!plan.ok) return fail(plan.hint);
+    const have = stockOf(stock, item);
+    const nextCount = have - plan.n;
+    const upd = await sql.query<{ stock: unknown }>(
+      `update world
+       set stock = jsonb_set(coalesce(stock, '{}'::jsonb), ARRAY[$2::text], to_jsonb($4::int), true),
+           updated_at = now()
+       where id = $1
+         and coalesce((stock->>$2)::int, $5) = $3
+         and coalesce((stock->>$2)::int, $5) >= $6
+       returning stock`,
+      [WORLD_ID, item, have, nextCount, STOCK_START, plan.n],
+    );
+    if (!upd[0]) {
+      const now = await ensureStock(sql);
+      return fail(stockOf(now, item) <= 0 ? "нет на складе" : "склад уже другой");
+    }
+    const fight = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
+    const body = { ...fight, inventory: data.pawn.body.inventory, gold: data.pawn.body.gold, due: 0, gifts };
+    await writePawn(sql, userId, data.pawn, body);
+    await sql.query(
+      `insert into deed (world_id, user_id, kind, x, y, payload)
+       values ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [WORLD_ID, userId, "stock-buy", data.pawn.x, data.pawn.y, JSON.stringify({ item, n: plan.n, gold: plan.cost })],
+    );
+    return { ok: true as const, stock: fillStock(upd[0].stock), credit: 0 };
   });
 
 export const writeServiceDeed = createServerFn({ method: "POST" })
