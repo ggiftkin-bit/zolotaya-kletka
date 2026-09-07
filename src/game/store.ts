@@ -89,12 +89,14 @@ import type {
   Transport,
   Trader,
   Weather,
+  Tile,
 } from "./types";
 import { chebyshev, dummyHome, foeById, gearSlot, ghostLiveFoe, leaveChance, makeHamletDummies, occupantAt, rememberLiveFoe, strikeDmg, talkChance, youFighter } from "./fight";
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
-import { FOG_DARK, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
-import { bindBookStore, commitHarm, flushBook, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
+import { FOG_DARK, FOG_LIVE, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
+import { bindBookStore, commitHarm, commitStall, flushBook, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
+import { canReachStall, planDrop, planPut, planTake, stallLine } from "./market";
 
 let worldAcc = 0;
 
@@ -528,6 +530,9 @@ type Actions = {
   drinkTonic: () => void;
   buyFromShop: (item: ItemId, qty: number) => void;
   sellToShop: (item: ItemId, qty: number) => void;
+  putStall: (item: ItemId, gold: number) => void;
+  dropStall: () => void;
+  takeStall: () => void;
   startMeet: (foeId: string) => void;
   meetPass: (foeId?: string) => void;
   meetHit: () => void;
@@ -1193,6 +1198,9 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   drinkTonic: () => drinkTonic(),
   buyFromShop: (item, qty) => buyFromShop(item, qty),
   sellToShop: (item, qty) => sellToShop(item, qty),
+  putStall: (item, gold) => putStall(item, gold),
+  dropStall: () => dropStall(),
+  takeStall: () => takeStall(),
   startMeet: (foeId) => startMeet(foeId),
   meetPass: (foeId) => meetPass(foeId),
   meetHit: () => meetHit(),
@@ -4423,6 +4431,144 @@ function sellToShop(item: ItemId, qty: number) {
     world: { ...s.world, tiles: s.world.tiles },
     log: pushLog(s.log, `Сдал в лавку ${tile.owner}: ${quote.take} ${ITEM_LABEL[item]} за ${goldTxt(quote.gold)}.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${goldTxt(quote.gold)}`, tone: "gold" as const }].slice(-10),
+  });
+}
+
+function stallHere(): Tile | null {
+  const s = useGame.getState();
+  const at = s.inspect ?? { x: s.character.x, y: s.character.y };
+  return tileAt(s.world, at.x, at.y);
+}
+
+function stallBlocked(): boolean {
+  const s = useGame.getState();
+  const hold = actHeld(s.character);
+  if (hold) {
+    speak(hold, s.character.x, s.character.y, "нельзя", "bad");
+    return true;
+  }
+  if (meetBlock()) return true;
+  if (busyBlock()) return true;
+  if (s.travel) {
+    speak("Сначала дойди.", s.character.x, s.character.y, "сначала дойди", "bad");
+    return true;
+  }
+  return false;
+}
+
+function putStall(item: ItemId, gold: number) {
+  const s = useGame.getState();
+  if (stallBlocked()) return;
+  const tile = stallHere();
+  if (!tile || tile.building !== "stall") {
+    speak("Это не прилавок.", s.character.x, s.character.y, "не прилавок", "bad");
+    return;
+  }
+  if (!canReachStall(s.character.x, s.character.y, tile)) {
+    speak("Подойди к прилавку.", tile.x, tile.y, "подойди", "bad");
+    return;
+  }
+  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
+    speak("В тумане витрины нет.", tile.x, tile.y, "туман", "bad");
+    return;
+  }
+  if (!isYours(tile)) {
+    speak("Чужой прилавок. Свой ордер клади у своего.", tile.x, tile.y, "чужой", "bad");
+    return;
+  }
+  const plan = planPut(tile, s.character.inventory, item, gold);
+  if (!plan.ok) {
+    speak(plan.hint, tile.x, tile.y, "нет", "bad");
+    return;
+  }
+  const prior = s.character;
+  tile.order = plan.order;
+  let c = { ...s.character, inventory: plan.inv };
+  if (c.hand && (c.inventory[c.hand] ?? 0) <= 0) c.hand = null;
+  useGame.setState({
+    character: c,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, `На прилавок: ${stallLine(plan.order)}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: stallLine(plan.order), tone: "gold" as const }].slice(-10),
+  });
+  void commitStall("stall-put", { x: tile.x, y: tile.y }, prior).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function dropStall() {
+  const s = useGame.getState();
+  if (stallBlocked()) return;
+  const tile = stallHere();
+  if (!tile || tile.building !== "stall") {
+    speak("Это не прилавок.", s.character.x, s.character.y, "не прилавок", "bad");
+    return;
+  }
+  if (!canReachStall(s.character.x, s.character.y, tile)) {
+    speak("Подойди к прилавку.", tile.x, tile.y, "подойди", "bad");
+    return;
+  }
+  if (!isYours(tile)) {
+    speak("Чужой ордер не снимают. Бери, если есть золото.", tile.x, tile.y, "чужой", "bad");
+    return;
+  }
+  const extra = wornKg(s.character) + pailKg(s.character.pail);
+  const plan = planDrop(tile, s.character.inventory, s.character.transport, extra);
+  if (!plan.ok) {
+    speak(plan.hint, tile.x, tile.y, "нет", "bad");
+    return;
+  }
+  const prior = s.character;
+  tile.order = null;
+  const c = { ...s.character, inventory: plan.inv };
+  useGame.setState({
+    character: c,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, plan.piled ? `Снял ордер. Лишнее на клетке.` : `Снял ордер. ${stallLine(plan.order)} снова в сумке.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "снял", tone: "ok" as const }].slice(-10),
+  });
+  void commitStall("stall-drop", { x: tile.x, y: tile.y }, prior).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function takeStall() {
+  const s = useGame.getState();
+  if (stallBlocked()) return;
+  const tile = stallHere();
+  if (!tile || tile.building !== "stall") {
+    speak("Это не прилавок.", s.character.x, s.character.y, "не прилавок", "bad");
+    return;
+  }
+  if (!canReachStall(s.character.x, s.character.y, tile)) {
+    speak("Подойди к прилавку.", tile.x, tile.y, "подойди", "bad");
+    return;
+  }
+  if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
+    speak("В тумане витрины нет.", tile.x, tile.y, "туман", "bad");
+    return;
+  }
+  if (isYours(tile)) {
+    speak("Свой ордер снимай, не бери.", tile.x, tile.y, "свой", "ok");
+    return;
+  }
+  const extra = wornKg(s.character) + pailKg(s.character.pail);
+  const plan = planTake(tile, s.character.gold, s.character.inventory, s.character.transport, extra);
+  if (!plan.ok) {
+    speak(plan.hint, tile.x, tile.y, "нет", "bad");
+    return;
+  }
+  const prior = s.character;
+  tile.order = null;
+  const c = { ...s.character, inventory: plan.inv, gold: plan.gold };
+  useGame.setState({
+    character: c,
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, plan.piled ? `Взял ${stallLine(plan.order)}. Лишнее на клетке.` : `Взял ${stallLine(plan.order)}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `−${goldTxt(plan.pay)}`, tone: "gold" as const }].slice(-10),
+  });
+  void commitStall("stall-take", { x: tile.x, y: tile.y }, prior).then((ok) => {
+    if (!ok) void pullSpot(true);
   });
 }
 

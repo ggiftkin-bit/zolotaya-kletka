@@ -7,6 +7,7 @@ import { slimTile, fatTile, type SlimTile } from "./save";
 import { GROW_CATCHUP_TICKS, GROW_WRITE_BATCH, TICK_MS, stepWorldClock, tickGrow } from "./grow";
 import type { Season, Tile } from "./types";
 import { generateWorld } from "./worldgen";
+import { isItemId } from "./market";
 import {
   FOG_FETCH,
   WORLD_ID,
@@ -228,6 +229,61 @@ async function mergeFightIntoPawnBody(sql: Sql, userId: string, body: PawnBody):
   if (!fight) return body;
   const hp = fight.aId === userId ? fight.aHp : fight.bHp;
   return { ...body, hp, life: hp <= 0 ? "down" : body.life === "down" ? "down" : "alive" };
+}
+
+function dueOf(body: PawnBody | null | undefined): number {
+  const n = Number(body?.due);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+async function mergeBookBody(sql: Sql, userId: string, body: PawnBody): Promise<{ body: PawnBody; credit: number }> {
+  const withFight = await mergeFightIntoPawnBody(sql, userId, body);
+  const row = await readPawn(sql, userId);
+  const credit = dueOf(row?.body);
+  return { body: { ...withFight, gold: (withFight.gold ?? 0) + credit, due: 0 }, credit };
+}
+
+async function writePawn(
+  sql: Sql,
+  userId: string,
+  pawn: { name: string; color: string; x: number; y: number },
+  body: PawnBody,
+) {
+  await sql.query(
+    `insert into pawn (world_id, user_id, name, color, x, y, body, seen_at, updated_at)
+     values ($1, $2, $3, $4, $5, $6, $7::jsonb, now(), now())
+     on conflict (world_id, user_id) do update set
+       name = excluded.name,
+       color = excluded.color,
+       x = excluded.x,
+       y = excluded.y,
+       body = excluded.body,
+       seen_at = now(),
+       updated_at = now()`,
+    [WORLD_ID, userId, pawn.name, pawn.color, pawn.x, pawn.y, JSON.stringify(body)],
+  );
+}
+
+async function creditSellerDue(sql: Sql, sellerId: string, gold: number) {
+  if (!sellerId || sellerId === "you" || gold <= 0) return;
+  await sql.query(
+    `update pawn
+     set body = jsonb_set(
+           coalesce(body, '{}'::jsonb),
+           '{due}',
+           to_jsonb(coalesce((body->>'due')::int, 0) + $3::int),
+           true
+         ),
+         updated_at = now()
+     where world_id = $1 and user_id = $2`,
+    [WORLD_ID, sellerId, gold],
+  );
+}
+
+function slimOrder(slim: SlimTile): { item: import("./types").ItemId; n: number; gold: number } | null {
+  const raw = slim.or;
+  if (!raw || !isItemId(raw.i) || raw.n <= 0 || raw.g <= 0) return null;
+  return { item: raw.i, n: Math.floor(raw.n), gold: Math.floor(raw.g) };
 }
 
 async function readWorld(sql: Sql): Promise<WorldRow> {
@@ -510,7 +566,15 @@ export const openWorldBook = createServerFn({ method: "POST" })
     const sql = await getSql();
     const born = await birthIfEmpty(sql);
     const clock = await advanceWorldClock(sql, context.userId);
-    const pawn = await readPawn(sql, context.userId);
+    let pawn = await readPawn(sql, context.userId);
+    if (pawn?.body) {
+      const credit = dueOf(pawn.body);
+      if (credit > 0) {
+        const body = { ...pawn.body, gold: (pawn.body.gold ?? 0) + credit, due: 0 };
+        await writePawn(sql, context.userId, pawn, body);
+        pawn = { ...pawn, body };
+      }
+    }
     const px = pawn?.x ?? data.x ?? 48;
     const py = pawn?.y ?? data.y ?? 48;
     const spot = await loadSpot(sql, px, py, context.userId);
@@ -555,9 +619,10 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
     const written: { x: number; y: number; ver: number }[] = [];
     for (const t of data.tiles) {
       const upd = await sql.query<{ ver: number }>(
-        `update tile
-         set slim = $5::jsonb, ver = ver + 1, updated_at = now(), updated_by = $6
-         where world_id = $1 and x = $2 and y = $3 and ver = $4
+        `update tile t
+         set slim = ($5::jsonb - 'or') || case when t.slim ? 'or' then jsonb_build_object('or', t.slim->'or') else '{}'::jsonb end,
+             ver = t.ver + 1, updated_at = now(), updated_by = $6
+         where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
          returning ver`,
         [WORLD_ID, t.x, t.y, t.ver, JSON.stringify(t.slim), context.userId],
       );
@@ -595,28 +660,8 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
         JSON.stringify({ n: data.tiles.length, written: written.length }),
       ],
     );
-    const body = await mergeFightIntoPawnBody(sql, context.userId, data.pawn.body);
-    await sql.query(
-      `insert into pawn (world_id, user_id, name, color, x, y, body, seen_at, updated_at)
-       values ($1, $2, $3, $4, $5, $6, $7::jsonb, now(), now())
-       on conflict (world_id, user_id) do update set
-         name = excluded.name,
-         color = excluded.color,
-         x = excluded.x,
-         y = excluded.y,
-         body = excluded.body,
-         seen_at = now(),
-         updated_at = now()`,
-      [
-        WORLD_ID,
-        context.userId,
-        data.pawn.name,
-        data.pawn.color,
-        data.pawn.x,
-        data.pawn.y,
-        JSON.stringify(body),
-      ],
-    );
+    const merged = await mergeBookBody(sql, context.userId, data.pawn.body);
+    await writePawn(sql, context.userId, data.pawn, merged.body);
     await imprintSpot(sql, context.userId, data.pawn.x, data.pawn.y);
     if (conflicts.length) {
       return {
@@ -624,9 +669,10 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
         hint: "клетка уже другая",
         conflicts,
         written,
+        credit: merged.credit,
       };
     }
-    return { ok: true as const, written };
+    return { ok: true as const, written, credit: merged.credit };
   });
 
 export const writeHarmDeed = createServerFn({ method: "POST" })
@@ -643,29 +689,9 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     if (!data.tiles.length) {
-      const body = await mergeFightIntoPawnBody(sql, context.userId, data.pawn.body);
-      await sql.query(
-        `insert into pawn (world_id, user_id, name, color, x, y, body, seen_at, updated_at)
-         values ($1, $2, $3, $4, $5, $6, $7::jsonb, now(), now())
-         on conflict (world_id, user_id) do update set
-           name = excluded.name,
-           color = excluded.color,
-           x = excluded.x,
-           y = excluded.y,
-           body = excluded.body,
-           seen_at = now(),
-           updated_at = now()`,
-        [
-          WORLD_ID,
-          context.userId,
-          data.pawn.name,
-          data.pawn.color,
-          data.pawn.x,
-          data.pawn.y,
-          JSON.stringify(body),
-        ],
-      );
-      return { ok: true as const, written: [] as { x: number; y: number; ver: number }[] };
+      const merged = await mergeBookBody(sql, context.userId, data.pawn.body);
+      await writePawn(sql, context.userId, data.pawn, merged.body);
+      return { ok: true as const, written: [] as { x: number; y: number; ver: number }[], credit: merged.credit };
     }
     const incoming = JSON.stringify(
       data.tiles.map((t) => ({ x: t.x, y: t.y, slim: t.slim, ver: t.ver })),
@@ -718,6 +744,7 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
         hint: "клетка уже другая",
         conflicts,
         written: [],
+        credit: 0,
       };
     }
     const origin = data.tiles[0];
@@ -733,30 +760,10 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
         JSON.stringify({ n: data.tiles.length, harm: true }),
       ],
     );
-    const body = await mergeFightIntoPawnBody(sql, context.userId, data.pawn.body);
-    await sql.query(
-      `insert into pawn (world_id, user_id, name, color, x, y, body, seen_at, updated_at)
-       values ($1, $2, $3, $4, $5, $6, $7::jsonb, now(), now())
-       on conflict (world_id, user_id) do update set
-         name = excluded.name,
-         color = excluded.color,
-         x = excluded.x,
-         y = excluded.y,
-         body = excluded.body,
-         seen_at = now(),
-         updated_at = now()`,
-      [
-        WORLD_ID,
-        context.userId,
-        data.pawn.name,
-        data.pawn.color,
-        data.pawn.x,
-        data.pawn.y,
-        JSON.stringify(body),
-      ],
-    );
+    const merged = await mergeBookBody(sql, context.userId, data.pawn.body);
+    await writePawn(sql, context.userId, data.pawn, merged.body);
     await imprintSpot(sql, context.userId, data.pawn.x, data.pawn.y);
-    return { ok: true as const, written };
+    return { ok: true as const, written, credit: merged.credit };
   });
 
 export const heartbeatWorld = createServerFn({ method: "POST" })
@@ -774,35 +781,24 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
   )
   .handler(async ({ context, data }) => {
     const sql = await getSql();
+    let credit = 0;
     if (data.pawn) {
-      const body = await mergeFightIntoPawnBody(sql, context.userId, data.pawn.body);
-      await sql.query(
-        `insert into pawn (world_id, user_id, name, color, x, y, body, seen_at, updated_at)
-         values ($1, $2, $3, $4, $5, $6, $7::jsonb, now(), now())
-         on conflict (world_id, user_id) do update set
-           name = excluded.name,
-           color = excluded.color,
-           x = excluded.x,
-           y = excluded.y,
-           body = excluded.body,
-           seen_at = now(),
-           updated_at = now()`,
-        [
-          WORLD_ID,
-          context.userId,
-          data.pawn.name,
-          data.pawn.color,
-          data.pawn.x,
-          data.pawn.y,
-          JSON.stringify(body),
-        ],
-      );
+      const merged = await mergeBookBody(sql, context.userId, data.pawn.body);
+      credit = merged.credit;
+      await writePawn(sql, context.userId, data.pawn, merged.body);
     } else {
       await sql.query(
         `update pawn set x = $3, y = $4, seen_at = now(), updated_at = now()
          where world_id = $1 and user_id = $2`,
         [WORLD_ID, context.userId, data.x, data.y],
       );
+      const row = await readPawn(sql, context.userId);
+      const due = dueOf(row?.body);
+      if (due > 0 && row?.body) {
+        const body = { ...row.body, gold: (row.body.gold ?? 0) + due, due: 0 };
+        await writePawn(sql, context.userId, { name: row.name, color: row.color, x: data.x, y: data.y }, body);
+        credit = due;
+      }
     }
     const clock = await advanceWorldClock(sql, context.userId);
     const liveRows = await sql.query<TileRow>(
@@ -853,7 +849,132 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       others: withFightOther(others, fight, context.userId),
       fight,
       since: nowIso(),
+      credit,
     };
+  });
+
+export const writeStallDeed = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: unknown) =>
+    z
+      .object({
+        kind: z.enum(["stall-put", "stall-drop", "stall-take"]),
+        tile: tileInSchema,
+        pawn: pawnInSchema,
+      })
+      .parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const userId = context.userId;
+    const t = data.tile;
+    const curRows = await sql.query<TileRow>(
+      `select x, y, slim, ver, updated_at::text as updated_at from tile where world_id = $1 and x = $2 and y = $3`,
+      [WORLD_ID, t.x, t.y],
+    );
+    const cur = curRows[0];
+    const asConflict = () =>
+      cur
+        ? [{ x: cur.x, y: cur.y, slim: asSlim(cur.slim), ver: cur.ver, updatedAt: cur.updated_at }]
+        : [];
+    if (!cur) {
+      return { ok: false as const, hint: "клетка уже другая", conflicts: [] as TilePacket[], written: [], credit: 0 };
+    }
+    const live = asSlim(cur.slim);
+    if (cur.ver !== t.ver) {
+      return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0 };
+    }
+    if (live.bd !== "stall") {
+      return { ok: false as const, hint: "это не прилавок", conflicts: asConflict(), written: [], credit: 0 };
+    }
+    const owner = live.on || "";
+    const liveOrder = slimOrder(live);
+
+    if (data.kind === "stall-take") {
+      if (!liveOrder) {
+        return { ok: false as const, hint: "пусто", conflicts: asConflict(), written: [], credit: 0 };
+      }
+      if (!owner || owner === userId) {
+        return { ok: false as const, hint: "свой ордер снимай сам", conflicts: [], written: [], credit: 0 };
+      }
+      if (Math.max(Math.abs(data.pawn.x - t.x), Math.abs(data.pawn.y - t.y)) > 1) {
+        return { ok: false as const, hint: "подойди к прилавку", conflicts: [], written: [], credit: 0 };
+      }
+      const buyer = await readPawn(sql, userId);
+      const dbGold = (buyer?.body?.gold ?? data.pawn.body.gold ?? 0) + dueOf(buyer?.body);
+      if (dbGold < liveOrder.gold) {
+        return { ok: false as const, hint: "мало золота", conflicts: [], written: [], credit: 0 };
+      }
+      const upd = await sql.query<{ ver: number }>(
+        `update tile t
+         set slim = t.slim - 'or', ver = t.ver + 1, updated_at = now(), updated_by = $4
+         where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $5
+           and t.slim ? 'or' and t.slim->>'bd' = 'stall'
+         returning ver`,
+        [WORLD_ID, t.x, t.y, userId, t.ver],
+      );
+      if (!upd[0]) {
+        const now = await sql.query<TileRow>(
+          `select x, y, slim, ver, updated_at::text as updated_at from tile where world_id = $1 and x = $2 and y = $3`,
+          [WORLD_ID, t.x, t.y],
+        );
+        const n = now[0];
+        return {
+          ok: false as const,
+          hint: "клетка уже другая",
+          conflicts: n ? [{ x: n.x, y: n.y, slim: asSlim(n.slim), ver: n.ver, updatedAt: n.updated_at }] : [],
+          written: [],
+          credit: 0,
+        };
+      }
+      await creditSellerDue(sql, owner, liveOrder.gold);
+      const had = buyer?.body?.inventory?.[liveOrder.item] ?? 0;
+      const inv = { ...data.pawn.body.inventory, [liveOrder.item]: Math.max(data.pawn.body.inventory[liveOrder.item] ?? 0, had + liveOrder.n) };
+      const gold = dbGold - liveOrder.gold;
+      const fight = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
+      const body = { ...fight, inventory: inv, gold, due: 0 };
+      await writePawn(sql, userId, data.pawn, body);
+      await sql.query(
+        `insert into deed (world_id, user_id, kind, x, y, payload)
+         values ($1, $2, $3, $4, $5, $6::jsonb)`,
+        [WORLD_ID, userId, data.kind, t.x, t.y, JSON.stringify({ item: liveOrder.item, n: liveOrder.n, gold: liveOrder.gold, seller: owner })],
+      );
+      await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
+      const credit = gold - (data.pawn.body.gold ?? gold);
+      return { ok: true as const, written: [{ x: t.x, y: t.y, ver: upd[0].ver }], credit };
+    }
+
+    if (owner !== userId) {
+      return { ok: false as const, hint: "чужой прилавок", conflicts: [], written: [], credit: 0 };
+    }
+    const incoming = slimOrder(t.slim);
+    if (data.kind === "stall-put") {
+      if (!incoming) return { ok: false as const, hint: "нет вещи", conflicts: [], written: [], credit: 0 };
+      if (liveOrder) return { ok: false as const, hint: "сначала сними свой ордер", conflicts: asConflict(), written: [], credit: 0 };
+    }
+    if (data.kind === "stall-drop" && !liveOrder) {
+      return { ok: false as const, hint: "пусто", conflicts: asConflict(), written: [], credit: 0 };
+    }
+    const upd = await sql.query<{ ver: number }>(
+      `update tile t
+       set slim = $5::jsonb, ver = t.ver + 1, updated_at = now(), updated_by = $6
+       where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
+         and t.slim->>'bd' = 'stall'
+       returning ver`,
+      [WORLD_ID, t.x, t.y, t.ver, JSON.stringify(t.slim), userId],
+    );
+    if (!upd[0]) {
+      return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0 };
+    }
+    const merged = await mergeBookBody(sql, userId, data.pawn.body);
+    await writePawn(sql, userId, data.pawn, merged.body);
+    await sql.query(
+      `insert into deed (world_id, user_id, kind, x, y, payload)
+       values ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [WORLD_ID, userId, data.kind, t.x, t.y, JSON.stringify({ item: incoming?.item ?? liveOrder?.item, gold: incoming?.gold ?? liveOrder?.gold })],
+    );
+    await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
+    return { ok: true as const, written: [{ x: t.x, y: t.y, ver: upd[0].ver }], credit: merged.credit };
   });
 
 export const dropPawn = createServerFn({ method: "POST" })

@@ -5,7 +5,8 @@ import { BUILD_COST, BUILDING_LABEL, CART_GOLD, CART_WOOD, LOCK_GOLD, WAGON_GOLD
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, waterHint } from "@/game/life";
 import { LIFE_INDEX } from "@/game/art";
 import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/places";
-import { FOG_DARK, fogAt } from "@/game/book";
+import { FOG_DARK, FOG_LIVE, fogAt } from "@/game/book";
+import { bagGoods, stallLine, stallOrderOf, STALL_PRICES } from "@/game/market";
 import { occupantAt } from "@/game/fight";
 import { canFoundVillage, clusterHint, hamletTitle, hasOwnYard } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
@@ -376,11 +377,11 @@ function PickPane({
       {tired && here && (
         <p className="text-[13px] text-danger">Сила на нуле. Жди или кружка сверху. Еда — сытость.</p>
       )}
-      {open && here && (
+      {open && (here || (tile.building === "stall" && near)) && (
         <Sticker
           title={tile.caravan ? "Открыть лавку" : `Открыть · ${placeTitle(tile)}`}
           sub={placeHint(tile)}
-          ico={<Ico i={tile.caravan || tile.building === "shop" ? ICO.gold : ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
+          ico={<Ico i={tile.caravan || tile.building === "shop" || tile.building === "stall" ? ICO.gold : ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
           onClick={() => onPane("place")}
         />
       )}
@@ -600,13 +601,19 @@ function GatherPane({ tile, loot }: { tile: Tile; loot: ReturnType<typeof lootOn
   );
 }
 
-function PlacePane({ tile, here }: { tile: Tile; here: boolean; near: boolean }) {
+function PlacePane({ tile, here, near }: { tile: Tile; here: boolean; near: boolean }) {
+  if (tile.building === "stall") {
+    if (!near) {
+      return <p className="mt-4 text-sm text-muted-foreground">Подойди к прилавку.</p>;
+    }
+    return <StallBody tile={tile} />;
+  }
   if (!here) {
     return <p className="mt-4 text-sm text-muted-foreground">Зайди внутрь — встань на клетку.</p>;
   }
   const mine = isYours(tile);
   if (tile.caravan) return <LavkaBody tile={tile} />;
-  if (tile.building === "shop" || tile.building === "stall") return <ShopBody tile={tile} />;
+  if (tile.building === "shop") return <ShopBody tile={tile} />;
   if (!mine && isForeignYard(tile)) return <ForeignStation tile={tile} />;
   if (tile.building === "shack" || tile.building === "house" || tile.building === "shed") {
     return <HomeBody tile={tile} />;
@@ -817,6 +824,85 @@ function LavkaBody({ tile }: { tile: Tile }) {
       />
       <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">Биржа у лавки</p>
       <Jobs />
+    </div>
+  );
+}
+
+function StallBody({ tile }: { tile: Tile }) {
+  const g = useGame();
+  const [pick, setPick] = useState<ItemId | null>(null);
+  const live = fogAt(g.world, tile.x, tile.y) === FOG_LIVE;
+  const mine = isYours(tile);
+  const order = live ? stallOrderOf(tile) : null;
+  const goods = bagGoods(g.character);
+
+  if (!live) {
+    return <p className="mt-4 text-sm text-muted-foreground">В тумане витрины нет. Подойди ближе.</p>;
+  }
+
+  if (order) {
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">
+          {mine ? "Твой ордер. Вещь на прилавке, не в сумке." : `Чужой прилавок. ${stallLine(order)}.`}
+        </p>
+        <p className="font-display text-2xl leading-none">{stallLine(order)}</p>
+        {mine ? (
+          <Button className="h-12 w-full text-base" onClick={() => g.dropStall()}>
+            Снять · обратно в сумку
+          </Button>
+        ) : (
+          <Button className="h-12 w-full text-base" onClick={() => g.takeStall()}>
+            Взять · {goldTxt(order.gold)}
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  if (!mine) {
+    return <p className="mt-4 text-sm text-muted-foreground">Пусто. Чужой прилавок, ордера нет.</p>;
+  }
+
+  if (pick) {
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">Цена словом. Вещь сразу на витрину.</p>
+        <p className="font-display text-xl leading-none">{ITEM_LABEL[pick]}</p>
+        {STALL_PRICES.map((n) => (
+          <Sticker
+            key={n}
+            title={goldTxt(n)}
+            ico={<Ico i={ICO.gold} className="size-11 overflow-hidden rounded-[12px]" />}
+            onClick={() => {
+              g.putStall(pick, n);
+              setPick(null);
+            }}
+          />
+        ))}
+        <Button variant="outline" className="h-12" onClick={() => setPick(null)}>
+          Другая вещь
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 flex flex-col gap-2">
+      <p className="text-[13px] text-muted-foreground">Положи вещь из сумки. Цена словом, не 3g.</p>
+      {goods.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Сумка пуста.</p>
+      ) : (
+        goods.map((k) => (
+          <Sticker
+            key={k}
+            title={ITEM_LABEL[k]}
+            sub={`в сумке ×${g.character.inventory[k]}`}
+            ico={<ItemPic id={k} className="size-11 overflow-hidden rounded-[12px]" />}
+            onClick={() => setPick(k)}
+          />
+        ))
+      )}
     </div>
   );
 }

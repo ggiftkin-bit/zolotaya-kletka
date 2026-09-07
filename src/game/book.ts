@@ -140,6 +140,8 @@ export type PawnBody = {
   bagWear?: Character["bagWear"];
   pacts: Record<string, "friend" | "feud">;
   village: string;
+  /** Золото с чужой покупки, пока стол был закрыт. Сервер складывает в gold при записи. */
+  due?: number;
 };
 
 export type PawnRow = {
@@ -345,7 +347,7 @@ export function packPawn(c: Character): PawnBody {
 }
 
 export function unpackPawn(row: PawnRow): Character {
-  const packed = (row.body && typeof row.body === "object" ? row.body : {}) as Partial<Character>;
+  const packed = (row.body && typeof row.body === "object" ? row.body : {}) as Partial<Character> & { due?: number };
   const inv = { ...emptyInv(), ...(packed.inventory ?? {}) };
   return {
     name: row.name || "Испытатель",
@@ -354,7 +356,7 @@ export function unpackPawn(row: PawnRow): Character {
     y: row.y,
     px: row.x,
     py: row.y,
-    gold: typeof packed.gold === "number" ? packed.gold : 20,
+    gold: (typeof packed.gold === "number" ? packed.gold : 20) + (Number(packed.due) || 0),
     inventory: inv,
     transport: packed.transport ?? "walk",
     energy: typeof packed.energy === "number" ? Math.min(ENERGY_MAX, packed.energy) : ENERGY_MAX,

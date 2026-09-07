@@ -44,10 +44,20 @@ export type SlimTile = {
   gl?: 1;
   pi?: 1;
   bk?: 1;
+  or?: { i: ItemId; n: number; g: number };
 };
 
 function emptyChest(): Inventory {
   return zeroInv();
+}
+
+function fatOrder(raw: SlimTile["or"] | undefined): Tile["order"] {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw.i;
+  const n = raw.n;
+  const gold = raw.g;
+  if (!item || typeof n !== "number" || n <= 0 || typeof gold !== "number" || gold <= 0) return null;
+  return { item, n, gold };
 }
 
 function slimChest(c?: Inventory | null): Partial<Inventory> | undefined {
@@ -102,6 +112,7 @@ export function slimTile(t: Tile): SlimTile {
   if (t.gateLock) o.gl = 1;
   if (t.pit) o.pi = 1;
   if (t.bank) o.bk = 1;
+  if (t.order && t.order.n > 0 && t.order.gold > 0) o.or = { i: t.order.item, n: t.order.n, g: t.order.gold };
   return o;
 }
 
@@ -147,6 +158,7 @@ export function fatTile(raw: Partial<Tile> & { b?: Tile["biome"] }, x: number, y
     gateLock: !!(raw.gateLock ?? slim.gl),
     pit: !!(raw.pit ?? slim.pi),
     bank: !!(raw.bank ?? slim.bk),
+    order: fatOrder(slim.or),
   };
 }
 

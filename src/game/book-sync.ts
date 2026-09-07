@@ -16,7 +16,7 @@ import {
   type BookFight,
   type WorldClock,
 } from "./book";
-import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, strikeBookFight, writeHarmDeed, writeWorldDeed } from "./book-api";
+import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, strikeBookFight, writeHarmDeed, writeStallDeed, writeWorldDeed } from "./book-api";
 import { rememberLiveFoe } from "./fight";
 import { makeJobs, makeTrader } from "./economy";
 import { TICKS_PER_DAY } from "./constants";
@@ -74,6 +74,12 @@ function publishTiles(state: GameState) {
 
 function sVer(state: GameState, x: number, y: number) {
   return state.world.ver?.[y * state.world.width + x] ?? 1;
+}
+
+function applyCredit(n: number | undefined) {
+  if (!n || !store) return;
+  const c = store.get().character;
+  store.set({ character: { ...c, gold: Math.max(0, c.gold + n) } });
 }
 
 export function bindBookStore(s: StoreSlice) {
@@ -245,6 +251,7 @@ export async function flushBook() {
       }
       for (const t of tiles) lastSlim.set(t.k, t.sig);
       store.set({ world: { ...s.world, ver } });
+      applyCredit(res.credit);
     } else {
       const world = maskLiveFog(applyLive(store.get().world, res.conflicts), store.get().character.x, store.get().character.y);
       store.set({ world });
@@ -299,6 +306,7 @@ export async function commitHarm(kind: string, cells: Array<{ x: number; y: numb
       }
       for (const t of tiles) lastSlim.set(t.k, t.sig);
       store.set({ world: { ...store.get().world, ver } });
+      applyCredit(res.credit);
       return true;
     }
     let world = store.get().world;
@@ -314,6 +322,60 @@ export async function commitHarm(kind: string, cells: Array<{ x: number; y: numb
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";
     if (msg !== "Unauthorized") console.warn("[книга] вред", err);
+    return false;
+  }
+}
+
+/** Ордер прилавка: клетка витрины и фишка сразу, с ver. Покупка капает due продавцу. */
+export async function commitStall(kind: "stall-put" | "stall-drop" | "stall-take", cell: { x: number; y: number }, prior?: Character) {
+  if (!store) return false;
+  const s = store.get();
+  if (s.started) saveGame(s);
+  if (!s.bookOn || !s.started) return true;
+  const selfId = selfIdOf();
+  const t = s.world.tiles[cell.y * s.world.width + cell.x];
+  const slim = t ? wireSlim(slimOf(t), selfId, "publish") : { b: "plains" as const };
+  const sig = t ? JSON.stringify(slimOf(t)) : "";
+  const pack = {
+    x: cell.x,
+    y: cell.y,
+    slim,
+    ver: sVer(s, cell.x, cell.y),
+    k: keyOf(cell.x, cell.y),
+    sig,
+  };
+  try {
+    const res = await writeStallDeed({
+      data: {
+        kind,
+        tile: { x: pack.x, y: pack.y, slim: pack.slim, ver: pack.ver },
+        pawn: pawnPayload(s.character),
+      },
+    });
+    if (!res) return false;
+    if (res.ok) {
+      const ver = (store.get().world.ver ?? []).slice();
+      for (const w of res.written) {
+        ver[w.y * s.world.width + w.x] = w.ver;
+      }
+      lastSlim.set(pack.k, pack.sig);
+      store.set({ world: { ...store.get().world, ver } });
+      applyCredit(res.credit);
+      return true;
+    }
+    let world = store.get().world;
+    if (res.conflicts.length) world = applyLive(world, localizePackets(res.conflicts));
+    world = maskLiveFog(world, store.get().character.x, store.get().character.y);
+    const patch: Partial<GameState> = { world };
+    if (prior) patch.character = prior;
+    store.set(patch);
+    rememberLive(store.get());
+    store.speak?.(res.hint || "клетка уже другая", s.character.x, s.character.y, "нет", "bad");
+    saveGame(store.get());
+    return false;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg !== "Unauthorized") console.warn("[книга] прилавок", err);
     return false;
   }
 }
@@ -359,6 +421,7 @@ export async function beatBook(_force = false) {
       bookAt: res.since,
       ...applyClock(res.clock, live),
     });
+    applyCredit(res.credit);
     rememberLive(store.get());
     if (res.fight) applyIncomingFight(res.fight, store.get().selfId);
     else if (store.get().meet?.live) {

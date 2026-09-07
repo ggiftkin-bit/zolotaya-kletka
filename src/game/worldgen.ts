@@ -645,6 +645,7 @@ function cloneWorld(world: World): World {
       pit: !!t.pit,
       bank: !!t.bank,
       regen: t.regen ?? 0,
+      order: t.order ? { ...t.order } : null,
     })),
   };
 }
@@ -716,6 +717,7 @@ function buildWorld(seed: string): World {
         gateLock: false,
         pit: false,
         bank: false,
+        order: null,
       };
     }
   }

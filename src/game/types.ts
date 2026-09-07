@@ -156,6 +156,12 @@ export type Herd = {
   age?: number;
 };
 
+export type StallOrder = {
+  item: ItemId;
+  n: number;
+  gold: number;
+};
+
 export type Tile = {
   x: number;
   y: number;
@@ -195,6 +201,8 @@ export type Tile = {
   pit: boolean;
   /** Yellow clay bank along the river. Dig → 2 clay, then pit. */
   bank: boolean;
+  /** Витрина прилавка. Вещь в эскро на клетке, не в воздухе. */
+  order: StallOrder | null;
 };
 
 export type Inventory = Record<ItemId, number>;
