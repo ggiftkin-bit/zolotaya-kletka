@@ -307,9 +307,11 @@ export function bodyMult(f: Fighter, winter: boolean, roof: boolean): number {
   return m;
 }
 
+export const STRIKE_CAP = 18;
+
 export function strikeDmg(atk: Fighter, ctx: StrikeCtx, def?: Fighter | Dummy | null): { dmg: number; sneak: boolean } {
   const en = Math.max(0, atk.energy);
-  let base = 4 * (en / ENERGY_MAX);
+  let base = 12 * (en / ENERGY_MAX);
   if (en < 1) base *= 0.4;
   let m = 1;
   m *= handMult(atk.hand, ctx.first, ctx.atYard, ctx.night);
@@ -321,7 +323,7 @@ export function strikeDmg(atk: Fighter, ctx: StrikeCtx, def?: Fighter | Dummy | 
   else if (ctx.foreignYard) m *= 0.9;
   m *= 1 + (atk.skills.fight ?? 0) * 0.02;
   const raw = base * m * armorMult(def);
-  const dmg = Math.max(1, Math.min(12, Math.round(raw)));
+  const dmg = Math.max(1, Math.min(STRIKE_CAP, Math.round(raw)));
   return { dmg, sneak };
 }
 

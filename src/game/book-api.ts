@@ -11,6 +11,7 @@ import { isItemId, settleService, serviceJobOf, stampTake } from "./market";
 import { isHamletOwner, isLivingOwner } from "./pact";
 import { defaultMatter, MATTER_HP } from "./work";
 import { pileAdd } from "./pile";
+import { STRIKE_CAP } from "./fight";
 import type { ItemId, ServiceJob } from "./types";
 import {
   FOG_FETCH,
@@ -1610,7 +1611,7 @@ export const strikeBookFight = createServerFn({ method: "POST" })
     const fight = await loadOpenFight(sql, context.userId);
     if (!fight) return { ok: false as const, hint: "встречи нет" };
     if (fight.turnId !== context.userId) return { ok: false as const, hint: "не твой шаг", fight };
-    const dmg = Math.max(1, Math.min(12, Math.round(data.dmg)));
+    const dmg = Math.max(1, Math.min(STRIKE_CAP, Math.round(data.dmg)));
     const iAmA = fight.aId === context.userId;
     const foeId = iAmA ? fight.bId : fight.aId;
     const foeHp = Math.max(0, (iAmA ? fight.bHp : fight.aHp) - dmg);
