@@ -6,10 +6,10 @@ import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, waterHint } from "@/game/life";
 import { LIFE_INDEX } from "@/game/art";
 import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/places";
 import { FOG_DARK, FOG_LIVE, fogAt } from "@/game/book";
-import { bagGoods, bringDestLine, bringDests, BRING_GOODS, BRING_N, canPostFromBoard, canReadBoard, canSeeService, craftsAtTile, firstOwnGate, firstOwnShed, isCraftStation, isGateTile, SERVICE_DO, SERVICE_GOLD, SERVICE_LABEL, serviceJobOf, serviceLine, stallLine, stallOrderOf, STALL_PRICES, streetNotices } from "@/game/market";
+import { bagGoods, bringDestLine, bringDests, boardNotices, BRING_GOODS, BRING_N, canPostFromBoard, canReadBoard, canSeeService, craftsAtTile, firstOwnGate, firstOwnShed, isCraftStation, isGateTile, SERVICE_DO, SERVICE_GOLD, SERVICE_LABEL, serviceJobOf, serviceLine, stallLine, stallOrderOf, STALL_PRICES } from "@/game/market";
 import { DONATE_GOLD, GIFTS, giftOrdered, LIVE_STOCK, stockOf } from "@/game/office";
 import { occupantAt } from "@/game/fight";
-import { canFoundVillage, canPlaceBoard, canPutLiveName, clusterHint, hamletTitle, hasOwnYard, namesTouchingYard, villageOf } from "@/game/pact";
+import { canFoundVillage, canPlaceBoard, canPutLiveName, clusterHint, hasOwnYard, namesTouchingYard, ownerFace, villageOf } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
 import { ownNearby, ownsMount, ridingHorse } from "@/game/mount";
 import { canDigReason, fillPay } from "@/game/pit";
@@ -95,7 +95,7 @@ function Sheet({ tile }: { tile: Tile }) {
   }, [tile.x, tile.y]);
   const title =
     pane === "place"
-      ? placeTitle(tile)
+      ? placeTitle(tile, g.others)
       : pane === "gather"
         ? "Что взять"
         : pane === "build"
@@ -155,7 +155,7 @@ function Sheet({ tile }: { tile: Tile }) {
           <p className="font-display text-2xl leading-none tracking-tight">{title}</p>
           <p className="mt-1 text-[12px] text-muted-foreground">
             {here ? "ты здесь" : near ? "рядом" : "далеко"}
-            {tile.plot ? (tile.owner === "you" ? " · твой двор" : ` · ${hamletTitle(tile.owner)}`) : ""}
+            {tile.plot ? (tile.owner === "you" ? " · твой двор" : ` · ${ownerFace(tile.owner, g.others) || "чужой"}`) : tile.building === "board" && tile.owner && tile.owner !== "you" ? ` · ${ownerFace(tile.owner, g.others) || "чужой"}` : ""}
             {tile.village ? ` · ${tile.village}` : ""}
             {tile.building !== "none" && pane === "pick" ? ` · ${MATTER_LABEL[tile.matter || "wood"]}` : ""}
             {tile.chestLock ? " · сундук на замке" : ""}
@@ -423,7 +423,7 @@ function PickPane({
       )}
       {open && (here || (tile.building === "stall" && near)) && (
         <Sticker
-          title={tile.caravan ? "Открыть лавку" : `Открыть · ${placeTitle(tile)}`}
+          title={tile.caravan ? "Открыть лавку" : `Открыть · ${placeTitle(tile, g.others)}`}
           sub={placeHint(tile)}
           ico={<Ico i={tile.caravan || tile.building === "shop" || tile.building === "stall" ? ICO.gold : ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
           onClick={() => onPane("place")}
@@ -570,12 +570,12 @@ function PickPane({
             />
           )}
           <Sticker
-            title={`Украсть у ${hamletTitle(tile.owner)}`}
+            title={`Украсть у ${ownerFace(tile.owner, g.others) || "чужой"}`}
             sub="С соседней клетки. Поймают — яма, залог 20."
             onClick={() => g.stealHere()}
           />
-          {g.character.pacts[tile.owner] !== "friend" && (
-            <Sticker title="Дружить" sub={`${hamletTitle(tile.owner)} кивнёт`} onClick={() => g.offerFriend()} />
+          {g.character.pacts[tile.owner] !== "friend" && !(tile.building === "board" && tile.burned) && (
+            <Sticker title="Дружить" sub={`${ownerFace(tile.owner, g.others) || "чужой"} кивнёт`} onClick={() => g.offerFriend()} />
           )}
         </>
       )}
@@ -1433,13 +1433,14 @@ function WellBody() {
 function BoardBody({ tile }: { tile: Tile }) {
   const g = useGame();
   useEffect(() => {
+    if (tile.burned) return;
     g.lookBoard(tile.x, tile.y);
-  }, [tile.x, tile.y]);
+  }, [tile.x, tile.y, tile.burned]);
   const live = fogAt(g.world, tile.x, tile.y) === FOG_LIVE;
   const near = Math.max(Math.abs(g.character.x - tile.x), Math.abs(g.character.y - tile.y)) <= 1;
   const readable = canReadBoard(tile, g.character.x, g.character.y, fogAt(g.world, tile.x, tile.y));
   const name = tile.village;
-  const rows = readable && name ? streetNotices(g.world, name) : [];
+  const rows = readable ? boardNotices(g.world, tile) : [];
   const mine = isYours(tile);
   const canHang = mine && canPostFromBoard(tile, mine, g.character.x, g.character.y);
   const [tab, setTab] = useState<"list" | "hang">("list");
@@ -1449,6 +1450,9 @@ function BoardBody({ tile }: { tile: Tile }) {
   }
   if (!near) {
     return <p className="mt-4 text-sm text-muted-foreground">Подойди к доске.</p>;
+  }
+  if (tile.burned) {
+    return <p className="mt-4 text-sm text-muted-foreground">Обгорела. Листа нет. Головешку можно разобрать.</p>;
   }
 
   const tabs = canHang ? (
@@ -1471,23 +1475,15 @@ function BoardBody({ tile }: { tile: Tile }) {
     );
   }
 
-  if (!name) {
-    return (
-      <div>
-        {tabs}
-        <p className="mt-4 text-sm text-muted-foreground">Доска без имени. Лист пуст — саму доску ставят. Повесить можно на свою клетку.</p>
-      </div>
-    );
-  }
   if (rows.length === 0) {
     return (
       <div>
         {tabs}
         <div className="mt-4 flex flex-col gap-2">
           <p className="text-[13px] text-muted-foreground">
-            «{name}». Ордера и услуги этой улицы.
+            {name ? `«${name}». Заказы хозяина столба и этой улицы.` : "Заказы хозяина столба. Берут здесь или у цели."}
           </p>
-          <p className="text-sm text-muted-foreground">Пусто.</p>
+          <p className="text-sm text-muted-foreground">{name ? "Пусто." : "Пока пусто — повесь у калитки или с листа."}</p>
         </div>
       </div>
     );
@@ -1497,7 +1493,7 @@ function BoardBody({ tile }: { tile: Tile }) {
       {tabs}
       <div className="mt-4 flex flex-col gap-2">
         <p className="text-[13px] text-muted-foreground">
-          «{name}». Берут здесь или у цели.
+          {name ? `«${name}». Берут здесь или у цели.` : "Берут здесь или у цели. Цель — клетка дела."}
         </p>
         {rows.map((row) => {
           const jobTile = row.kind === "service" ? tileAt(g.world, row.x, row.y) : null;
@@ -1928,7 +1924,7 @@ function BuildPane({ tile }: { tile: Tile }) {
           {(tile.plot || tile.owned
             ? ([
                 ["Жильё", ["shack", "house", "shed", "camp"]],
-                ["Станки и столы", ["bench", "forge", "oven", "smoke", "herbs", "coalpit", "stall", "board", "adit"]],
+                ["Станки и столы", ["bench", "forge", "oven", "smoke", "herbs", "coalpit", "stall", "adit"]],
                 ["Двор", ["field", "well", "pen", "stable", "tower", "jail"]],
               ] as const)
             : ([
@@ -1967,7 +1963,7 @@ function BuildPane({ tile }: { tile: Tile }) {
           ))}
           {canPlaceBoard(g.world, tile, isYours(tile)) && !tile.plot && (
             <div>
-              <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">Имя</p>
+              <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">Доска</p>
               <Button
                 size="sm"
                 variant="outline"

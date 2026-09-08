@@ -1,7 +1,8 @@
 import { ITEM_LABEL } from "./constants";
 import { BUILDING_LABEL } from "./economy";
+import { ownerFace } from "./pact";
 import { asPile, pileLabel, pileTotal } from "./pile";
-import type { ItemId, Tile, World } from "./types";
+import type { ItemId, OtherPawn, Tile, World } from "./types";
 import { canFishOn } from "./work";
 
 export type Loot = {
@@ -49,7 +50,7 @@ export function canOpenPlace(tile: Tile) {
   return tile.caravan || tile.building !== "none";
 }
 
-export function placeTitle(tile: Tile) {
+export function placeTitle(tile: Tile, others: OtherPawn[] = []) {
   if (tile.caravan) return "Лавка на тракте";
   if (tile.bank && tile.building === "none") return "берег";
   if (tile.wagon) {
@@ -67,7 +68,7 @@ export function placeTitle(tile: Tile) {
   if (tile.building === "none") return "";
   const lock =
     tile.chestLock || tile.gateLock ? " · на замке" : "";
-  if (tile.owner && tile.owner !== "you") return `${BUILDING_LABEL[tile.building]} · ${tile.owner}${lock}`;
+  if (tile.owner && tile.owner !== "you") return `${BUILDING_LABEL[tile.building]} · ${ownerFace(tile.owner, others) || "чужой"}${lock}`;
   return BUILDING_LABEL[tile.building] + lock;
 }
 
@@ -105,9 +106,10 @@ export function placeHint(tile: Tile) {
     case "well":
       return "Ведро сюда.";
     case "board":
+      if (tile.burned) return "Обгорела. Листа нет. Головешку можно разобрать.";
       return tile.village
-        ? "Доска имени. Ордер и услуга этой улицы. У своей — ещё услуга. Берут у прилавка, не здесь."
-        : "Доска без имени. Пустой лист. У своей — услуга. Не биржа.";
+        ? "Знак на дороге. Заказы хозяина столба и этой улицы. Цель — клетка дела. Сюда услугу не вешают."
+        : "Знак на дороге. Заказы хозяина столба. Без имени лист не пуст, если висят заказы. Сюда услугу не вешают.";
     case "mine":
     case "adit":
       return "Добыча из жилы.";

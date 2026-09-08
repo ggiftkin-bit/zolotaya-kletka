@@ -1677,16 +1677,22 @@ export const readStreetNotices = createServerFn({ method: "POST" })
     if (!board) return { name: "", live: [] as TilePacket[] };
     const slim = asSlim(board.slim);
     if (slim.bd !== "board") return { name: "", live: [] as TilePacket[] };
+    if (slim.br) return { name: (slim.vg || "").trim(), live: [] as TilePacket[] };
     const name = (slim.vg || "").trim();
-    if (!name) return { name: "", live: [] as TilePacket[] };
+    const owner = (slim.on || "").trim();
+    if (!name && !owner) return { name: "", live: [] as TilePacket[] };
     const rows = await sql.query<TileRow>(
       `select x, y, slim, ver, updated_at::text as updated_at
        from tile
        where world_id = $1
-         and slim->>'vg' = $2
          and (slim ? 'or' or slim ? 'sv')
+         and (
+           ($2 <> '' and slim->>'vg' = $2)
+           or ($3 <> '' and (slim->>'on' = $3 or slim->'sv'->>'by' = $3))
+         )
+         and not (x = $4 and y = $5)
        limit 40`,
-      [WORLD_ID, name],
+      [WORLD_ID, name, owner, data.x, data.y],
     );
     const live: TilePacket[] = rows.map((r) => ({
       x: r.x,

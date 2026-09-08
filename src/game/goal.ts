@@ -15,7 +15,7 @@ export const BUILD_HINT: Record<Exclude<BuildingKind, "none">, string> = {
   well: "вода вокруг",
   workshop: "верстак",
   shop: "продаёт из тайника",
-  board: "объявления двора и улицы",
+  board: "знак на тракте, берегу, поляне, улице",
   mine: "руда",
   tower: "смотрит ночь, не стреляет",
   bench: "доска · плотник",

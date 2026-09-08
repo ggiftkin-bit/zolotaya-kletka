@@ -195,10 +195,30 @@ export function nearVillageBoard(world: World, px: number, py: number, village: 
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
       const t = atXY(world, px + dx, py + dy);
-      if (t?.building === "board" && t.village === village) return true;
+      if (t?.building === "board" && !t.burned && t.village === village) return true;
     }
   }
   return false;
+}
+
+/** Стоишь у знака этого хозяина. Без имени улицы тоже. */
+export function nearOwnerBoard(world: World, px: number, py: number, owner: string): boolean {
+  if (!owner) return false;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const t = atXY(world, px + dx, py + dy);
+      if (t?.building === "board" && !t.burned && t.owner === owner) return true;
+    }
+  }
+  return false;
+}
+
+export function canTakeServiceHere(world: World | undefined, tile: Tile, px: number, py: number): boolean {
+  if (chebyshev(px, py, tile.x, tile.y) <= 1) return true;
+  if (!world) return false;
+  if (tile.village && nearVillageBoard(world, px, py, tile.village)) return true;
+  const owner = tile.owner || serviceJobOf(tile)?.by || "";
+  return !!owner && nearOwnerBoard(world, px, py, owner);
 }
 
 export function canBringTarget(dest: Tile, destMine: boolean): boolean {
@@ -456,7 +476,7 @@ export function planTakeService(
   if (mine || job.by === "you") return { ok: false, hint: "Свою услугу снимай, не бери." };
   if (job.take) return { ok: false, hint: "Уже взяли." };
   if (chebyshev(px, py, tile.x, tile.y) > 1) {
-    if (!world || !tile.village || !nearVillageBoard(world, px, py, tile.village)) {
+    if (!canTakeServiceHere(world, tile, px, py)) {
       return { ok: false, hint: "Подойди." };
     }
   }
@@ -609,21 +629,63 @@ export type StreetNotice = {
 };
 
 export function canReadBoard(tile: Tile, px: number, py: number, fog: number): boolean {
-  if (tile.building !== "board") return false;
+  if (tile.building !== "board" || tile.burned) return false;
   if (fog !== FOG_LIVE) return false;
   return chebyshev(px, py, tile.x, tile.y) <= 1;
 }
 
-export function streetNotices(world: World, name: string, now = Date.now()): StreetNotice[] {
-  if (!name) return [];
+function collectNotices(
+  world: World,
+  now: number,
+  take: (t: Tile) => boolean,
+  skip?: { x: number; y: number },
+): StreetNotice[] {
   const rows: StreetNotice[] = [];
+  const seen = new Set<string>();
   for (const t of world.tiles) {
-    if (t.village !== name) continue;
+    if (skip && t.x === skip.x && t.y === skip.y) continue;
+    if (!take(t)) continue;
     const order = stallOrderOf(t);
-    if (order) rows.push({ kind: "order", x: t.x, y: t.y, line: stallLine(order) });
+    if (order) {
+      const k = `order:${t.x},${t.y}`;
+      if (!seen.has(k)) {
+        seen.add(k);
+        rows.push({ kind: "order", x: t.x, y: t.y, line: stallLine(order) });
+      }
+    }
     const job = serviceJobOf(t);
-    if (job) rows.push({ kind: "service", x: t.x, y: t.y, line: serviceLine(job, now) });
+    if (job) {
+      const k = `service:${t.x},${t.y}`;
+      if (!seen.has(k)) {
+        seen.add(k);
+        rows.push({ kind: "service", x: t.x, y: t.y, line: serviceLine(job, now) });
+      }
+    }
   }
   return rows;
+}
+
+/** Лист знака: заказы хозяина столба, плюс улица имени если есть. */
+export function boardNotices(world: World, board: Tile, now = Date.now()): StreetNotice[] {
+  if (board.burned || board.building !== "board") return [];
+  const owner = board.owner || "";
+  const name = board.village || "";
+  if (!owner && !name) return [];
+  return collectNotices(
+    world,
+    now,
+    (t) => {
+      const job = serviceJobOf(t);
+      if (owner && (t.owner === owner || job?.by === owner)) return true;
+      if (name && t.village === name) return true;
+      return false;
+    },
+    board,
+  );
+}
+
+export function streetNotices(world: World, name: string, now = Date.now()): StreetNotice[] {
+  if (!name) return [];
+  return collectNotices(world, now, (t) => t.village === name);
 }
 

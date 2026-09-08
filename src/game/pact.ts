@@ -16,11 +16,25 @@ export const HAMLETS = [
 
 const HAMLET_OWNER = new Set<string>(HAMLETS.map((h) => h.owner));
 
+const RAW_OWNER_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Свободное 4×4 под двор игрока — вплотную к кусту. */
 export const PLAYER_FIELD = { dx: -8, dy: 1, w: 4, h: 4 } as const;
 
 export function hamletTitle(owner: string): string {
-  return HAMLETS.find((h) => h.owner === owner)?.title ?? owner;
+  return ownerFace(owner);
+}
+
+/** Имя фишки или хутора. Сырой user_id не светить. */
+export function ownerFace(owner: string, others: { id: string; name: string }[] = []): string {
+  if (!owner || owner === "you") return "";
+  const ham = HAMLETS.find((h) => h.owner === owner);
+  if (ham) return ham.title;
+  const n = others.find((o) => o.id === owner)?.name?.trim();
+  if (n) return n;
+  if (owner.length > 20 || RAW_OWNER_ID.test(owner)) return "чужой";
+  return owner;
 }
 
 export function isHamletOwner(owner: string): boolean {
@@ -289,25 +303,31 @@ export function isOutsideYard(world: World, x: number, y: number): boolean {
   return false;
 }
 
-/** Доска: свой двор (даже без имени), улица имени, клетка у своего тына. */
-export function canPlaceBoard(world: World, tile: Tile, mine: boolean): boolean {
+/** Доска — знак на дороге: тракт, берег, поляна, улица имени. Плот не берёт. */
+export function canPlaceBoard(_world: World, tile: Tile, _mine: boolean): boolean {
   if (tile.burned) return false;
   if (tile.building !== "none") return false;
-  if (tile.plot || tile.owned) return mine;
-  if (tile.village) return true;
-  return nextToOwnPlot(world, tile);
+  if (tile.caravan) return false;
+  if (tile.biome === "river") return false;
+  if (tile.owner && tile.owner !== "you") return false;
+  if (tile.plot || tile.owned) return false;
+  const tract = tile.road !== "none";
+  const glade = !!tile.commons;
+  const shore = !!tile.bank || tile.biome === "ford";
+  const street = !!tile.village;
+  return tract || glade || shore || street;
 }
 
-function nextToOwnPlot(world: World, tile: Tile, owner = "you"): boolean {
-  if (!isOutsideYard(world, tile.x, tile.y)) return false;
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      if (dx === 0 && dy === 0) continue;
-      const n = at(world, tile.x + dx, tile.y + dy);
-      if (n?.plot && n.owner === owner) return true;
-    }
-  }
-  return false;
+/** Хозяин столба. Плот не ставим. */
+export function stampBoard(tile: Tile, who = "you") {
+  if (tile.building !== "board") return;
+  if (!tile.owner) tile.owner = who;
+}
+
+/** Сняли знак с ничьей клетки — хозяин столба тоже уходит. Двор не трогать. */
+export function releaseBoard(tile: Tile) {
+  if (tile.plot) return;
+  tile.owner = "";
 }
 
 

@@ -43,7 +43,7 @@ import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_
 import { applyCatch, applyDriveFail, DRIVE_LABEL, harmCells, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, markCrime, ownerOf, planDriveOff, plotCells, punish, rollCaught, stealChance, takeLoot, unlockKind, fenceBurnCells } from "./crime";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
 import { clearGame, loadGame, saveGame } from "./save";
-import { stampVillage, leaveVillage, hamletTitle, hasOwnYard, isOutsideYard, setVillageLaw, planFoundOwners, canJoinVillage, namesTouchingYard, livingOwnersOf, villageOf, snapVillage, villageChangedCells, atNameSpot, normVillageName, canPlaceBoard } from "./pact";
+import { stampVillage, leaveVillage, hamletTitle, hasOwnYard, isOutsideYard, setVillageLaw, planFoundOwners, canJoinVillage, namesTouchingYard, livingOwnersOf, villageOf, snapVillage, villageChangedCells, atNameSpot, normVillageName, canPlaceBoard, stampBoard, releaseBoard } from "./pact";
 import { cargoWeight, loadRatio, pailKg, stepEnergy, wornKg } from "./travel";
 import { atBench, CRAFTS, EAT_ORDER, EAT_SAT, PROF_BLURB, type CraftKind } from "./craft";
 import { markDepleted, tickGrow, REGROW_WAIT } from "./grow";
@@ -115,6 +115,7 @@ import {
   planTakeService,
   SERVICE_LABEL,
   canPostFromBoard,
+  canTakeServiceHere,
   serviceBusyUntil,
   serviceJobOf,
   serviceLine,
@@ -2248,7 +2249,7 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
   }
   if (kind === "board") {
     if (!canPlaceBoard(s.world, tile, isYours(tile))) {
-      speak("Доску ставят на своём дворе, у тына или на улице имени.", x, y, "не здесь", "bad");
+      speak("Доску ставят на тракте, берегу, поляне или улице имени.", x, y, "не здесь", "bad");
       return;
     }
   } else if (tile.commons) {
@@ -3087,6 +3088,7 @@ function resolveBuild(s: GameState, c0: Character, tile: NonNullable<ReturnType<
   tile.matter = defaultMatter(kind);
   tile.hp = MATTER_HP[tile.matter];
   tile.burned = false;
+  if (kind === "board") stampBoard(tile);
   if (kind === "field") tile.resource = FIELD_CROP;
   const c = bumpSkill(c0, "build", 0.2);
   useGame.setState({
@@ -3651,6 +3653,7 @@ function scrapBurned() {
     return;
   }
   const wood = tile.matter === "stone" ? 0 : 2;
+  if (tile.building === "board") releaseBoard(tile);
   tile.building = "none";
   tile.burned = false;
   tile.hp = 0;
@@ -5264,9 +5267,12 @@ function takeServiceAt(x: number, y: number) {
 function takeServiceOn(tile: Tile) {
   const s = useGame.getState();
   if (serviceBlocked()) return;
+  const far = Math.max(Math.abs(s.character.x - tile.x), Math.abs(s.character.y - tile.y)) > 1;
   if (fogAt(s.world, tile.x, tile.y) !== FOG_LIVE) {
-    speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
-    return;
+    if (!far || !canTakeServiceHere(s.world, tile, s.character.x, s.character.y)) {
+      speak("В тумане услуги нет.", tile.x, tile.y, "туман", "bad");
+      return;
+    }
   }
   const plan = planTakeService(tile, isYours(tile), s.character.x, s.character.y, s.character.busy, Date.now(), s.character.inventory, s.world);
   if (!plan.ok) {
