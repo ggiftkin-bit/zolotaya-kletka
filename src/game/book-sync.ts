@@ -534,7 +534,7 @@ export async function commitBag(
   kind: BagKind,
   cell: { x: number; y: number },
   prior?: Character,
-  extra?: { item?: ItemId; qty?: number; craft?: string; need?: Partial<Record<ItemId, number>> },
+  extra?: { item?: ItemId; qty?: number; craft?: string; need?: Partial<Record<ItemId, number>>; job?: string },
 ) {
   if (!store) return false;
   const s = store.get();
@@ -552,7 +552,7 @@ export async function commitBag(
     k: keyOf(cell.x, cell.y),
     sig,
   };
-  const writesTile = kind !== "eat" && kind !== "spend";
+  const writesTile = kind !== "eat" && kind !== "spend" && kind !== "job" && kind !== "grant" && kind !== "yard";
   if (writesTile) lastSlim.set(pack.k, pack.sig);
   try {
     const res = await writeBagDeed({
@@ -564,6 +564,7 @@ export async function commitBag(
         qty: extra?.qty,
         craft: extra?.craft,
         need: extra?.need,
+        job: extra?.job,
       },
     });
     if (!res) return false;

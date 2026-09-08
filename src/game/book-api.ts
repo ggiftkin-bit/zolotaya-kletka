@@ -10,11 +10,13 @@ import { generateWorld } from "./worldgen";
 import { isItemId, settleService, serviceJobOf, stampTake } from "./market";
 import { fillStock, isGiftId, planBuyFromStock, planDonate, planGift, planSellToStock, stockOf, STOCK_CAP, STOCK_START } from "./office";
 import { isGoldKind, planGoldDeed, START_GOLD } from "./gold";
-import { bagOf, canCraftHere, craftDefOf, giveOrSpill, isBagKind, planEat, planGather, startInv, takeBag } from "./bag";
+import { bagOf, canCraftHere, craftDefOf, giveOrSpill, GRANT_WOOD, isBagKind, planEat, planGather, startInv, takeBag } from "./bag";
 import { isHamletOwner, isLivingOwner } from "./pact";
 import { defaultMatter, MATTER_HP } from "./work";
 import { asPile, pileAdd, pileEmpty, pileSet, pullNeed, SHED_REACH, applyNeedPull } from "./pile";
 import { STRIKE_CAP } from "./fight";
+import { makeJobs } from "./economy";
+import { MAX_PLOT, plotBounds, yardWoodCost } from "./fence";
 import {
   FOG_FETCH,
   WORLD_ID,
@@ -1741,6 +1743,7 @@ export const writeBagDeed = createServerFn({ method: "POST" })
         qty: z.number().optional(),
         craft: z.string().optional(),
         need: z.record(z.string(), z.number()).optional(),
+        job: z.string().optional(),
       })
       .parse(d),
   )
@@ -1769,12 +1772,13 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       gold,
       inventory,
     });
+    const bagSoft = data.kind === "eat" || data.kind === "spend" || data.kind === "job" || data.kind === "grant" || data.kind === "yard";
     if (!cur) return emptyFail("клетка уже другая");
-    if (cur.ver !== t.ver && data.kind !== "eat" && data.kind !== "spend") {
+    if (cur.ver !== t.ver && !bagSoft) {
       return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0, gold: 0, inventory: startInv() };
     }
     const reach = Math.max(Math.abs(data.pawn.x - t.x), Math.abs(data.pawn.y - t.y));
-    if (data.kind !== "eat" && data.kind !== "spend" && reach > 1) {
+    if (!bagSoft && reach > 1) {
       return emptyFail("подойди");
     }
     const liveSlim = asSlim(cur.slim);
@@ -1974,6 +1978,33 @@ export const writeBagDeed = createServerFn({ method: "POST" })
         const ver = await bump(shed, row.ver);
         if (ver != null) written.push({ x: sh.x, y: sh.y, ver });
       }
+    } else if (data.kind === "job") {
+      if (!live.caravan) return emptyFail("Заказ закрывают в лавке на тракте.", gold, inv);
+      if (reach > 1) return emptyFail("подойди", gold, inv);
+      const id = (data.job ?? "").trim();
+      const job = makeJobs(clock.week).find((j) => j.id === id);
+      if (!job) return emptyFail("заказа нет", gold, inv);
+      const paid = takeBag(inv, { [job.item]: job.need });
+      if (!paid.ok) return emptyFail(paid.hint, gold, inv);
+      inv = paid.inv;
+      gold += job.pay;
+    } else if (data.kind === "grant") {
+      spill("wood", GRANT_WOOD);
+    } else if (data.kind === "yard") {
+      if (!live.plot) return emptyFail("Здесь нет двора.", gold, inv);
+      if (live.owner && live.owner !== userId) return emptyFail("чужой двор", gold, inv);
+      const nearRows = await sql.query<TileRow>(
+        `select x, y, slim, ver, updated_at::text as updated_at
+         from tile where world_id = $1
+           and greatest(abs(x - $2), abs(y - $3)) <= $4`,
+        [WORLD_ID, t.x, t.y, MAX_PLOT],
+      );
+      const fats = nearRows.map((r) => fatTile(asSlim(r.slim), r.x, r.y));
+      const world = asMiniWorld(fats);
+      const b = plotBounds(world, t.x, t.y);
+      if (!b) return emptyFail("Здесь нет двора.", gold, inv);
+      const refund = Math.floor(yardWoodCost(b.x1 - b.x0 + 1, b.y1 - b.y0 + 1) / 2);
+      if (refund > 0) spill("wood", refund);
     } else if (data.kind === "steal") {
       return emptyFail("кража — делом вреда", gold, inv);
     } else {
@@ -1985,7 +2016,7 @@ export const writeBagDeed = createServerFn({ method: "POST" })
     await sql.query(
       `insert into deed (world_id, user_id, kind, x, y, payload)
        values ($1, $2, $3, $4, $5, $6::jsonb)`,
-      [WORLD_ID, userId, `bag-${data.kind}`, t.x, t.y, JSON.stringify({ item: data.item, qty: data.qty, craft: data.craft, n: written.length })],
+      [WORLD_ID, userId, `bag-${data.kind}`, t.x, t.y, JSON.stringify({ item: data.item, qty: data.qty, craft: data.craft, job: data.job, n: written.length })],
     );
     await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
     return { ok: true as const, written, credit: merged.credit, gold, inventory: inv };

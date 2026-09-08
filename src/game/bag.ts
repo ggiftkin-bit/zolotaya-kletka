@@ -84,6 +84,9 @@ export const BAG_KINDS = [
   "eat",
   "spend",
   "steal",
+  "job",
+  "grant",
+  "yard",
 ] as const;
 
 export type BagKind = (typeof BAG_KINDS)[number];
@@ -128,5 +131,8 @@ export function canCraftHere(id: string, profession: Profession, tile: Tile | nu
   if (!def) return false;
   return canDoCraft(def, profession, tile);
 }
+
+/** Испытание «выдать дерево». Книга кладёт столько, не стол. */
+export const GRANT_WOOD = 20;
 
 export { FIELD_CROP };

@@ -1070,6 +1070,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       set({ log: pushLog(s.log, `Нужно ${job.need} ${job.item}, есть ${have}.`) });
       return;
     }
+    const prior = s.character;
     const inv = { ...s.character.inventory };
     inv[job.item] -= job.need;
     let c = {
@@ -1083,10 +1084,12 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       jobs: s.jobs.map((j) => (j.id === id ? { ...j, status: "done" as const } : j)),
       log: pushLog(s.log, `Закрыл заказ «${job.title}»: +${goldTxt(job.pay)}.`),
     });
+    sealBag("job", { x: here.x, y: here.y }, prior, { job: id });
   },
 
   grant: (kind) => {
     const s = get();
+    const prior = s.character;
     const inv = { ...s.character.inventory };
     let gold = s.character.gold;
     let transport = s.character.transport;
@@ -1130,6 +1133,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       },
       log: pushLog(s.log, line),
     });
+    if (kind === "wood") sealBag("grant", { x: s.character.x, y: s.character.y }, prior);
   },
 
   stepSim: (dt) => {
@@ -1265,10 +1269,10 @@ function sealHarm(kind: string, cells: Array<{ x: number; y: number }>, prior?: 
 }
 
 function sealBag(
-  kind: "gather" | "dig" | "hunt" | "fish" | "pickup" | "drop" | "chest-put" | "chest-take" | "craft" | "eat" | "spend",
+  kind: "gather" | "dig" | "hunt" | "fish" | "pickup" | "drop" | "chest-put" | "chest-take" | "craft" | "eat" | "spend" | "job" | "grant" | "yard",
   cell: { x: number; y: number },
   prior: Character,
-  extra?: { item?: ItemId; qty?: number; craft?: string; need?: Partial<Record<ItemId, number>> },
+  extra?: { item?: ItemId; qty?: number; craft?: string; need?: Partial<Record<ItemId, number>>; job?: string },
 ) {
   void commitBag(kind, cell, prior, extra).then((ok) => {
     if (!ok) void pullSpot(true);
@@ -1886,6 +1890,7 @@ function dropYardHere() {
   const b = plotBounds(s.world, t.x, t.y);
   if (!b) return;
   const refund = Math.floor(yardWoodCost(b.x1 - b.x0 + 1, b.y1 - b.y0 + 1) / 2);
+  const prior = s.character;
   clearYard(s.world, b.x0, b.y0, b.x1, b.y1);
   const inv = { ...s.character.inventory, wood: s.character.inventory.wood + refund };
   useGame.setState({
@@ -1895,6 +1900,9 @@ function dropYardHere() {
     log: pushLog(s.log, `Снял забор. Вернул ${refund} дерева. Постройки остались.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: t.x, y: t.y, text: "двор снят", tone: "ok" as const }].slice(-10),
   });
+  sealBag("yard", { x: t.x, y: t.y }, prior);
+  noteDeed("fence");
+  useGame.getState().persist();
 }
 
 function upgradeFenceHere(to: "palisade" | "wall") {
