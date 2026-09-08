@@ -9,6 +9,7 @@ import type { Season, Tile } from "./types";
 import { generateWorld } from "./worldgen";
 import { isItemId, settleService, serviceJobOf, stampTake } from "./market";
 import { fillStock, isGiftId, planBuyFromStock, planDonate, planGift, planSellToStock, stockOf, STOCK_CAP, STOCK_START } from "./office";
+import { isGoldKind, planGoldDeed, START_GOLD } from "./gold";
 import { isHamletOwner, isLivingOwner } from "./pact";
 import { defaultMatter, MATTER_HP } from "./work";
 import { pileAdd } from "./pile";
@@ -251,11 +252,38 @@ function dueOf(body: PawnBody | null | undefined): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
-async function mergeBookBody(sql: Sql, userId: string, body: PawnBody): Promise<{ body: PawnBody; credit: number }> {
+function purseOf(body: PawnBody | null | undefined): number {
+  const g = typeof body?.gold === "number" && Number.isFinite(body.gold) ? body.gold : 0;
+  return Math.max(0, Math.floor(g) + dueOf(body));
+}
+
+function purseGold(book: PawnBody | null | undefined): number {
+  return book ? purseOf(book) : START_GOLD;
+}
+
+/** Upsert фишки не берёт с клиента gold / due / gifts. Нет строки — старт 20. */
+function keepBookPurse(incoming: PawnBody, book: PawnBody | null | undefined): PawnBody {
+  return {
+    ...incoming,
+    gold: purseGold(book),
+    due: 0,
+    gifts: { ...(book?.gifts ?? {}) },
+  };
+}
+
+function goldTakenFromSlim(live: SlimTile, incoming: SlimTile): number {
+  let n = 0;
+  if ((live.gd ?? 0) > 0 && incoming.gd == null) n += live.gd ?? 0;
+  if ((live.tk ?? 0) > 0 && incoming.tk == null) n += live.tk ?? 0;
+  return n;
+}
+
+async function mergeBookBody(sql: Sql, userId: string, body: PawnBody): Promise<{ body: PawnBody; credit: number; gold: number }> {
   const withFight = await mergeFightIntoPawnBody(sql, userId, body);
   const row = await readPawn(sql, userId);
   const credit = dueOf(row?.body);
-  return { body: { ...withFight, gold: (withFight.gold ?? 0) + credit, due: 0 }, credit };
+  const kept = keepBookPurse(withFight, row?.body);
+  return { body: kept, credit, gold: kept.gold };
 }
 
 async function writePawn(
@@ -790,7 +818,13 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
     const sql = await getSql();
     const conflicts: TilePacket[] = [];
     const written: { x: number; y: number; ver: number }[] = [];
+    let picked = 0;
     for (const t of data.tiles) {
+      const live = await sql.query<TileRow>(
+        `select x, y, slim, ver, updated_at::text as updated_at
+         from tile where world_id = $1 and x = $2 and y = $3`,
+        [WORLD_ID, t.x, t.y],
+      );
       const upd = await sql.query<{ ver: number }>(
         `update tile t
          set slim = ${keepSlimKeys("$5::jsonb", ["or", "sv", "vg"])},
@@ -801,20 +835,16 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
       );
       if (upd[0]) {
         written.push({ x: t.x, y: t.y, ver: upd[0].ver });
+        if (live[0]) picked += goldTakenFromSlim(asSlim(live[0].slim), t.slim);
         continue;
       }
-      const cur = await sql.query<TileRow>(
-        `select x, y, slim, ver, updated_at::text as updated_at
-         from tile where world_id = $1 and x = $2 and y = $3`,
-        [WORLD_ID, t.x, t.y],
-      );
-      if (cur[0]) {
+      if (live[0]) {
         conflicts.push({
-          x: cur[0].x,
-          y: cur[0].y,
-          slim: asSlim(cur[0].slim),
-          ver: cur[0].ver,
-          updatedAt: cur[0].updated_at,
+          x: live[0].x,
+          y: live[0].y,
+          slim: asSlim(live[0].slim),
+          ver: live[0].ver,
+          updatedAt: live[0].updated_at,
         });
       }
     }
@@ -834,7 +864,8 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
       ],
     );
     const merged = await mergeBookBody(sql, context.userId, data.pawn.body);
-    await writePawn(sql, context.userId, data.pawn, merged.body);
+    const body = { ...merged.body, gold: merged.gold + picked };
+    await writePawn(sql, context.userId, data.pawn, body);
     await imprintSpot(sql, context.userId, data.pawn.x, data.pawn.y);
     if (conflicts.length) {
       return {
@@ -843,9 +874,10 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
         conflicts,
         written,
         credit: merged.credit,
+        gold: body.gold,
       };
     }
-    return { ok: true as const, written, credit: merged.credit };
+    return { ok: true as const, written, credit: merged.credit, gold: body.gold };
   });
 
 export const writeHarmDeed = createServerFn({ method: "POST" })
@@ -864,7 +896,15 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
     if (!data.tiles.length) {
       const merged = await mergeBookBody(sql, context.userId, data.pawn.body);
       await writePawn(sql, context.userId, data.pawn, merged.body);
-      return { ok: true as const, written: [] as { x: number; y: number; ver: number }[], credit: merged.credit };
+      return { ok: true as const, written: [] as { x: number; y: number; ver: number }[], credit: merged.credit, gold: merged.gold };
+    }
+    let picked = 0;
+    for (const t of data.tiles) {
+      const live = await sql.query<{ slim: SlimTile }>(
+        `select slim from tile where world_id = $1 and x = $2 and y = $3`,
+        [WORLD_ID, t.x, t.y],
+      );
+      if (live[0]) picked += goldTakenFromSlim(asSlim(live[0].slim), t.slim);
     }
     const incoming = JSON.stringify(
       data.tiles.map((t) => ({ x: t.x, y: t.y, slim: t.slim, ver: t.ver })),
@@ -935,9 +975,10 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
       ],
     );
     const merged = await mergeBookBody(sql, context.userId, data.pawn.body);
-    await writePawn(sql, context.userId, data.pawn, merged.body);
+    const body = { ...merged.body, gold: merged.gold + picked };
+    await writePawn(sql, context.userId, data.pawn, body);
     await imprintSpot(sql, context.userId, data.pawn.x, data.pawn.y);
-    return { ok: true as const, written, credit: merged.credit };
+    return { ok: true as const, written, credit: merged.credit, gold: body.gold };
   });
 
 export const heartbeatWorld = createServerFn({ method: "POST" })
@@ -956,9 +997,11 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     let credit = 0;
+    let gold = START_GOLD;
     if (data.pawn) {
       const merged = await mergeBookBody(sql, context.userId, data.pawn.body);
       credit = merged.credit;
+      gold = merged.gold;
       await writePawn(sql, context.userId, data.pawn, merged.body);
     } else {
       await sql.query(
@@ -968,8 +1011,9 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       );
       const row = await readPawn(sql, context.userId);
       const due = dueOf(row?.body);
+      gold = purseOf(row?.body);
       if (due > 0 && row?.body) {
-        const body = { ...row.body, gold: (row.body.gold ?? 0) + due, due: 0 };
+        const body = { ...row.body, gold, due: 0 };
         await writePawn(sql, context.userId, { name: row.name, color: row.color, x: data.x, y: data.y }, body);
         credit = due;
       }
@@ -1026,6 +1070,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       fight,
       since: nowIso(),
       credit,
+      gold,
       stock,
     };
   });
@@ -1078,7 +1123,7 @@ export const writeStallDeed = createServerFn({ method: "POST" })
         return { ok: false as const, hint: "подойди к прилавку", conflicts: [], written: [], credit: 0 };
       }
       const buyer = await readPawn(sql, userId);
-      const dbGold = (buyer?.body?.gold ?? data.pawn.body.gold ?? 0) + dueOf(buyer?.body);
+      const dbGold = purseGold(buyer?.body);
       if (dbGold < liveOrder.gold) {
         return { ok: false as const, hint: "мало золота", conflicts: [], written: [], credit: 0 };
       }
@@ -1127,7 +1172,8 @@ export const writeStallDeed = createServerFn({ method: "POST" })
       }
       const gold = dbGold - liveOrder.gold;
       const fight = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
-      const body = { ...fight, inventory: data.pawn.body.inventory, gold, due: 0 };
+      const kept = keepBookPurse(fight, buyer?.body);
+      const body = { ...kept, inventory: data.pawn.body.inventory, gold, due: 0 };
       await writePawn(sql, userId, data.pawn, body);
       await sql.query(
         `insert into deed (world_id, user_id, kind, x, y, payload)
@@ -1135,8 +1181,7 @@ export const writeStallDeed = createServerFn({ method: "POST" })
         [WORLD_ID, userId, data.kind, t.x, t.y, JSON.stringify({ item: liveOrder.item, n: liveOrder.n, gold: liveOrder.gold, seller: owner })],
       );
       await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
-      const credit = gold - (data.pawn.body.gold ?? gold);
-      return { ok: true as const, written: [{ x: t.x, y: t.y, ver: upd[0].ver }], credit };
+      return { ok: true as const, written: [{ x: t.x, y: t.y, ver: upd[0].ver }], credit: 0, gold };
     }
 
     if (owner !== userId) {
@@ -1170,7 +1215,7 @@ export const writeStallDeed = createServerFn({ method: "POST" })
       [WORLD_ID, userId, data.kind, t.x, t.y, JSON.stringify({ item: incoming?.item ?? liveOrder?.item, gold: incoming?.gold ?? liveOrder?.gold })],
     );
     await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
-    return { ok: true as const, written: [{ x: t.x, y: t.y, ver: upd[0].ver }], credit: merged.credit };
+    return { ok: true as const, written: [{ x: t.x, y: t.y, ver: upd[0].ver }], credit: merged.credit, gold: merged.gold };
   });
 
 export const writeOfficeDeed = createServerFn({ method: "POST" })
@@ -1194,23 +1239,25 @@ export const writeOfficeDeed = createServerFn({ method: "POST" })
     const stock = await ensureStock(sql);
     const row = await readPawn(sql, userId);
     const dbBody = row?.body;
-    const dbGold = (dbBody?.gold ?? data.pawn.body.gold ?? 0) + dueOf(dbBody);
+    const dbGold = purseGold(dbBody);
     const trader = (dbBody?.profession ?? data.pawn.body.profession) === "trader";
-    const gifts = { ...(dbBody?.gifts ?? data.pawn.body.gifts ?? {}) };
+    const gifts = { ...(dbBody?.gifts ?? {}) };
 
-    const fail = (hint: string) => ({ ok: false as const, hint, stock, credit: 0 });
+    const fail = (hint: string) => ({ ok: false as const, hint, stock, credit: 0, gold: dbGold });
 
     if (data.kind === "donate") {
       const plan = planDonate();
       const fight = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
-      const body = { ...fight, gold: dbGold + plan.gold, due: 0, gifts };
+      const kept = keepBookPurse(fight, dbBody);
+      const gold = dbGold + plan.gold;
+      const body = { ...kept, gold, due: 0, gifts };
       await writePawn(sql, userId, data.pawn, body);
       await sql.query(
         `insert into deed (world_id, user_id, kind, x, y, payload)
          values ($1, $2, $3, $4, $5, $6::jsonb)`,
         [WORLD_ID, userId, "office-donate", data.pawn.x, data.pawn.y, JSON.stringify({ gold: plan.gold })],
       );
-      return { ok: true as const, stock, credit: 0 };
+      return { ok: true as const, stock, credit: 0, gold };
     }
 
     if (data.kind === "gift") {
@@ -1219,14 +1266,16 @@ export const writeOfficeDeed = createServerFn({ method: "POST" })
       const plan = planGift(dbGold, gifts, id);
       if (!plan.ok) return fail(plan.hint);
       const fight = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
-      const body = { ...fight, gold: dbGold - plan.gold, due: 0, gifts: plan.next };
+      const kept = keepBookPurse(fight, dbBody);
+      const gold = dbGold - plan.gold;
+      const body = { ...kept, gold, due: 0, gifts: plan.next };
       await writePawn(sql, userId, data.pawn, body);
       await sql.query(
         `insert into deed (world_id, user_id, kind, x, y, payload)
          values ($1, $2, $3, $4, $5, $6::jsonb)`,
         [WORLD_ID, userId, "office-gift", data.pawn.x, data.pawn.y, JSON.stringify({ id, gold: plan.gold })],
       );
-      return { ok: true as const, stock, credit: 0 };
+      return { ok: true as const, stock, credit: 0, gold };
     }
 
     const item = data.item ?? "";
@@ -1255,21 +1304,23 @@ export const writeOfficeDeed = createServerFn({ method: "POST" })
         return fail(again > STOCK_CAP ? "склад полон" : "склад уже другой");
       }
       const fight = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
-      const body = { ...fight, inventory: data.pawn.body.inventory, gold: data.pawn.body.gold, due: 0, gifts };
+      const kept = keepBookPurse(fight, dbBody);
+      const gold = dbGold + plan.gold;
+      const body = { ...kept, inventory: data.pawn.body.inventory, gold, due: 0, gifts };
       await writePawn(sql, userId, data.pawn, body);
       await sql.query(
         `insert into deed (world_id, user_id, kind, x, y, payload)
          values ($1, $2, $3, $4, $5, $6::jsonb)`,
         [WORLD_ID, userId, "stock-sell", data.pawn.x, data.pawn.y, JSON.stringify({ item, n: plan.take, gold: plan.gold })],
       );
-      return { ok: true as const, stock: fillStock(upd[0].stock), credit: 0 };
+      return { ok: true as const, stock: fillStock(upd[0].stock), credit: 0, gold };
     }
 
     const plan = planBuyFromStock(stock, dbGold, item, qty, season);
     if (!plan.ok) return fail(plan.hint);
-    const have = stockOf(stock, item);
-    const nextCount = have - plan.n;
-    const upd = await sql.query<{ stock: unknown }>(
+    const haveBuy = stockOf(stock, item);
+    const nextBuy = haveBuy - plan.n;
+    const updBuy = await sql.query<{ stock: unknown }>(
       `update world
        set stock = jsonb_set(coalesce(stock, '{}'::jsonb), ARRAY[$2::text], to_jsonb($4::int), true),
            updated_at = now()
@@ -1277,21 +1328,52 @@ export const writeOfficeDeed = createServerFn({ method: "POST" })
          and coalesce((stock->>$2)::int, $5) = $3
          and coalesce((stock->>$2)::int, $5) >= $6
        returning stock`,
-      [WORLD_ID, item, have, nextCount, STOCK_START, plan.n],
+      [WORLD_ID, item, haveBuy, nextBuy, STOCK_START, plan.n],
     );
-    if (!upd[0]) {
+    if (!updBuy[0]) {
       const now = await ensureStock(sql);
       return fail(stockOf(now, item) <= 0 ? "нет на складе" : "склад уже другой");
     }
-    const fight = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
-    const body = { ...fight, inventory: data.pawn.body.inventory, gold: data.pawn.body.gold, due: 0, gifts };
-    await writePawn(sql, userId, data.pawn, body);
+    const fightBuy = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
+    const keptBuy = keepBookPurse(fightBuy, dbBody);
+    const goldBuy = dbGold - plan.cost;
+    const bodyBuy = { ...keptBuy, inventory: data.pawn.body.inventory, gold: goldBuy, due: 0, gifts };
+    await writePawn(sql, userId, data.pawn, bodyBuy);
     await sql.query(
       `insert into deed (world_id, user_id, kind, x, y, payload)
        values ($1, $2, $3, $4, $5, $6::jsonb)`,
       [WORLD_ID, userId, "stock-buy", data.pawn.x, data.pawn.y, JSON.stringify({ item, n: plan.n, gold: plan.cost })],
     );
-    return { ok: true as const, stock: fillStock(upd[0].stock), credit: 0 };
+    return { ok: true as const, stock: fillStock(updBuy[0].stock), credit: 0, gold: goldBuy };
+  });
+
+export const writeGoldDeed = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: unknown) =>
+    z
+      .object({
+        kind: z.string(),
+        pawn: pawnInSchema,
+      })
+      .parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const userId = context.userId;
+    if (!isGoldKind(data.kind)) return { ok: false as const, hint: "нет такого дела", gold: 0 };
+    const row = await readPawn(sql, userId);
+    const merged = await mergeBookBody(sql, userId, data.pawn.body);
+    const plan = planGoldDeed(data.kind, merged.gold, row?.body?.deaths ?? 0);
+    if (!plan.ok) return { ok: false as const, hint: plan.hint, gold: merged.gold };
+    const fight = await mergeFightIntoPawnBody(sql, userId, merged.body);
+    const body = { ...fight, gold: plan.gold, due: 0, gifts: merged.body.gifts };
+    await writePawn(sql, userId, data.pawn, body);
+    await sql.query(
+      `insert into deed (world_id, user_id, kind, x, y, payload)
+       values ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [WORLD_ID, userId, `gold-${data.kind}`, data.pawn.x, data.pawn.y, JSON.stringify({ gold: plan.gold, delta: plan.delta })],
+    );
+    return { ok: true as const, gold: plan.gold, credit: 0 };
   });
 
 export const writeServiceDeed = createServerFn({ method: "POST" })
@@ -1336,6 +1418,10 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
       if (liveJob) return { ok: false as const, hint: "сначала сними услугу", conflicts: asConflict(), written: [], credit: 0 };
       if (!nextJob || nextJob.by !== userId) return { ok: false as const, hint: "нет услуги", conflicts: [], written: [], credit: 0 };
       if (nextJob.gold < 1) return { ok: false as const, hint: "цена словом", conflicts: [], written: [], credit: 0 };
+      const poster = await readPawn(sql, userId);
+      if (purseOf(poster?.body) < nextJob.gold) {
+        return { ok: false as const, hint: "мало золота", conflicts: [], written: [], credit: 0 };
+      }
       const posted: ServiceJob = { ...nextJob, until: 0 };
       delete posted.take;
       nextTile.service = posted;
@@ -1417,7 +1503,7 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
       const merged = await mergeBookBody(sql, userId, data.pawn.body);
       await writePawn(sql, userId, data.pawn, { ...merged.body, busy: null });
       await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
-      return { ok: true as const, written: [{ x: t.x, y: t.y, ver }], credit: merged.credit };
+      return { ok: true as const, written: [{ x: t.x, y: t.y, ver }], credit: merged.credit, gold: merged.gold };
     }
 
     const upd = await sql.query<{ ver: number }>(
@@ -1463,9 +1549,20 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
     }
 
     const merged = await mergeBookBody(sql, userId, data.pawn.body);
+    let gold = merged.gold;
+    if (data.kind === "service-post") {
+      const pay = nextJob?.gold ?? 0;
+      if (gold < pay) {
+        return { ok: false as const, hint: "мало золота", conflicts: [], written: [], credit: 0, gold };
+      }
+      gold -= pay;
+    } else if (data.kind === "service-cancel") {
+      gold += liveJob?.gold ?? 0;
+    }
     const body = {
       ...merged.body,
-      busy: data.kind === "service-take" ? merged.body.busy : merged.body.busy,
+      gold,
+      busy: merged.body.busy,
     };
     await writePawn(sql, userId, data.pawn, body);
     await sql.query(
@@ -1474,7 +1571,7 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
       [WORLD_ID, userId, data.kind, t.x, t.y, JSON.stringify({ k: liveJob?.kind ?? nextJob?.kind, gold: liveJob?.gold ?? nextJob?.gold })],
     );
     await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
-    return { ok: true as const, written, credit: merged.credit };
+    return { ok: true as const, written, credit: merged.credit, gold };
   });
 
 export const writeVillageDeed = createServerFn({ method: "POST" })
@@ -1502,7 +1599,7 @@ export const writeVillageDeed = createServerFn({ method: "POST" })
     if (!data.tiles.length) {
       const merged = await mergeBookBody(sql, userId, data.pawn.body);
       await writePawn(sql, userId, data.pawn, merged.body);
-      return { ok: true as const, written: [] as { x: number; y: number; ver: number }[], credit: merged.credit };
+      return { ok: true as const, written: [] as { x: number; y: number; ver: number }[], credit: merged.credit, gold: merged.gold };
     }
     const keys = JSON.stringify(data.tiles.map((t) => ({ x: t.x, y: t.y })));
     const curRows = await sql.query<TileRow>(
@@ -1661,7 +1758,7 @@ export const writeVillageDeed = createServerFn({ method: "POST" })
     const merged = await mergeBookBody(sql, userId, data.pawn.body);
     await writePawn(sql, userId, data.pawn, merged.body);
     await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
-    return { ok: true as const, written, credit: merged.credit };
+    return { ok: true as const, written, credit: merged.credit, gold: merged.gold };
   });
 
 export const readStreetNotices = createServerFn({ method: "POST" })
