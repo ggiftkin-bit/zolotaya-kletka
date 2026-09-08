@@ -100,7 +100,7 @@ import { chebyshev, dummyHome, foeById, gearSlot, ghostLiveFoe, leaveChance, mak
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, FOG_LIVE, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
-import { bindBookStore, commitGold, commitHarm, commitOffice, commitService, commitStall, commitVillage, flushBook, lookStreet, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
+import { bindBookStore, commitBag, commitGold, commitHarm, commitOffice, commitService, commitStall, commitVillage, flushBook, lookStreet, markFreshLive, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
 import {
   applyCargoPile,
   canReachStall,
@@ -1003,6 +1003,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       speak("Сыт. Сила капает сама, еда её не копирует.", s.character.x, s.character.y, "сыт", "ok");
       return;
     }
+    const prior = s.character;
     inv[item] -= 1;
     const bonus = s.character.profession === "baker" && item === "bread" ? 8 : 0;
     const satiety = Math.min(100, s.character.satiety + (EAT_SAT[item] ?? 14) + bonus);
@@ -1014,6 +1015,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         { id: ++floaterSeq, x: s.character.x, y: s.character.y, text: "+сытость", tone: "ok" as const },
       ].slice(-10),
     });
+    sealBag("eat", { x: s.character.x, y: s.character.y }, prior, { item });
   },
 
   sellToCaravan: (item, qty) => {
@@ -1260,6 +1262,17 @@ bindBookStore({
 function sealHarm(kind: string, cells: Array<{ x: number; y: number }>, prior?: Character) {
   noteDeed(kind);
   void commitHarm(kind, cells, prior);
+}
+
+function sealBag(
+  kind: "gather" | "dig" | "hunt" | "fish" | "pickup" | "drop" | "chest-put" | "chest-take" | "craft" | "eat" | "spend",
+  cell: { x: number; y: number },
+  prior: Character,
+  extra?: { item?: ItemId; qty?: number; craft?: string; need?: Partial<Record<ItemId, number>> },
+) {
+  void commitBag(kind, cell, prior, extra).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
 }
 
 function catchUpSim(dt: number) {
@@ -1825,6 +1838,7 @@ function finishYard(ax: number, ay: number, bx: number, by: number) {
     floaters: [...s.floaters, { id: ++floaterSeq, x: x0, y: y0, text: `−${wood} ${ITEM_LABEL.wood}`, tone: "ok" as const }].slice(-10),
   });
   noteDeed("fence");
+  sealBag("spend", { x: x0, y: y0 }, s.character, { item: "wood", qty: wood });
   useGame.getState().persist();
 }
 
@@ -1911,6 +1925,10 @@ function upgradeFenceHere(to: "palisade" | "wall") {
       -10,
     ),
   });
+  const spent: ItemId = to === "palisade" ? "wood" : "stone";
+  sealBag("spend", { x: t.x, y: t.y }, s.character, { item: spent, qty: per });
+  noteDeed("fence");
+  useGame.getState().persist();
 }
 
 function makeGateHere() {
@@ -2111,6 +2129,7 @@ function pickupPile() {
   const gold = tile.goldDrop ?? 0;
   const pile = asPile(tile.pile);
   if (pileEmpty(pile) && gold <= 0) return;
+  const prior = s.character;
   let inv = { ...s.character.inventory };
   const bits: string[] = [];
   for (const k of ITEMS) {
@@ -2131,7 +2150,8 @@ function pickupPile() {
     ].slice(-10),
     world: { ...s.world, tiles: s.world.tiles },
   });
-  sealHarm("pile", harmCells(tile), s.character);
+  markFreshLive(useGame.getState());
+  sealBag("pickup", { x: tile.x, y: tile.y }, prior);
 }
 
 function dropItem(item: ItemId, qty: number) {
@@ -2166,7 +2186,8 @@ function dropItem(item: ItemId, qty: number) {
     ].slice(-10),
     world: { ...s.world, tiles: s.world.tiles },
   });
-  sealHarm("pile", harmCells(tile), s.character);
+  markFreshLive(useGame.getState());
+  sealBag("drop", { x: tile.x, y: tile.y }, s.character, { item, qty: n });
 }
 
 function storeItem(item: ItemId, qty: number) {
@@ -2196,6 +2217,8 @@ function storeItem(item: ItemId, qty: number) {
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "в сундук", tone: "ok" as const }].slice(-10),
     world: { ...s.world, tiles: s.world.tiles },
   });
+  markFreshLive(useGame.getState());
+  sealBag("chest-put", { x: tile.x, y: tile.y }, s.character, { item, qty: n });
 }
 
 function takeChest(item: ItemId, qty: number) {
@@ -2220,6 +2243,8 @@ function takeChest(item: ItemId, qty: number) {
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "из сундука", tone: "ok" as const }].slice(-10),
     world: { ...s.world, tiles: s.world.tiles },
   });
+  markFreshLive(useGame.getState());
+  sealBag("chest-take", { x: tile.x, y: tile.y }, s.character, { item, qty: n });
 }
 
 function buildOn(x: number, y: number, kind: BuildingKind) {
@@ -2310,6 +2335,12 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
   const next = { ...c, inventory: pulled.inv, gold: c.gold - cost.gold, energy: Math.max(0, c.energy - 2) };
   const ms = buildMs(kind, next);
   useGame.setState({ world: { ...s.world, tiles: s.world.tiles } });
+  const bagNeed: Partial<Record<ItemId, number>> = {};
+  for (const k of Object.keys(need) as ItemId[]) {
+    const d = (c.inventory[k] ?? 0) - (pulled.inv[k] ?? 0);
+    if (d > 0) bagNeed[k] = d;
+  }
+  if (Object.keys(bagNeed).length) sealBag("spend", { x, y }, c, { need: bagNeed });
   startBusy(
     next,
     makeBusy("build", x, y, Date.now() + ms, { build: kind }),
@@ -2359,6 +2390,10 @@ function buildRoad(x: number, y: number, kind: "dirt" | "stone" | "bridge") {
   }
   const next = { ...c, inventory: inv, energy: Math.max(0, c.energy - 2) };
   const ms = workMs("road", null, next);
+  const bagNeed: Partial<Record<ItemId, number>> = {};
+  if (cost.wood) bagNeed.wood = cost.wood;
+  if (cost.stone) bagNeed.stone = cost.stone;
+  if (Object.keys(bagNeed).length) sealBag("spend", { x, y }, c, { need: bagNeed });
   startBusy(
     next,
     makeBusy("road", x, y, Date.now() + ms, { road: kind }),
@@ -2750,6 +2785,9 @@ function cookHere() {
     log: pushLog(s.log, herb ? "Похлёбка. Сытость. Сила сама капает." : "Подогрел еду. Сытость, не сила."),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "горячее", tone: "ok" as const }].slice(-10),
   });
+  const bagNeed: Partial<Record<ItemId, number>> = { [meal]: 1, wood: 1 };
+  if (herb) bagNeed.herb = 1;
+  sealBag("spend", { x: tile.x, y: tile.y }, s.character, { need: bagNeed });
 }
 
 function craftAxe() {
@@ -3086,7 +3124,8 @@ function resolveGather(s: GameState, c0: Character, tile: NonNullable<ReturnType
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${got} ${ITEM_LABEL[res]}`, tone: "ok" as const }].slice(-10),
   });
   noteDeed(res === "wood" ? "chop" : "gather");
-  useGame.getState().persist();
+  markFreshLive(useGame.getState());
+  sealBag("gather", { x: tile.x, y: tile.y }, c0);
 }
 
 function resolveBuild(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>, kind?: BuildingKind) {
@@ -3148,7 +3187,8 @@ function resolveCraft(s: GameState, c0: Character, tile: NonNullable<ReturnType<
     ),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${def.label}`, tone: "ok" as const }].slice(-10),
   });
-  useGame.getState().persist();
+  markFreshLive(useGame.getState());
+  sealBag("craft", { x: tile.x, y: tile.y }, c0, { craft: def.id });
 }
 
 function resolveRoad(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>, kind?: "dirt" | "stone" | "bridge") {
@@ -3198,7 +3238,8 @@ function resolveDig(s: GameState, c0: Character, tile: NonNullable<ReturnType<ty
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: bits[0]!, tone: "ok" as const }].slice(-10),
   });
   noteDeed("pit");
-  useGame.getState().persist();
+  markFreshLive(useGame.getState());
+  sealBag("dig", { x: tile.x, y: tile.y }, c0);
 }
 
 function resolveFill(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>) {
@@ -3242,7 +3283,8 @@ function resolveHunt(s: GameState, c0: Character, tile: NonNullable<ReturnType<t
       floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "ушёл", tone: "bad" as const }].slice(-10),
     });
     noteDeed("hunt");
-    useGame.getState().persist();
+    markFreshLive(useGame.getState());
+    sealBag("hunt", { x: tile.x, y: tile.y }, c0);
     return;
   }
   const got = spear ? 2 : 1;
@@ -3258,7 +3300,8 @@ function resolveHunt(s: GameState, c0: Character, tile: NonNullable<ReturnType<t
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${got} еда`, tone: "ok" as const }].slice(-10),
   });
   noteDeed("hunt");
-  useGame.getState().persist();
+  markFreshLive(useGame.getState());
+  sealBag("hunt", { x: tile.x, y: tile.y }, c0);
 }
 
 function resolveCatch(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>) {
@@ -3327,7 +3370,8 @@ function resolveFish(s: GameState, c0: Character, tile: NonNullable<ReturnType<t
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${got} рыба`, tone: "ok" as const }].slice(-10),
   });
   noteDeed("fish");
-  useGame.getState().persist();
+  markFreshLive(useGame.getState());
+  sealBag("fish", { x: tile.x, y: tile.y }, c0);
 }
 
 function cancelBusy() {
@@ -4783,6 +4827,8 @@ function sowField() {
     log: pushLog(s.log, "Засеял поле. Всходы сразу."),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "посев", tone: "ok" as const }].slice(-10),
   });
+  sealBag("spend", { x: tile.x, y: tile.y }, s.character, { item: FIELD_CROP, qty: 1 });
+  useGame.getState().persist();
 }
 
 function drinkTonic() {
@@ -4802,6 +4848,7 @@ function drinkTonic() {
     log: pushLog(s.log, `Настой. Раны ${Math.round(hp)}.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: s.character.x, y: s.character.y, text: "+раны", tone: "ok" as const }].slice(-10),
   });
+  sealBag("spend", { x: s.character.x, y: s.character.y }, s.character, { item: "tonic", qty: 1 });
 }
 
 function buyFromShop(item: ItemId, qty: number) {
@@ -5428,6 +5475,8 @@ function feedHere() {
     log: pushLog(s.log, "Положил корм в ясли. На пару дней."),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "корм", tone: "ok" as const }].slice(-10),
   });
+  sealBag("spend", { x: tile.x, y: tile.y }, s.character, { item: feed, qty: 1 });
+  useGame.getState().persist();
 }
 
 function excavateHere() {

@@ -17,15 +17,17 @@ import {
   type BookFight,
   type WorldClock,
 } from "./book";
-import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, readStreetNotices, strikeBookFight, writeGoldDeed, writeHarmDeed, writeOfficeDeed, writeServiceDeed, writeStallDeed, writeVillageDeed, writeWorldDeed } from "./book-api";
+import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, readStreetNotices, strikeBookFight, writeBagDeed, writeGoldDeed, writeHarmDeed, writeOfficeDeed, writeServiceDeed, writeStallDeed, writeVillageDeed, writeWorldDeed } from "./book-api";
 import { rememberLiveFoe } from "./fight";
 import { makeJobs, makeTrader } from "./economy";
 import { fillStock } from "./office";
 import { TICKS_PER_DAY } from "./constants";
 import { settleOldCounts } from "./mount";
 import { loadGame, saveGame, type SlimTile } from "./save";
-import type { Character, GameState, GiftId, ItemId, OtherPawn, Travel } from "./types";
+import type { Character, GameState, GiftId, Inventory, ItemId, OtherPawn, Travel } from "./types";
 import type { GoldKind } from "./gold";
+import type { BagKind } from "./bag";
+import { bagOf, bagsEqual } from "./bag";
 import { spawnPoint } from "./worldgen";
 
 type StoreSlice = {
@@ -87,6 +89,19 @@ function applyGold(n: number | undefined) {
   const gold = Math.max(0, Math.floor(n));
   if (c.gold === gold) return;
   store.set({ character: { ...c, gold } });
+}
+
+function applyBag(inv: Inventory | undefined) {
+  if (!inv || !store) return;
+  const c = store.get().character;
+  const next = bagOf({ inventory: inv });
+  if (bagsEqual(c.inventory, next)) return;
+  store.set({ character: { ...c, inventory: next } });
+}
+
+function applyOwned(res: { credit?: number; gold?: number; inventory?: Inventory }) {
+  applyCredit(res.credit, res.gold);
+  applyBag(res.inventory);
 }
 
 function applyCredit(n: number | undefined, gold?: number) {
@@ -315,7 +330,7 @@ export async function flushBook() {
       }
       for (const t of tiles) lastSlim.set(t.k, t.sig);
       store.set({ world: { ...s.world, ver } });
-      applyCredit(res.credit, "gold" in res ? (res as { gold?: number }).gold : undefined);
+      applyOwned(res);
     } else {
       const world = maskLiveFog(applyLive(store.get().world, res.conflicts), store.get().character.x, store.get().character.y);
       store.set({ world });
@@ -370,7 +385,7 @@ export async function commitHarm(kind: string, cells: Array<{ x: number; y: numb
       }
       for (const t of tiles) lastSlim.set(t.k, t.sig);
       store.set({ world: { ...store.get().world, ver } });
-      applyCredit(res.credit, "gold" in res ? (res as { gold?: number }).gold : undefined);
+      applyOwned(res);
       return true;
     }
     let world = store.get().world;
@@ -425,7 +440,7 @@ export async function commitStall(kind: "stall-put" | "stall-drop" | "stall-take
       }
       lastSlim.set(pack.k, pack.sig);
       store.set({ world: { ...store.get().world, ver } });
-      applyCredit(res.credit, "gold" in res ? (res as { gold?: number }).gold : undefined);
+      applyOwned(res);
       return true;
     }
     let world = store.get().world;
@@ -468,7 +483,7 @@ export async function commitOffice(
     if (!res) return false;
     if (res.ok) {
       store.set({ stock: fillStock(res.stock) });
-      applyCredit(res.credit, "gold" in res ? (res as { gold?: number }).gold : undefined);
+      applyOwned(res);
       return true;
     }
     const patch: Partial<GameState> = {};
@@ -499,7 +514,7 @@ export async function commitGold(kind: GoldKind, prior?: Character) {
     });
     if (!res) return false;
     if (res.ok) {
-      applyGold(res.gold);
+      applyOwned(res);
       return true;
     }
     if (prior) store.set({ character: prior });
@@ -509,6 +524,75 @@ export async function commitGold(kind: GoldKind, prior?: Character) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";
     if (msg !== "Unauthorized") console.warn("[книга] золото", err);
+    if (prior) store.set({ character: prior });
+    return false;
+  }
+}
+
+/** Сумка: клетка и фишка сразу. Книга считает ношу, не стол. */
+export async function commitBag(
+  kind: BagKind,
+  cell: { x: number; y: number },
+  prior?: Character,
+  extra?: { item?: ItemId; qty?: number; craft?: string; need?: Partial<Record<ItemId, number>> },
+) {
+  if (!store) return false;
+  const s = store.get();
+  if (s.started) saveGame(s);
+  if (!s.bookOn || !s.started) return true;
+  const selfId = selfIdOf();
+  const t = s.world.tiles[cell.y * s.world.width + cell.x];
+  const slim = t ? wireSlim(slimOf(t), selfId, "publish") : { b: "plains" as const };
+  const sig = t ? JSON.stringify(slimOf(t)) : "";
+  const pack = {
+    x: cell.x,
+    y: cell.y,
+    slim,
+    ver: sVer(s, cell.x, cell.y),
+    k: keyOf(cell.x, cell.y),
+    sig,
+  };
+  const writesTile = kind !== "eat" && kind !== "spend";
+  if (writesTile) lastSlim.set(pack.k, pack.sig);
+  try {
+    const res = await writeBagDeed({
+      data: {
+        kind,
+        tile: { x: pack.x, y: pack.y, slim: pack.slim, ver: pack.ver },
+        pawn: pawnPayload(s.character),
+        item: extra?.item,
+        qty: extra?.qty,
+        craft: extra?.craft,
+        need: extra?.need,
+      },
+    });
+    if (!res) return false;
+    if (res.ok) {
+      const ver = (store.get().world.ver ?? []).slice();
+      for (const w of res.written) {
+        ver[w.y * s.world.width + w.x] = w.ver;
+      }
+      if (writesTile) {
+        lastSlim.set(pack.k, pack.sig);
+        store.set({ world: { ...store.get().world, ver } });
+        rememberLive(store.get());
+      }
+      applyOwned(res);
+      return true;
+    }
+    let world = store.get().world;
+    if (res.conflicts.length) world = applyLive(world, localizePackets(res.conflicts));
+    world = maskLiveFog(world, store.get().character.x, store.get().character.y);
+    const patch: Partial<GameState> = { world };
+    if (prior) patch.character = prior;
+    store.set(patch);
+    rememberLive(store.get());
+    store.speak?.(res.hint || "клетка уже другая", s.character.x, s.character.y, "нет", "bad");
+    saveGame(store.get());
+    return false;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg !== "Unauthorized") console.warn("[книга] сумка", err);
     if (prior) store.set({ character: prior });
     return false;
   }
@@ -565,7 +649,7 @@ export async function commitService(
       lastSlim.set(pack.k, pack.sig);
       for (const e of extra) lastSlim.set(e.k, e.sig);
       store.set({ world: { ...store.get().world, ver } });
-      applyCredit(res.credit, "gold" in res ? (res as { gold?: number }).gold : undefined);
+      applyOwned(res);
       return true;
     }
     let world = store.get().world;
@@ -627,7 +711,7 @@ export async function commitVillage(
       }
       for (const t of tiles) lastSlim.set(t.k, t.sig);
       store.set({ world: { ...store.get().world, ver } });
-      applyCredit(res.credit, "gold" in res ? (res as { gold?: number }).gold : undefined);
+      applyOwned(res);
       return true;
     }
     let world = store.get().world;
@@ -706,7 +790,7 @@ export async function beatBook(_force = false) {
       stock: res.stock ? fillStock(res.stock) : store.get().stock,
       ...applyClock(res.clock, live),
     });
-    applyCredit(res.credit, "gold" in res ? (res as { gold?: number }).gold : undefined);
+    applyOwned(res);
     rememberLive(store.get());
     if (res.fight) applyIncomingFight(res.fight, store.get().selfId);
     else if (store.get().meet?.live) {
