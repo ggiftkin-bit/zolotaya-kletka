@@ -78,6 +78,8 @@ export function GameApp() {
 
   useEffect(() => {
     if (!started) return;
+    useGame.getState().catchUp();
+    void pullSpot(true);
     const beat = () => {
       void pullSpot();
     };
@@ -415,6 +417,10 @@ export function GameApp() {
     };
     let debounce = 0;
     const persistNow = () => useGame.getState().persist();
+    const sealAway = () => {
+      persistNow();
+      if (useGame.getState().started) void pullSpot(true);
+    };
     const unsub = useGame.subscribe((s, prev) => {
       if (!s.started) return;
       if (
@@ -436,13 +442,13 @@ export function GameApp() {
       if (useGame.getState().started) persistNow();
     }, 20000);
     const onHide = () => {
-      if (document.visibilityState === "hidden") persistNow();
+      if (document.visibilityState === "hidden") sealAway();
       else useGame.getState().catchUp();
     };
     const onShow = () => useGame.getState().catchUp();
     document.addEventListener("visibilitychange", onHide);
-    window.addEventListener("pagehide", persistNow);
-    window.addEventListener("beforeunload", persistNow);
+    window.addEventListener("pagehide", sealAway);
+    window.addEventListener("beforeunload", sealAway);
     window.addEventListener("pageshow", onShow);
     window.addEventListener("focus", onShow);
     if ("serviceWorker" in navigator) {
@@ -453,8 +459,8 @@ export function GameApp() {
       window.clearInterval(id);
       window.clearTimeout(debounce);
       document.removeEventListener("visibilitychange", onHide);
-      window.removeEventListener("pagehide", persistNow);
-      window.removeEventListener("beforeunload", persistNow);
+      window.removeEventListener("pagehide", sealAway);
+      window.removeEventListener("beforeunload", sealAway);
       window.removeEventListener("pageshow", onShow);
       window.removeEventListener("focus", onShow);
     };

@@ -354,6 +354,7 @@ function walkTo(x: number, y: number) {
     if (ok) scheduleNotice("walk", "Пришёл", `Ход ${Math.ceil(total)} с — на месте.`, t0 + wallMs);
   });
   useGame.getState().persist();
+  void pullSpot();
 }
 
 function ownedCount(world: GameState["world"]) {

@@ -10,6 +10,7 @@ import {
   packPawn,
   rememberFog,
   slimOf,
+  travelOf,
   unpackPawn,
   wireSlim,
   WORLD_SEED,
@@ -23,12 +24,13 @@ import { fillStock } from "./office";
 import { TICKS_PER_DAY } from "./constants";
 import { settleOldCounts } from "./mount";
 import { loadGame, saveGame, type SlimTile } from "./save";
-import type { Character, GameState, GiftId, ItemId, OtherPawn } from "./types";
+import type { Character, GameState, GiftId, ItemId, OtherPawn, Travel } from "./types";
 import { spawnPoint } from "./worldgen";
 
 type StoreSlice = {
   get: () => GameState & {
     persist: () => void;
+    catchUp: () => void;
   };
   set: (p: Partial<GameState>) => void;
   speak?: (line: string, x: number, y: number, short?: string, tone?: "ok" | "bad" | "gold") => void;
@@ -142,8 +144,31 @@ function pawnPayload(c: Character) {
     color: c.color,
     x: c.x,
     y: c.y,
-    body: packPawn(c),
+    body: packPawn(c, store?.get().travel ?? null),
   };
+}
+
+function travelFromPocket(pocket: ReturnType<typeof loadGame>, x: number, y: number): Travel | null {
+  const t = pocket?.travel;
+  if (!t || !t.path?.length) return null;
+  const pc = pocket?.character;
+  if (!pc || pc.x !== x || pc.y !== y) return null;
+  return {
+    path: t.path,
+    index: t.index ?? 0,
+    elapsed: t.elapsed ?? 0,
+    total: t.total ?? 0,
+    t0: t.t0 ?? Date.now(),
+  };
+}
+
+function keepPocketBusy(character: Character, pocket: ReturnType<typeof loadGame>): Character {
+  const pb = pocket?.character?.busy;
+  if (!pb || !(pb.until > Date.now())) return character;
+  const pc = pocket?.character;
+  if (!pc || pc.x !== character.x || pc.y !== character.y) return character;
+  if (character.busy && character.busy.until >= pb.until) return character;
+  return { ...character, busy: pb };
 }
 
 export async function openBookFromServer(): Promise<boolean> {
@@ -191,8 +216,12 @@ export async function openBookFromServer(): Promise<boolean> {
       if (days > 0 && character.wanted > 0) {
         character = { ...character, wanted: Math.max(0, character.wanted - days) };
       }
+      const travel = travelOf(shot.pawn.body) ?? travelFromPocket(pocket, character.x, character.y);
+      character = keepPocketBusy(character, pocket);
       patch.character = character;
       patch.started = true;
+      patch.travel = travel;
+      patch.preview = travel?.path ?? null;
       if (mig.cells.length) {
         store.set(patch);
         void commitHarm("wagon", mig.cells, character);
@@ -208,8 +237,11 @@ export async function openBookFromServer(): Promise<boolean> {
       };
       const mig = settleOldCounts(world, character);
       character = mig.character;
+      const travel = pocket.travel ?? null;
       patch.character = character;
       patch.started = true;
+      patch.travel = travel;
+      patch.preview = travel?.path ?? null;
       if (mig.cells.length) {
         store.set(patch);
         void commitHarm("wagon", mig.cells, character);
@@ -220,7 +252,11 @@ export async function openBookFromServer(): Promise<boolean> {
     rememberLive(next);
     lastCell = keyOf(next.character.x, next.character.y);
     if (shot.fight) applyIncomingFight(shot.fight, next.selfId);
-    if (next.started) void beatBook(true);
+    if (next.started) {
+      next.catchUp();
+      next.persist();
+      void beatBook(true);
+    }
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";

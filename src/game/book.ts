@@ -2,7 +2,7 @@ import { ENERGY_MAX, splitBodyWater } from "./pace";
 import { emptySkills } from "./economy";
 import { MAP_H, MAP_W, zeroInv } from "./constants";
 import { fatTile, slimTile, type SlimTile } from "./save";
-import type { Busy, Character, FenceKind, GiftId, Inventory, ItemId, OtherPawn, Season, Skills, Tile, Transport, Weather, World } from "./types";
+import type { Busy, Character, FenceKind, GiftId, Inventory, ItemId, OtherPawn, Season, Skills, Tile, Transport, Travel, Weather, World } from "./types";
 
 export type { OtherPawn };
 
@@ -163,6 +163,8 @@ export type PawnBody = {
   stillUntil: number;
   resting: boolean;
   busy: Busy | null;
+  /** Ход по часам. Книга держит путь, чтобы закрытый стол всё равно довёл фишку. */
+  travel?: Travel | null;
   wear: Character["wear"];
   bagWear?: Character["bagWear"];
   pacts: Record<string, "friend" | "feud">;
@@ -336,7 +338,7 @@ export function darkWorld(seed = WORLD_SEED): World {
   };
 }
 
-export function packPawn(c: Character): PawnBody {
+export function packPawn(c: Character, travel: Travel | null = null): PawnBody {
   return {
     gold: c.gold,
     inventory: c.inventory,
@@ -370,12 +372,29 @@ export function packPawn(c: Character): PawnBody {
     stillUntil: c.stillUntil,
     resting: c.resting,
     busy: c.busy,
+    travel,
     wear: c.wear ?? {},
     bagWear: c.bagWear ?? {},
     pacts: c.pacts,
     village: c.village,
     gifts: c.gifts ?? {},
   };
+}
+
+/** Путь из тела книги. Пустой / битый — нет хода. */
+export function travelOf(body: PawnBody | null | undefined): Travel | null {
+  const t = body?.travel;
+  if (!t || !Array.isArray(t.path) || t.path.length === 0) return null;
+  const path = t.path.filter(
+    (p) => p && typeof p.x === "number" && typeof p.y === "number" && typeof p.cost === "number" && p.cost >= 0,
+  );
+  if (!path.length) return null;
+  const index = Math.max(0, Math.min(path.length, Math.floor(Number(t.index) || 0)));
+  const elapsed = typeof t.elapsed === "number" && t.elapsed >= 0 ? t.elapsed : 0;
+  const total =
+    typeof t.total === "number" && t.total >= 0 ? t.total : path.reduce((n, p) => n + (p.cost || 0), 0);
+  const t0 = typeof t.t0 === "number" && t.t0 > 0 ? t.t0 : Date.now();
+  return { path, index, elapsed, total, t0 };
 }
 
 export function unpackPawn(row: PawnRow): Character {
