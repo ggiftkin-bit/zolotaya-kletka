@@ -153,11 +153,14 @@ export type ItemId =
   | "helm"
   | "brick"
   | "grain"
-  | "flour";
+  | "flour"
+  | "steel_axe"
+  | "steel_pick"
+  | "steel_shovel";
 
 export type GiftId = "gift_pin" | "gift_mug" | "gift_nft";
 
-export type WearKind = "axe" | "pick" | "spear" | "shovel" | "club" | "knife";
+export type WearKind = "axe" | "pick" | "spear" | "shovel" | "club" | "knife" | "steel_axe" | "steel_pick" | "steel_shovel";
 
 export type AnimalKind = "hare" | "deer" | "horse" | "cow";
 

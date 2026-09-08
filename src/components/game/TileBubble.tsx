@@ -15,7 +15,7 @@ import { ownNearby, ownsMount, ridingHorse } from "@/game/mount";
 import { canDigReason, digLine, fillPay } from "@/game/pit";
 import { useGame, meetIsIgnored } from "@/game/store";
 import type { BuildingKind, ItemId, Tile } from "@/game/types";
-import { burnableFence, CLAD_STONE, isRoof, MATTER_LABEL, stoneFence } from "@/game/work";
+import { burnableFence, CLAD_STONE, isRoof, isShovelHand, MATTER_LABEL, stoneFence } from "@/game/work";
 import { isWalkable, tileAt } from "@/game/worldgen";
 import { ENERGY_MAX, formatWait, nextEnergyIn } from "@/game/pace";
 import { Button } from "@/components/ui/button";
@@ -510,12 +510,12 @@ function PickPane({
       {here && !tile.pit && canDigReason(g.world, tile, g.character.hand) == null && (
         <Sticker
           title="Копать"
-          sub={digLine(tile)}
+          sub={digLine(tile, g.character.hand)}
           ico={<Ico i={ICO.gather} className="size-11 overflow-hidden rounded-[12px]" />}
           onClick={() => g.excavateHere()}
         />
       )}
-      {here && !tile.pit && g.character.hand === "shovel" && canDigReason(g.world, tile, g.character.hand) && (
+      {here && !tile.pit && isShovelHand(g.character.hand) && canDigReason(g.world, tile, g.character.hand) && (
         <p className="text-[13px] text-muted-foreground">{canDigReason(g.world, tile, g.character.hand)}</p>
       )}
       {near && tile.pit && (

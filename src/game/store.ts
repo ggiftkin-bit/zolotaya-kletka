@@ -47,6 +47,7 @@ import { stampVillage, leaveVillage, hamletTitle, hasOwnYard, isOutsideYard, set
 import { cargoWeight, loadRatio, pailKg, stepEnergy, wornKg } from "./travel";
 import { atBench, CRAFTS, EAT_ORDER, EAT_SAT, PROF_BLURB, type CraftKind } from "./craft";
 import { markDepleted, tickGrow, PIT_HEAL_WEEKS, REGROW_WAIT } from "./grow";
+import { planGather } from "./bag";
 import { fillStock, planBuyFromStock, planDonate, planGift, planSellToStock, seedStock, sellsToday, SELL_DAY_CAP, SELL_DAY_HINT, worldDayOf } from "./office";
 import { planGoldDeed } from "./gold";
 import { canParkOn, claimMount, mountAt, MOUNT_LABEL, ownNearby, ownsMount, parkNear, ridingHorse, ridingKind, settleOldCounts, stripRidden, takeOwnMount, type MountKind } from "./mount";
@@ -67,6 +68,9 @@ import {
   defaultMatter,
   isRoof,
   isWearId,
+  isAxeHand,
+  isPickHand,
+  isShovelHand,
   makeBusy,
   nearCamp,
   remainingWear,
@@ -1775,8 +1779,8 @@ function gatherHere() {
   if (!needStrength(s.character, cost, here.x, here.y)) return;
   let c = { ...s.character, energy: Math.max(0, s.character.energy - cost) };
   let tool: WearId | null = null;
-  if (kind === "chop" && c.hand === "axe") tool = "axe";
-  if (kind === "mine" && c.hand === "pick") tool = "pick";
+  if (kind === "chop" && isAxeHand(c.hand) && isWearId(c.hand)) tool = c.hand;
+  if (kind === "mine" && isPickHand(c.hand) && isWearId(c.hand)) tool = c.hand;
   const worn = takeWear(c, tool);
   c = worn.c;
   const ms = workMs(kind, null, c);
@@ -3129,7 +3133,8 @@ function resolveBusy() {
 
 function resolveGather(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>, item?: ItemId) {
   const res = item ?? tile.resource;
-  if (!res || tile.resource !== res || tile.amount <= 0) {
+  const plan = planGather(tile, { profession: c0.profession, hand: c0.hand }, s.phase === "night");
+  if (!res || tile.resource !== res || !plan.ok || plan.item !== res) {
     useGame.setState({
       character: c0,
       log: pushLog(s.log, "уже нет"),
@@ -3137,14 +3142,8 @@ function resolveGather(s: GameState, c0: Character, tile: NonNullable<ReturnType
     });
     return;
   }
-  let got = Math.min(GATHER_YIELD[res] || 1, tile.amount);
+  const got = plan.got;
   const match = PROFESSION_BIOME[c0.profession]?.includes(tile.biome);
-  if (match) got = Math.min(tile.amount, got + 1);
-  if (c0.hand === "axe" && res === "wood") got = Math.min(tile.amount, got + 1);
-  if (c0.hand === "pick" && (res === "stone" || res === "ore" || res === "crystal")) got = Math.min(tile.amount, got + 1);
-  if (res === "wood" && c0.hand !== "axe") got = Math.max(1, Math.floor(got * 0.4));
-  if ((res === "stone" || res === "ore") && c0.hand !== "pick") got = Math.max(1, Math.floor(got * 0.4));
-  if (s.phase === "night") got = Math.max(1, Math.floor(got * 0.5));
   tile.amount -= got;
   if (tile.amount <= 0) markDepleted(tile);
   else if (res === "herb") tile.regen = Math.max(tile.regen ?? 0, REGROW_WAIT.herb ?? 2);
@@ -3209,8 +3208,12 @@ function resolveCraft(s: GameState, c0: Character, tile: NonNullable<ReturnType<
   const given = giveOrPile(pulled.inv, c0.transport, tile, def.out, def.n);
   let hand = c0.hand;
   let wear = { ...(c0.wear ?? {}) };
-  const toolOut = def.out === "axe" || def.out === "pick" || def.out === "spear" || def.out === "rope" || def.out === "bucket" || def.out === "shovel" || def.out === "rod" || def.out === "club" || def.out === "knife";
-  if (toolOut && !c0.hand && (given.inv[def.out] ?? 0) > 0) {
+  if (hand && (given.inv[hand] ?? 0) <= 0) {
+    if (isWearId(hand)) delete wear[hand];
+    hand = null;
+  }
+  const toolOut = (TOOL_ITEMS as readonly string[]).includes(def.out);
+  if (toolOut && !hand && (given.inv[def.out] ?? 0) > 0) {
     hand = def.out;
     if (isWearId(def.out)) wear[def.out] = TOOL_LIFE[def.out];
   }
@@ -5551,7 +5554,7 @@ function excavateHere() {
   }
   if (!needStrength(s.character, 2, tile.x, tile.y)) return;
   let c = { ...s.character, energy: Math.max(0, s.character.energy - 2) };
-  const worn = takeWear(c, "shovel");
+  const worn = takeWear(c, isWearId(c.hand) && isShovelHand(c.hand) ? c.hand : "shovel");
   c = worn.c;
   const ms = workMs("dig", null, c);
   startBusy(c, makeBusy("dig", tile.x, tile.y, Date.now() + ms), `Копаю · ${Math.ceil(ms / 1000)} с.`, tile.x, tile.y, "копаю");
@@ -5578,7 +5581,7 @@ function fillPitHere() {
     speak("Засыпают рядом.", tile.x, tile.y, "подойди", "bad");
     return;
   }
-  if (s.character.hand !== "shovel") {
+  if (!isShovelHand(s.character.hand)) {
     speak("нужна лопата", tile.x, tile.y, "нужна лопата", "bad");
     return;
   }
@@ -5597,7 +5600,7 @@ function fillPitHere() {
   }
   const inv = takePaid({ ...s.character.inventory }, pay);
   let c = { ...s.character, inventory: inv, energy: Math.max(0, s.character.energy - 1) };
-  const worn = takeWear(c, "shovel");
+  const worn = takeWear(c, isWearId(c.hand) && isShovelHand(c.hand) ? c.hand : "shovel");
   c = worn.c;
   const ms = workMs("fill", null, c);
   startBusy(c, makeBusy("fill", tile.x, tile.y, Date.now() + ms), `Засыпаю · ${Math.ceil(ms / 1000)} с.`, tile.x, tile.y, "засыпаю");

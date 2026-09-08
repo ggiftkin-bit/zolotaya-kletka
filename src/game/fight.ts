@@ -268,9 +268,9 @@ export function handMult(hand: ItemId | null, first: boolean, atYard: boolean, n
   if (hand === "spear") return 1.25 * (first ? 1.1 : 1);
   if (hand === "club") return 1.1;
   if (hand === "knife") return 1.15 * (night ? 1.05 : 1);
-  if (hand === "axe") return 1.05 * (atYard ? 1.1 : 1);
-  if (hand === "pick") return 0.9;
-  if (hand === "shovel") return 0.75;
+  if (hand === "axe" || hand === "steel_axe") return 1.05 * (atYard ? 1.1 : 1);
+  if (hand === "pick" || hand === "steel_pick") return 0.9;
+  if (hand === "shovel" || hand === "steel_shovel") return 0.75;
   if (hand === "rope" || hand === "rod" || hand === "bucket") return 0.65;
   return 0.55;
 }

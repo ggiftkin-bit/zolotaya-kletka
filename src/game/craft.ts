@@ -1,6 +1,6 @@
 import type { ItemId, Profession, Tile } from "./types";
 
-export type CraftKind = "coal" | "plank" | "bar" | "axe" | "pick" | "bread" | "smoked" | "tonic" | "rope" | "bucket" | "spear" | "shovel" | "rod" | "wheel" | "lock" | "club" | "knife" | "board_shield" | "bar_shield" | "wadded" | "helm" | "brick" | "flour";
+export type CraftKind = "coal" | "plank" | "bar" | "axe" | "pick" | "bread" | "smoked" | "tonic" | "rope" | "bucket" | "spear" | "shovel" | "rod" | "wheel" | "lock" | "club" | "knife" | "board_shield" | "bar_shield" | "wadded" | "helm" | "brick" | "flour" | "steel_axe" | "steel_pick" | "steel_shovel";
 
 /** mill — не здание: дом или печь. */
 export type BenchId = "home" | "bench" | "forge" | "oven" | "smoke" | "herbs" | "coalpit" | "workshop" | "mill";
@@ -24,6 +24,9 @@ export const CRAFTS: CraftDef[] = [
   { id: "bar", out: "bar", n: 1, need: { ore: 1, coal: 2 }, who: "smith", bench: "forge", energy: 2, label: "слиток", hint: "руда + 2 угля · кузнец · горн. Сдать 4 золота" },
   { id: "axe", out: "axe", n: 1, need: { bar: 1, wood: 2 }, who: "smith", bench: "forge", energy: 2, label: "топор", hint: "слиток + 2 дерева · кузнец. Сдать 4, купить 14" },
   { id: "pick", out: "pick", n: 1, need: { bar: 1, wood: 2 }, who: "smith", bench: "forge", energy: 2, label: "кирка", hint: "слиток + 2 дерева · кузнец. Камень и руда" },
+  { id: "steel_axe", out: "steel_axe", n: 1, need: { bar: 1, axe: 1 }, who: "smith", bench: "forge", energy: 2, label: "топор кованый", hint: "слиток + топор · кузнец · горн. В лесу +1 к топору" },
+  { id: "steel_pick", out: "steel_pick", n: 1, need: { bar: 1, pick: 1 }, who: "smith", bench: "forge", energy: 2, label: "кирка кованая", hint: "слиток + кирка · кузнец · горн. Камень и руда +1" },
+  { id: "steel_shovel", out: "steel_shovel", n: 1, need: { bar: 1, shovel: 1 }, who: "smith", bench: "forge", energy: 2, label: "лопата кованая", hint: "слиток + лопата · кузнец · горн. Песок и глина +1" },
   { id: "lock", out: "lock", n: 1, need: { bar: 1 }, who: "smith", bench: "forge", energy: 2, label: "замок", hint: "слиток · кузнец · горн. На калитку или сундук" },
   { id: "bread", out: "bread", n: 1, need: { flour: 2 }, who: "baker", bench: "oven", energy: 1, label: "хлеб", hint: "2 муки · пекарь · печь. Сдать 2 золота" },
   { id: "flour", out: "flour", n: 1, need: { grain: 2 }, who: "any", bench: "mill", energy: 1, label: "мука", hint: "2 зерна → 1 мука · любой · дом или печь" },
@@ -51,7 +54,7 @@ export const PROF_BLURB: Record<Profession, string> = {
   farmer: "Поле даёт зерно. Засев — 1 зерно. Верёвку дома сколотит любой.",
   baker: "Печь: 2 муки → хлеб. Сдать 2 золота. Мука — 2 зерна, любой дома или у печи.",
   carpenter: "Верстак: доска, колесо, щит тесовый. Телега — 2 колеса, 4 дерева и слиток. В сумку не кладётся.",
-  smith: "Горн: руда+2 угля → слиток, топор, кирка, замок, нож, шлем, щит кованый. Замок — на калитку или сундук. Свой открывается сам.",
+  smith: "Горн: руда+2 угля → слиток, топор, кирка, замок, нож, шлем, щит кованый. Кованый набор: слиток + топор / кирка / лопата. Лавка набор не берёт. Замок — на калитку или сундук. Свой открывается сам.",
   trader: "Прилавок у калитки. Курс как у тракта. Купчина: +1 золото к пачке сырья.",
   healer: "Стол трав: 3 травы → настой. Сдать 3 золота.",
   hireling: "Башня. Вахта. Копьё дома сколотит любой.",

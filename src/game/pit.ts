@@ -1,6 +1,7 @@
 import { CELL_GONE } from "./bag";
 import { isForeignYard } from "./crime";
 import type { Inventory, ItemId, Tile, World } from "./types";
+import { isShovelHand } from "./work";
 import { tileAt } from "./worldgen";
 
 export { giveOrPile } from "./pile";
@@ -30,7 +31,7 @@ export function digYield(tile: Tile): { item: ItemId; got: number } | null {
 }
 
 function digRefuse(tile: Tile, hand: ItemId | null): string | null {
-  if (hand !== "shovel") return "нужна лопата";
+  if (!isShovelHand(hand)) return "нужна лопата";
   if (tile.pit) return CELL_GONE;
   if (tile.commons) return "поляну не копают";
   if (tile.road !== "none") return "тракт не копают";
@@ -50,13 +51,16 @@ export function planDig(
   if (why) return { ok: false, hint: why };
   const y = digYield(tile);
   if (!y) return { ok: false, hint: "здесь лопатой не копают" };
-  return { ok: true, ...y };
+  const got = hand === "steel_shovel" ? y.got + 1 : y.got;
+  return { ok: true, item: y.item, got };
 }
 
-export function digLine(tile: Tile): string {
+export function digLine(tile: Tile, hand?: ItemId | null): string {
   const y = digYield(tile);
   if (!y) return "яма";
-  return y.got === 1 ? `1 ${y.item === "sand" ? "песок" : "глина"} · яма` : `${y.got} глины · яма`;
+  const got = hand === "steel_shovel" ? y.got + 1 : y.got;
+  if (y.item === "sand") return `${got} песок · яма`;
+  return got === 1 ? `1 глина · яма` : `${got} глины · яма`;
 }
 
 export function canDigReason(world: World, tile: Tile, hand: ItemId | null): string | null {

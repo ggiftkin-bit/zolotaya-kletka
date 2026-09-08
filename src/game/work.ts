@@ -40,6 +40,9 @@ export const TOOL_LIFE = {
   shovel: 80,
   club: 80,
   knife: 50,
+  steel_axe: 160,
+  steel_pick: 120,
+  steel_shovel: 80,
 } as const;
 
 export type WearId = keyof typeof TOOL_LIFE;
@@ -51,7 +54,22 @@ export const TOOL_BREAK: Record<WearId, string> = {
   shovel: "лопата кончилась",
   club: "дубина кончилась",
   knife: "нож кончился",
+  steel_axe: "топор кованый кончился",
+  steel_pick: "кирка кованая кончилась",
+  steel_shovel: "лопата кованая кончилась",
 };
+
+export function isAxeHand(hand: string | null | undefined): boolean {
+  return hand === "axe" || hand === "steel_axe";
+}
+
+export function isPickHand(hand: string | null | undefined): boolean {
+  return hand === "pick" || hand === "steel_pick";
+}
+
+export function isShovelHand(hand: string | null | undefined): boolean {
+  return hand === "shovel" || hand === "steel_shovel";
+}
 
 export const CLAD_STONE = 16;
 
@@ -101,8 +119,8 @@ export function workMs(kind: BusyKind, herdKind: string | null, c: Character): n
   if (kind === "hunt") sec = herdKind === "deer" ? 45 : 25;
   if (kind === "catch") sec = 40;
   if (kind === "fish") sec = 35;
-  if (kind === "chop") sec = c.hand === "axe" ? 12 : 20;
-  if (kind === "mine") sec = c.hand === "pick" ? 14 : 22;
+  if (kind === "chop") sec = isAxeHand(c.hand) ? 12 : 20;
+  if (kind === "mine") sec = isPickHand(c.hand) ? 14 : 22;
   if (kind === "forage") sec = 7;
   if (kind === "dig") sec = 18;
   if (kind === "fill") sec = 14;
@@ -172,7 +190,7 @@ export function remainingWear(c: Character, id: WearId): number {
 }
 
 export function isWearId(id: string | null | undefined): id is WearId {
-  return id === "axe" || id === "pick" || id === "spear" || id === "shovel" || id === "club" || id === "knife";
+  return !!id && Object.prototype.hasOwnProperty.call(TOOL_LIFE, id);
 }
 
 /** Минус одно использование в начале дела. На нуле вещь пропадает. Удар с руки. */

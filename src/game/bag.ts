@@ -1,6 +1,7 @@
 import { CAPACITY, FIELD_CROP, GATHER_YIELD, ITEMS, ITEM_LABEL, ITEM_WEIGHT, PROFESSION_BIOME, zeroInv } from "./constants";
 import { canDoCraft, CRAFTS, EAT_ORDER, EAT_SAT, type CraftKind } from "./craft";
 import { cargoWeight } from "./travel";
+import { isAxeHand, isPickHand } from "./work";
 import type { Inventory, ItemId, Profession, Tile, Transport } from "./types";
 
 /** Первая запись фишки. Не мешок с клиента. */
@@ -114,10 +115,12 @@ export function planGather(
   let got = Math.min(GATHER_YIELD[res] || 1, tile.amount);
   const match = PROFESSION_BIOME[pawn.profession]?.includes(tile.biome);
   if (match) got = Math.min(tile.amount, got + 1);
-  if (pawn.hand === "axe" && res === "wood") got = Math.min(tile.amount, got + 1);
-  if (pawn.hand === "pick" && (res === "stone" || res === "ore" || res === "crystal")) got = Math.min(tile.amount, got + 1);
-  if (res === "wood" && pawn.hand !== "axe") got = Math.max(1, Math.floor(got * 0.4));
-  if ((res === "stone" || res === "ore") && pawn.hand !== "pick") got = Math.max(1, Math.floor(got * 0.4));
+  if (isAxeHand(pawn.hand) && res === "wood") got = Math.min(tile.amount, got + 1);
+  if (pawn.hand === "steel_axe" && res === "wood") got = Math.min(tile.amount, got + 1);
+  if (isPickHand(pawn.hand) && (res === "stone" || res === "ore" || res === "crystal")) got = Math.min(tile.amount, got + 1);
+  if (pawn.hand === "steel_pick" && (res === "stone" || res === "ore")) got = Math.min(tile.amount, got + 1);
+  if (res === "wood" && !isAxeHand(pawn.hand)) got = Math.max(1, Math.floor(got * 0.4));
+  if ((res === "stone" || res === "ore") && !isPickHand(pawn.hand)) got = Math.max(1, Math.floor(got * 0.4));
   if (night) got = Math.max(1, Math.floor(got * 0.5));
   return { ok: true, item: res, got };
 }

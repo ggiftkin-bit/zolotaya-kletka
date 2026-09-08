@@ -1,7 +1,7 @@
 import type { Biome, BuildingKind, Inventory, ItemId, Profession, Season, Transport, Weather } from "./types";
 
 /** Альфа. 0 всегда. Вторая цифра — новая механика. Третья — доработка. */
-export const GAME_VERSION = "0.22.0";
+export const GAME_VERSION = "0.23.0";
 
 /** Заливка паттерном (вода, луг, мох, камень, песок). false — плоские BIOME_FILL. */
 export const FILL_TEX = true;
@@ -48,6 +48,9 @@ export const ITEMS: ItemId[] = [
   "brick",
   "grain",
   "flour",
+  "steel_axe",
+  "steel_pick",
+  "steel_shovel",
 ];
 
 export const ITEM_WEIGHT: Record<ItemId, number> = {
@@ -84,6 +87,9 @@ export const ITEM_WEIGHT: Record<ItemId, number> = {
   brick: 1.2,
   grain: 0.4,
   flour: 0.3,
+  steel_axe: 2,
+  steel_pick: 2.4,
+  steel_shovel: 1.4,
 };
 
 export const CAPACITY: Record<Transport, number> = {
@@ -158,6 +164,9 @@ export const ITEM_LABEL: Record<ItemId, string> = {
   brick: "кирпич",
   grain: "зерно",
   flour: "мука",
+  steel_axe: "топор кованый",
+  steel_pick: "кирка кованая",
+  steel_shovel: "лопата кованая",
 };
 
 export const TRANSPORT_LABEL: Record<Transport, string> = {
@@ -232,6 +241,9 @@ export const GATHER_YIELD: Record<ItemId, number> = {
   brick: 0,
   grain: 1,
   flour: 0,
+  steel_axe: 0,
+  steel_pick: 0,
+  steel_shovel: 0,
 };
 
 export const GATHER_TABLE: Partial<Record<Biome, { item: ItemId; yield: number }>> = {

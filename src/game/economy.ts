@@ -141,6 +141,9 @@ export const SELL_GOLD: Record<ItemId, number> = {
   brick: 1,
   grain: 0,
   flour: 1,
+  steel_axe: 0,
+  steel_pick: 0,
+  steel_shovel: 0,
 };
 
 /** Покупка в лавке. Не ×2 к сдаче. */
@@ -178,6 +181,9 @@ export const BUY_GOLD: Record<ItemId, number> = {
   brick: 3,
   grain: 1,
   flour: 3,
+  steel_axe: 0,
+  steel_pick: 0,
+  steel_shovel: 0,
 };
 
 export function goldTxt(n: number): string {
