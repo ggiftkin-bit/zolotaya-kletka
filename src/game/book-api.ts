@@ -10,7 +10,7 @@ import { generateWorld } from "./worldgen";
 import { isItemId, settleService, serviceJobOf, stampTake } from "./market";
 import { fillStock, isGiftId, planBuyFromStock, planDonate, planGift, planSellDay, planSellToStock, stockOf, worldDayOf, STOCK_CAP, STOCK_START } from "./office";
 import { isGoldKind, planGoldDeed, START_GOLD } from "./gold";
-import { bagOf, canCraftHere, CISTERN_CAP, CISTERN_POUR, craftDefOf, eatSatiety, giveOrSpill, GRANT_WOOD, isBagKind, isDrinkTile, PAIL_FULL, planCook, planEat, planGather, SIP_WATER, startInv, takeBag } from "./bag";
+import { bagOf, canCraftHere, CISTERN_CAP, CISTERN_POUR, CELL_GONE, craftDefOf, eatSatiety, giveOrSpill, GRANT_WOOD, isBagKind, isDrinkTile, PAIL_FULL, planCook, planEat, planGather, SIP_WATER, startInv, takeBag } from "./bag";
 import { BOOST_ENERGY, busyEnergy, DEAD_MS, ENERGY_MAX, fleshOf, regenVigor, RISE_SAT, RISE_WATER, RISE_WARMTH, tickFlesh, vigorOf, WORK_HUNGER } from "./pace";
 import { stepEnergy } from "./travel";
 import { isHamletOwner, isLivingOwner } from "./pact";
@@ -1996,9 +1996,25 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       data.kind === "pail" ||
       data.kind === "sip" ||
       data.kind === "cook";
-    if (!cur) return emptyFail("клетка уже другая");
+    const takesCell =
+      data.kind === "gather" ||
+      data.kind === "dig" ||
+      data.kind === "hunt" ||
+      data.kind === "fish" ||
+      data.kind === "pickup" ||
+      data.kind === "chest-take" ||
+      data.kind === "craft";
+    if (!cur) return emptyFail(takesCell ? CELL_GONE : "клетка уже другая");
     if (cur.ver !== t.ver && !bagSoft) {
-      return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0, gold: 0, inventory: startInv() };
+      return {
+        ok: false as const,
+        hint: takesCell ? CELL_GONE : "клетка уже другая",
+        conflicts: asConflict(),
+        written: [],
+        credit: 0,
+        gold: 0,
+        inventory: startInv(),
+      };
     }
     const reach = Math.max(Math.abs(data.pawn.x - t.x), Math.abs(data.pawn.y - t.y));
     if (!bagSoft && reach > 1) {
@@ -2008,8 +2024,10 @@ export const writeBagDeed = createServerFn({ method: "POST" })
     const live = fatTile(liveSlim, t.x, t.y);
     const merged = await mergeBookBody(sql, userId, data.pawn);
     const ride = transportOf(merged.body);
-    let inv = merged.inventory;
-    let gold = merged.gold;
+    const bag0 = merged.inventory;
+    const gold0 = merged.gold;
+    let inv = bag0;
+    let gold = gold0;
     let resting = !!merged.body.resting;
     let energyAt = merged.body.energyAt;
     const flesh0 = fleshOf(merged.body);
@@ -2022,18 +2040,43 @@ export const writeBagDeed = createServerFn({ method: "POST" })
     const clock = asClock(await readWorld(sql));
     const night = clock.phase === "night";
 
-    const bump = async (tile: Tile, ver: number) => {
+    const bump = async (tile: Tile, ver: number, minN = 0) => {
       const slim = slimTile(tile);
+      const extra = minN > 0 ? "and coalesce((t.slim->>'n')::int, 0) >= $7" : "";
+      const params: unknown[] = [WORLD_ID, tile.x, tile.y, ver, JSON.stringify(slim), userId];
+      if (minN > 0) params.push(minN);
       const upd = await sql.query<{ ver: number }>(
         `update tile t
          set slim = ${keepSlimKeys("$5::jsonb", ["or", "sv", "vg"])},
              ver = t.ver + 1, updated_at = now(), updated_by = $6
          where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
+           ${extra}
          returning ver`,
-        [WORLD_ID, tile.x, tile.y, ver, JSON.stringify(slim), userId],
+        params,
       );
       return upd[0]?.ver ?? null;
     };
+
+    const failCell = async (hint: string) => {
+      const rows = await sql.query<TileRow>(
+        `select x, y, slim, ver, updated_at::text as updated_at from tile where world_id = $1 and x = $2 and y = $3`,
+        [WORLD_ID, t.x, t.y],
+      );
+      const now = rows[0];
+      const conflicts = now
+        ? [{ x: now.x, y: now.y, slim: asSlim(now.slim), ver: now.ver, updatedAt: now.updated_at }]
+        : [];
+      return {
+        ok: false as const,
+        hint,
+        conflicts,
+        written: [] as { x: number; y: number; ver: number }[],
+        credit: 0,
+        gold: gold0,
+        inventory: bag0,
+      };
+    };
+    const lost = () => failCell(CELL_GONE);
 
     const spill = (item: ItemId, n: number) => {
       const g = giveOrSpill(inv, ride, item, n);
@@ -2068,13 +2111,13 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       inv = paid.inv;
     } else if (data.kind === "gather") {
       const plan = planGather(live, { profession: merged.body.profession, hand: merged.body.hand }, night);
-      if (!plan.ok) return emptyFail(plan.hint, gold, inv);
+      if (!plan.ok) return lost();
       live.amount -= plan.got;
       if (live.amount <= 0) markDepleted(live);
       else if (plan.item === "herb") live.regen = Math.max(live.regen ?? 0, REGROW_WAIT.herb ?? 2);
       spill(plan.item, plan.got);
-      const ver = await bump(live, t.ver);
-      if (ver == null) return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0, gold, inventory: inv };
+      const ver = await bump(live, t.ver, plan.got);
+      if (ver == null) return lost();
       written.push({ x: t.x, y: t.y, ver });
     } else if (data.kind === "dig") {
       if (live.pit) return emptyFail("Уже яма.", gold, inv);
@@ -2085,11 +2128,11 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       spill("clay", clay);
       if (!bank && Math.random() < 0.08) spill("ore", 1);
       const ver = await bump(live, t.ver);
-      if (ver == null) return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0, gold, inventory: inv };
+      if (ver == null) return lost();
       written.push({ x: t.x, y: t.y, ver });
     } else if (data.kind === "hunt") {
       if (!live.herd || !live.herd.wild || (live.herd.kind !== "hare" && live.herd.kind !== "deer")) {
-        return emptyFail("Зверя уже нет.", gold, inv);
+        return lost();
       }
       const spear = merged.body.hand === "spear";
       const chance = spear ? 0.85 : merged.body.hand === "axe" ? 0.55 : 0.35;
@@ -2103,14 +2146,14 @@ export const writeBagDeed = createServerFn({ method: "POST" })
         spill("food", got);
       }
       const ver = await bump(live, t.ver);
-      if (ver == null) return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0, gold, inventory: inv };
+      if (ver == null) return lost();
       written.push({ x: t.x, y: t.y, ver });
     } else if (data.kind === "fish") {
       const hasRod = merged.body.hand === "rod";
       const net = live.building === "net";
       if (!hasRod && !net) return emptyFail("Нужна удочка в руке.", gold, inv);
       const stock = live.resource === "fish" ? live.amount : Math.max(0, 6 - (live.takings ?? 0));
-      if (stock <= 0) return emptyFail("Разгнали. Завтра подойдут.", gold, inv);
+      if (stock <= 0) return lost();
       const fisher = merged.body.profession === "fisher";
       let got = 1;
       if (hasRod) got += 1;
@@ -2120,12 +2163,12 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       live.takings = (live.takings ?? 0) + 1;
       if (live.resource === "fish") live.amount = Math.max(0, live.amount - got);
       spill("fish", got);
-      const ver = await bump(live, t.ver);
-      if (ver == null) return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0, gold, inventory: inv };
+      const ver = await bump(live, t.ver, live.resource === "fish" ? got : 0);
+      if (ver == null) return lost();
       written.push({ x: t.x, y: t.y, ver });
     } else if (data.kind === "pickup") {
       const pile = asPile(live.pile);
-      if (pileEmpty(pile) && (live.goldDrop ?? 0) <= 0) return emptyFail("пусто", gold, inv);
+      if (pileEmpty(pile) && (live.goldDrop ?? 0) <= 0) return lost();
       pileSet(live, {});
       for (const [k, n] of Object.entries(pile) as [ItemId, number][]) {
         if (n > 0) spill(k, n);
@@ -2133,7 +2176,7 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       gold += live.goldDrop ?? 0;
       live.goldDrop = 0;
       const ver = await bump(live, t.ver);
-      if (ver == null) return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0, gold, inventory: inv };
+      if (ver == null) return lost();
       written.push({ x: t.x, y: t.y, ver });
     } else if (data.kind === "drop") {
       const item = data.item ?? "";
@@ -2146,7 +2189,7 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       inv = paid.inv;
       pileAdd(live, item, n);
       const ver = await bump(live, t.ver);
-      if (ver == null) return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0, gold, inventory: inv };
+      if (ver == null) return failCell("клетка уже другая");
       written.push({ x: t.x, y: t.y, ver });
     } else if (data.kind === "chest-put" || data.kind === "chest-take") {
       const mine = !live.owner || live.owner === userId || live.owner === "you";
@@ -2168,12 +2211,12 @@ export const writeBagDeed = createServerFn({ method: "POST" })
         live.chest = { ...live.chest, [item]: (live.chest[item] ?? 0) + n };
       } else {
         const n = Math.min(qty, live.chest[item] ?? 0);
-        if (n < 1) return emptyFail("В сундуке пусто.", gold, inv);
+        if (n < 1) return lost();
         live.chest = { ...live.chest, [item]: Math.max(0, (live.chest[item] ?? 0) - n) };
         spill(item, n);
       }
       const ver = await bump(live, t.ver);
-      if (ver == null) return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0, gold, inventory: inv };
+      if (ver == null) return lost();
       written.push({ x: t.x, y: t.y, ver });
     } else if (data.kind === "craft") {
       const id = data.craft ?? "";
@@ -2199,16 +2242,17 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       inv = g.inv;
       if (g.spill > 0) pileAdd(station, def.out, g.spill);
       const stationVer = await bump(station, t.ver);
-      if (stationVer == null) return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0, gold, inventory: inv };
+      if (stationVer == null) return lost();
       written.push({ x: t.x, y: t.y, ver: stationVer });
       for (const sh of pulled.sheds) {
         const row = nearRows.find((r) => r.x === sh.x && r.y === sh.y);
-        if (!row) continue;
+        if (!row) return lost();
         const shed = world.tiles[sh.y * world.width + sh.x];
-        if (!shed) continue;
+        if (!shed) return lost();
         pileSet(shed, sh.pile);
         const ver = await bump(shed, row.ver);
-        if (ver != null) written.push({ x: sh.x, y: sh.y, ver });
+        if (ver == null) return lost();
+        written.push({ x: sh.x, y: sh.y, ver });
       }
     } else if (data.kind === "job") {
       if (!live.caravan) return emptyFail("Заказ закрывают в лавке на тракте.", gold, inv);

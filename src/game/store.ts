@@ -3132,7 +3132,7 @@ function resolveGather(s: GameState, c0: Character, tile: NonNullable<ReturnType
   if (!res || tile.resource !== res || tile.amount <= 0) {
     useGame.setState({
       character: c0,
-      log: pushLog(s.log, "Уже пусто."),
+      log: pushLog(s.log, "уже нет"),
       floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "пусто", tone: "bad" as const }].slice(-10),
     });
     return;

@@ -665,7 +665,7 @@ export async function commitBag(
     if (prior) patch.character = prior;
     store.set(patch);
     rememberLive(store.get());
-    store.speak?.(res.hint || "клетка уже другая", s.character.x, s.character.y, "нет", "bad");
+    store.speak?.(res.hint || "клетка уже другая", s.character.x, s.character.y, res.hint || "нет", "bad");
     saveGame(store.get());
     return false;
   } catch (err) {

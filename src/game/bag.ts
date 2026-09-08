@@ -101,13 +101,16 @@ export function isBagKind(v: string): v is BagKind {
   return (BAG_KINDS as readonly string[]).includes(v);
 }
 
+export const CELL_GONE = "уже нет";
+
 export function planGather(
   tile: { resource: ItemId | null; amount: number; biome: Tile["biome"] },
   pawn: { profession: Profession; hand: ItemId | null },
   night: boolean,
 ): { ok: true; item: ItemId; got: number } | { ok: false; hint: string } {
   const res = tile.resource;
-  if (!res || tile.amount <= 0) return { ok: false, hint: "Уже пусто." };
+  if (!res || tile.amount <= 0) return { ok: false, hint: CELL_GONE };
+
   let got = Math.min(GATHER_YIELD[res] || 1, tile.amount);
   const match = PROFESSION_BIOME[pawn.profession]?.includes(tile.biome);
   if (match) got = Math.min(tile.amount, got + 1);
