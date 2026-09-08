@@ -26,6 +26,7 @@ import {
   LOCK_GOLD,
   PROF_SKILL,
   PROFESSION_LABEL,
+  buildNeed,
   caravanSell,
   emptySkills,
   goldTxt,
@@ -2342,7 +2343,7 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
     speak("Сеть — на берегу реки или брода.", x, y, "не берег", "bad");
     return;
   }
-  if ((kind === "tower" || kind === "jail" || kind === "shed" || kind === "bench" || kind === "forge" || kind === "oven") && !tile.plot && !tile.owned) {
+  if ((kind === "tower" || kind === "jail" || kind === "shed" || kind === "bench" || kind === "forge" || kind === "oven" || kind === "mill" || kind === "sawmill") && !tile.plot && !tile.owned) {
     speak(`${BUILDING_LABEL[kind]} — только во дворе.`, x, y, "не двор", "bad");
     return;
   }
@@ -2358,9 +2359,7 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
     return;
   }
   const cost = BUILD_COST[kind];
-  const need: Partial<Record<ItemId, number>> = {};
-  if (cost.wood) need.wood = cost.wood;
-  if (cost.stone) need.stone = cost.stone;
+  const need = buildNeed(kind);
   const pulled = pullNeed(s.world, c.inventory, tile, need);
   if (!pulled.ok) {
     speak(pulled.hint, x, y, "мало материалов", "bad");
@@ -4772,6 +4771,12 @@ function doCraft(kind: CraftKind) {
                   ? "Этот рецепт — у стола трав."
                   : def.bench === "coalpit"
                     ? "Этот рецепт — у дровницы."
+                    : def.bench === "mill"
+                      ? "Этот рецепт — дома или у печи."
+                      : def.bench === "grist"
+                        ? "Этот рецепт — у мельницы."
+                        : def.bench === "sawmill"
+                          ? "Этот рецепт — у пилорамы."
                     : "Не здесь.";
     speak(where, s.character.x, s.character.y, "не здесь", "bad");
     return;

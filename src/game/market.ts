@@ -1,5 +1,5 @@
 import { ITEM_LABEL, ITEMS } from "./constants";
-import { BUILD_COST, BUILDING_LABEL, goldTxt } from "./economy";
+import { BUILD_COST, BUILDING_LABEL, buildNeed, goldTxt } from "./economy";
 import { CRAFTS, atBench, type CraftKind } from "./craft";
 import { asPile, giveOrPile, pileSet, pullNeed, type Pile } from "./pile";
 import { FOG_LIVE, chebyshev } from "./book";
@@ -132,7 +132,7 @@ export function isGateTile(tile: Tile): boolean {
 
 export function isCraftStation(tile: Tile): boolean {
   const b = tile.building;
-  return b === "bench" || b === "workshop" || b === "forge" || b === "oven" || b === "smoke" || b === "herbs" || b === "coalpit";
+  return b === "bench" || b === "workshop" || b === "forge" || b === "oven" || b === "smoke" || b === "herbs" || b === "coalpit" || b === "mill" || b === "sawmill";
 }
 
 export function serviceJobOf(tile: Tile | null | undefined): ServiceJob | null {
@@ -441,9 +441,7 @@ export function planPostBuild(
   if (serviceJobOf(tile)) return { ok: false, hint: "Сначала сними услугу." };
   const pay = payGold(purse, gold);
   if (!pay.ok) return pay;
-  const need: Partial<Record<ItemId, number>> = {};
-  if (cost.wood) need.wood = cost.wood;
-  if (cost.stone) need.stone = cost.stone;
+  const need = buildNeed(kind as Exclude<BuildingKind, "none">);
   const pulled = pullNeed(world, inv, tile, need);
   if (!pulled.ok) return pulled;
   return {

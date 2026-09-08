@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BIOME_LABEL, FIELD_CROP, ITEM_LABEL, ITEMS } from "@/game/constants";
 import { CRAFTS, canDoCraft } from "@/game/craft";
-import { BUILD_COST, BUILDING_LABEL, CART_GOLD, CART_WOOD, LOCK_GOLD, WAGON_GOLD, caravanBuy, caravanSell, goldTxt, sellLot } from "@/game/economy";
+import { BUILD_COST, BUILDING_LABEL, CART_GOLD, CART_WOOD, LOCK_GOLD, WAGON_GOLD, buildCostLine, caravanBuy, caravanSell, goldTxt, sellLot } from "@/game/economy";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, waterHint } from "@/game/life";
 import { LIFE_INDEX } from "@/game/art";
 import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/places";
@@ -36,6 +36,8 @@ const BUILDINGS: Exclude<BuildingKind, "none" | "workshop" | "shop" | "board" | 
   "bench",
   "forge",
   "oven",
+  "mill",
+  "sawmill",
   "smoke",
   "herbs",
   "stall",
@@ -688,6 +690,8 @@ function PlacePane({ tile, here, near }: { tile: Tile; here: boolean; near: bool
     tile.building === "bench" ||
     tile.building === "forge" ||
     tile.building === "oven" ||
+    tile.building === "mill" ||
+    tile.building === "sawmill" ||
     tile.building === "smoke" ||
     tile.building === "herbs" ||
     tile.building === "coalpit"
@@ -1273,7 +1277,7 @@ function ServiceBody({ tile }: { tile: Tile }) {
           <Sticker
             key={b}
             title={BUILDING_LABEL[b]}
-            sub={`${BUILD_COST[b].wood ? `${BUILD_COST[b].wood} дер.` : ""}${BUILD_COST[b].wood && BUILD_COST[b].stone ? " · " : ""}${BUILD_COST[b].stone ? `${BUILD_COST[b].stone} кам.` : ""}`}
+            sub={buildCostLine(b)}
             ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
             onClick={() => setBuildKind(b)}
           />
@@ -1716,7 +1720,7 @@ function HangFromBoard({ tile }: { tile: Tile }) {
           <Sticker
             key={b}
             title={BUILDING_LABEL[b]}
-            sub={`${BUILD_COST[b].wood ? `${BUILD_COST[b].wood} дер.` : ""}${BUILD_COST[b].wood && BUILD_COST[b].stone ? " · " : ""}${BUILD_COST[b].stone ? `${BUILD_COST[b].stone} кам.` : ""}`}
+            sub={buildCostLine(b)}
             ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
             onClick={() => setBuildKind(b)}
           />
@@ -1951,7 +1955,7 @@ function BuildPane({ tile }: { tile: Tile }) {
           {(tile.plot || tile.owned
             ? ([
                 ["Жильё", ["shack", "house", "shed", "camp"]],
-                ["Станки и столы", ["bench", "forge", "oven", "smoke", "herbs", "coalpit", "stall", "adit"]],
+                ["Станки и столы", ["bench", "forge", "oven", "mill", "sawmill", "smoke", "herbs", "coalpit", "stall", "adit"]],
                 ["Двор", ["field", "well", "pen", "stable", "tower", "jail"]],
               ] as const)
             : ([
@@ -1981,7 +1985,7 @@ function BuildPane({ tile }: { tile: Tile }) {
                   >
                     {BUILDING_LABEL[b]}
                     <span className="ml-1 text-[10px] text-muted-foreground">
-                      {BUILD_COST[b].wood ? `${BUILD_COST[b].wood} дер.` : BUILD_COST[b].stone ? `${BUILD_COST[b].stone} кам.` : ""}
+                      {buildCostLine(b)}
                     </span>
                   </Button>
                 ))}

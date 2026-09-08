@@ -34,6 +34,8 @@ const BUILDINGS: Exclude<BuildingKind, "none" | "workshop" | "shop" | "board" | 
   "bench",
   "forge",
   "oven",
+  "mill",
+  "sawmill",
   "smoke",
   "herbs",
   "stall",

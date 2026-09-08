@@ -1,9 +1,9 @@
 import type { ItemId, Profession, Tile } from "./types";
 
-export type CraftKind = "coal" | "plank" | "bar" | "axe" | "pick" | "bread" | "smoked" | "tonic" | "rope" | "bucket" | "spear" | "shovel" | "rod" | "wheel" | "lock" | "club" | "knife" | "board_shield" | "bar_shield" | "wadded" | "helm" | "brick" | "flour" | "steel_axe" | "steel_pick" | "steel_shovel";
+export type CraftKind = "coal" | "plank" | "bar" | "axe" | "pick" | "bread" | "smoked" | "tonic" | "rope" | "bucket" | "spear" | "shovel" | "rod" | "wheel" | "lock" | "club" | "knife" | "board_shield" | "bar_shield" | "wadded" | "helm" | "brick" | "flour" | "steel_axe" | "steel_pick" | "steel_shovel" | "mill_flour" | "saw_plank";
 
-/** mill — не здание: дом или печь. */
-export type BenchId = "home" | "bench" | "forge" | "oven" | "smoke" | "herbs" | "coalpit" | "workshop" | "mill";
+/** mill — не здание: дом или печь. grist — мельница. */
+export type BenchId = "home" | "bench" | "forge" | "oven" | "smoke" | "herbs" | "coalpit" | "workshop" | "mill" | "grist" | "sawmill";
 
 export type CraftDef = {
   id: CraftKind;
@@ -30,6 +30,8 @@ export const CRAFTS: CraftDef[] = [
   { id: "lock", out: "lock", n: 1, need: { bar: 1 }, who: "smith", bench: "forge", energy: 2, label: "замок", hint: "слиток · кузнец · горн. На калитку или сундук" },
   { id: "bread", out: "bread", n: 1, need: { flour: 2 }, who: "baker", bench: "oven", energy: 1, label: "хлеб", hint: "2 муки · пекарь · печь. Сдать 2 золота" },
   { id: "flour", out: "flour", n: 1, need: { grain: 2 }, who: "any", bench: "mill", energy: 1, label: "мука", hint: "2 зерна → 1 мука · любой · дом или печь" },
+  { id: "mill_flour", out: "flour", n: 2, need: { grain: 2 }, who: "any", bench: "grist", energy: 1, label: "мука", hint: "2 зерна → 2 муки · любой · мельница" },
+  { id: "saw_plank", out: "plank", n: 2, need: { wood: 3 }, who: "any", bench: "sawmill", energy: 1, label: "доска", hint: "3 дерева → 2 доски · любой · пилорама. Верстак плотника — 3 → 1" },
   { id: "brick", out: "brick", n: 1, need: { clay: 2, coal: 1 }, who: "any", bench: "oven", energy: 1, label: "кирпич", hint: "2 глины + уголь · любой · печь. Сдать 1 золото" },
   { id: "smoked", out: "smoked", n: 1, need: { fish: 1, wood: 1 }, who: "fisher", bench: "smoke", energy: 1, label: "копчёное", hint: "рыба + дерево · рыбак · коптильня. Сдать 2 золота" },
   { id: "tonic", out: "tonic", n: 1, need: { herb: 3 }, who: "healer", bench: "herbs", energy: 1, label: "настой", hint: "3 травы · целитель · стол трав. Сдать 3 золота" },
@@ -47,13 +49,13 @@ export const CRAFTS: CraftDef[] = [
 ];
 
 export const PROF_BLURB: Record<Profession, string> = {
-  wanderer: "Своего станка нет. Дома — верёвка, копьё, ведро, лопата, удочка, дубина, стёганка. Мука — 2 зерна, дом или печь. Печь: кирпич — любой.",
+  wanderer: "Своего станка нет. Дома — верёвка, копьё, ведро, лопата, удочка, дубина, стёганка. Мука — 2 зерна, дом или печь. Мельница: 2 зерна → 2 муки. Пилорама: 3 дерева → 2 доски. Печь: кирпич — любой.",
   lumberjack: "Дровница: 4 дерева → 1 уголь. Без угля кузнец не льёт.",
   miner: "Сруб у горы. Больше руды. Кристалл ищет только он.",
   fisher: "Коптильня: рыба + дерево → копчёное. Ловят удочкой: дерево + верёвка дома.",
   farmer: "Поле даёт зерно. Засев — 1 зерно. Верёвку дома сколотит любой.",
-  baker: "Печь: 2 муки → хлеб. Сдать 2 золота. Мука — 2 зерна, любой дома или у печи.",
-  carpenter: "Верстак: доска, колесо, щит тесовый. Телега — 2 колеса, 4 дерева и слиток. В сумку не кладётся.",
+  baker: "Печь: 2 муки → хлеб. Сдать 2 золота. Мука — 2 зерна, любой дома или у печи. Мельница: 2 зерна → 2 муки.",
+  carpenter: "Верстак: доска, колесо, щит тесовый. 3 дерева → 1 доска. Пилорама: любой, 3 дерева → 2 доски. Телега — 2 колеса, 4 дерева и слиток. В сумку не кладётся.",
   smith: "Горн: руда+2 угля → слиток, топор, кирка, замок, нож, шлем, щит кованый. Кованый набор: слиток + топор / кирка / лопата. Лавка набор не берёт. Замок — на калитку или сундук. Свой открывается сам.",
   trader: "Прилавок у калитки. Курс как у тракта. Купчина: +1 золото к пачке сырья.",
   healer: "Стол трав: 3 травы → настой. Сдать 3 золота.",
@@ -88,6 +90,8 @@ export function atBench(tile: Tile | null, bench: BenchId) {
   if (bench === "herbs") return tile.building === "herbs" || isHome(tile);
   if (bench === "coalpit") return tile.building === "coalpit";
   if (bench === "mill") return isHome(tile) || tile.building === "oven";
+  if (bench === "grist") return tile.building === "mill";
+  if (bench === "sawmill") return tile.building === "sawmill";
   return false;
 }
 

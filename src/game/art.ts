@@ -103,6 +103,8 @@ const PROP_INDEX: Record<Exclude<BuildingKind, "none">, number> = {
   bench: 3,
   forge: 3,
   oven: 4,
+  mill: 1,
+  sawmill: 3,
   smoke: 3,
   herbs: 5,
   stall: 4,

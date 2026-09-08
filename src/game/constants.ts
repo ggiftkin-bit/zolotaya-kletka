@@ -1,7 +1,7 @@
 import type { Biome, BuildingKind, Inventory, ItemId, Profession, Season, Transport, Weather } from "./types";
 
 /** Альфа. 0 всегда. Вторая цифра — новая механика. Третья — доработка. */
-export const GAME_VERSION = "0.23.0";
+export const GAME_VERSION = "0.24.0";
 
 /** Заливка паттерном (вода, луг, мох, камень, песок). false — плоские BIOME_FILL. */
 export const FILL_TEX = true;
@@ -294,6 +294,8 @@ export const BUILD_OK: Record<Exclude<BuildingKind, "none">, Biome[]> = {
   bench: ["plains", "fertile", "forest"],
   forge: ["plains", "fertile", "mountain", "ore"],
   oven: ["plains", "fertile", "forest"],
+  mill: ["plains", "fertile", "forest"],
+  sawmill: ["plains", "fertile", "forest"],
   smoke: ["plains", "fertile", "forest", "ford"],
   herbs: ["plains", "fertile", "forest", "swamp"],
   stall: ["plains", "fertile", "forest"],

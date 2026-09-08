@@ -91,7 +91,9 @@ export type BuildingKind =
   | "stakes"
   | "moat"
   | "net"
-  | "camp";
+  | "camp"
+  | "mill"
+  | "sawmill";
 
 export type Profession =
   | "wanderer"

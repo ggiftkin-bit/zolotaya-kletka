@@ -46,6 +46,8 @@ export const BUILDING_LABEL = {
   bench: "верстак",
   forge: "горн",
   oven: "печь",
+  mill: "мельница",
+  sawmill: "пилорама",
   smoke: "коптильня",
   herbs: "стол трав",
   stall: "прилавок",
@@ -59,9 +61,11 @@ export const BUILDING_LABEL = {
   camp: "костёр",
 } as const;
 
+export type BuildCost = { wood: number; stone: number; gold: number; plank?: number };
+
 export const BUILD_COST: Record<
   Exclude<keyof typeof BUILDING_LABEL, "none">,
-  { wood: number; stone: number; gold: number }
+  BuildCost
 > = {
   shack: { wood: 6, stone: 0, gold: 0 },
   house: { wood: 14, stone: 6, gold: 0 },
@@ -77,6 +81,8 @@ export const BUILD_COST: Record<
   bench: { wood: 8, stone: 0, gold: 0 },
   forge: { wood: 0, stone: 6, gold: 0 },
   oven: { wood: 0, stone: 6, gold: 0 },
+  mill: { wood: 8, stone: 4, gold: 0 },
+  sawmill: { wood: 6, stone: 0, gold: 0, plank: 2 },
   smoke: { wood: 6, stone: 0, gold: 0 },
   herbs: { wood: 3, stone: 0, gold: 0 },
   stall: { wood: 8, stone: 0, gold: 0 },
@@ -89,6 +95,24 @@ export const BUILD_COST: Record<
   net: { wood: 4, stone: 0, gold: 0 },
   camp: { wood: 2, stone: 0, gold: 0 },
 };
+
+export function buildNeed(kind: Exclude<keyof typeof BUILDING_LABEL, "none">): Partial<Record<ItemId, number>> {
+  const cost = BUILD_COST[kind];
+  const need: Partial<Record<ItemId, number>> = {};
+  if (cost.wood) need.wood = cost.wood;
+  if (cost.stone) need.stone = cost.stone;
+  if (cost.plank) need.plank = cost.plank;
+  return need;
+}
+
+export function buildCostLine(kind: Exclude<keyof typeof BUILDING_LABEL, "none">): string {
+  const cost = BUILD_COST[kind];
+  const parts: string[] = [];
+  if (cost.wood) parts.push(`${cost.wood} дер.`);
+  if (cost.stone) parts.push(`${cost.stone} кам.`);
+  if (cost.plank) parts.push(`${cost.plank} дос.`);
+  return parts.length ? parts.join(" · ") : "даром";
+}
 
 /** Сырьё лавка берёт пачкой. Штука дерева золота не даёт. Готовое — по штуке. */
 export const SELL_PACK: Partial<Record<ItemId, { n: number; gold: number }>> = {

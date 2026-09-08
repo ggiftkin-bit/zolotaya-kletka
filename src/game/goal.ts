@@ -21,6 +21,8 @@ export const BUILD_HINT: Record<Exclude<BuildingKind, "none">, string> = {
   bench: "доска · плотник",
   forge: "слиток, топор, кирка, замок · кузнец",
   oven: "мука · любой, хлеб · пекарь",
+  mill: "2 зерна → 2 муки · любой",
+  sawmill: "3 дерева → 2 доски · любой",
   smoke: "копчёное · рыбак",
   herbs: "настой · целитель",
   stall: "прилавок у калитки",

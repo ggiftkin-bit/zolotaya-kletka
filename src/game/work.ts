@@ -76,7 +76,7 @@ export const CLAD_STONE = 16;
 export function defaultMatter(kind: BuildingKind): Matter {
   if (kind === "none") return "wood";
   if (kind === "shack" || kind === "stakes" || kind === "camp") return "wattle";
-  if (kind === "well" || kind === "forge" || kind === "oven" || kind === "jail" || kind === "moat") return "stone";
+  if (kind === "well" || kind === "forge" || kind === "oven" || kind === "jail" || kind === "moat" || kind === "mill") return "stone";
   return "wood";
 }
 
@@ -155,7 +155,7 @@ export function buildMs(kind: BuildingKind, c: Character): number {
   let sec = 28;
   if (kind === "shack" || kind === "stakes" || kind === "field" || kind === "herbs" || kind === "coalpit" || kind === "camp" || kind === "net") sec = 18;
   if (kind === "house") sec = 42;
-  if (kind === "well" || kind === "forge" || kind === "oven" || kind === "jail" || kind === "moat") sec = 48;
+  if (kind === "well" || kind === "forge" || kind === "oven" || kind === "jail" || kind === "moat" || kind === "mill") sec = 48;
   if (kind === "tower") sec = 40;
   sec *= Math.max(0.6, 1 - c.skills.build * 0.03);
   return Math.round(sec * 1000);
