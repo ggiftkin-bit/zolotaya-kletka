@@ -63,6 +63,7 @@ export const ITEM_ICO: Record<ItemId, number> = {
   pick: ICO.axe,
   herb: 0,
   clay: 1,
+  sand: 1,
   crystal: 2,
   rope: 0,
   bucket: 1,
@@ -108,8 +109,8 @@ export function LifePic({ i, className, alt }: { i: number; className?: string; 
 }
 
 export function ItemPic({ id, className }: { id: ItemId; className?: string }) {
-  if (id === "herb" || id === "clay" || id === "crystal" || id === "tonic") {
-    return <ExtraIco i={id === "tonic" ? 0 : ITEM_ICO[id]} className={className} alt="" />;
+  if (id === "herb" || id === "clay" || id === "sand" || id === "crystal" || id === "tonic") {
+    return <ExtraIco i={id === "tonic" ? 0 : id === "crystal" ? 2 : ITEM_ICO[id]} className={className} alt="" />;
   }
   if (id === "rope" || id === "bucket" || id === "spear") {
     return <GearPic i={GEAR_ICO[id]} className={className} alt="" />;

@@ -36,7 +36,7 @@ import {
 } from "./economy";
 import { requestLook } from "./cam";
 import { findPath, pathTotal } from "./path";
-import { canDigReason, fillNeedLine, fillPay, giveOrPile, takePaid } from "./pit";
+import { canDigReason, fillNeedLine, fillPay, giveOrPile, planDig, takePaid } from "./pit";
 import { asPile, dumpAllOn, pileAdd, pileEmpty, pileSet, pullNeed, applyNeedPull } from "./pile";
 import { canCrossDiag, MAX_PLOT, clearYard, normRect, plotBounds, putGate, setYardGateLock, stampYard, upgradeYard, yardHasGate, yardWoodCost } from "./fence";
 import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, NO_STRENGTH, SKIP_GOLD, deathFee, energyPeriod, fleshOf, formatWait, splitBodyWater, tickFlesh } from "./pace";
@@ -46,7 +46,7 @@ import { clearGame, loadGame, saveGame } from "./save";
 import { stampVillage, leaveVillage, hamletTitle, hasOwnYard, isOutsideYard, setVillageLaw, planFoundOwners, canJoinVillage, namesTouchingYard, livingOwnersOf, villageOf, snapVillage, villageChangedCells, atNameSpot, normVillageName, canPlaceBoard, stampBoard, releaseBoard } from "./pact";
 import { cargoWeight, loadRatio, pailKg, stepEnergy, wornKg } from "./travel";
 import { atBench, CRAFTS, EAT_ORDER, EAT_SAT, PROF_BLURB, type CraftKind } from "./craft";
-import { markDepleted, tickGrow, REGROW_WAIT } from "./grow";
+import { markDepleted, tickGrow, PIT_HEAL_WEEKS, REGROW_WAIT } from "./grow";
 import { fillStock, planBuyFromStock, planDonate, planGift, planSellToStock, seedStock, sellsToday, SELL_DAY_CAP, SELL_DAY_HINT, worldDayOf } from "./office";
 import { planGoldDeed } from "./gold";
 import { canParkOn, claimMount, mountAt, MOUNT_LABEL, ownNearby, ownsMount, parkNear, ridingHorse, ridingKind, settleOldCounts, stripRidden, takeOwnMount, type MountKind } from "./mount";
@@ -3248,25 +3248,26 @@ function resolveRoad(s: GameState, c0: Character, tile: NonNullable<ReturnType<t
 }
 
 function resolveDig(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>) {
-  if (tile.pit) {
-    useGame.setState({ character: c0, log: pushLog(s.log, "Уже яма.") });
+  const plan = planDig(tile, c0.hand);
+  if (!plan.ok) {
+    useGame.setState({ character: c0, log: pushLog(s.log, plan.hint) });
     return;
   }
-  const bank = !!tile.bank;
-  let clay = bank ? 2 : 1;
+  const wasBank = !!tile.bank;
   tile.pit = true;
   tile.bank = false;
+  tile.regen = PIT_HEAL_WEEKS;
   let ore = 0;
-  if (!bank && Math.random() < 0.08) ore = 1;
   let inv = { ...c0.inventory };
-  const clayOut = giveOrPile(inv, c0.transport, tile, "clay", clay);
-  inv = clayOut.inv;
-  if (ore) {
+  const dug = giveOrPile(inv, c0.transport, tile, plan.item, plan.got);
+  inv = dug.inv;
+  if (!wasBank && Math.random() < 0.08) {
+    ore = 1;
     const oreOut = giveOrPile(inv, c0.transport, tile, "ore", ore);
     inv = oreOut.inv;
   }
   const c = bumpSkill({ ...c0, inventory: inv }, "mine", 0.08);
-  const bits = [`+${clay} глина`];
+  const bits = [`+${plan.got} ${ITEM_LABEL[plan.item]}`];
   if (ore) bits.push("+руда");
   useGame.setState({
     character: c,

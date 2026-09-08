@@ -1,7 +1,7 @@
 import type { Biome, BuildingKind, Inventory, ItemId, Profession, Season, Transport, Weather } from "./types";
 
 /** Альфа. 0 всегда. Вторая цифра — новая механика. Третья — доработка. */
-export const GAME_VERSION = "0.21.3";
+export const GAME_VERSION = "0.22.0";
 
 /** Заливка паттерном (вода, луг, мох, камень, песок). false — плоские BIOME_FILL. */
 export const FILL_TEX = true;
@@ -22,6 +22,7 @@ export const ITEMS: ItemId[] = [
   "fish",
   "herb",
   "clay",
+  "sand",
   "crystal",
   "axe",
   "pick",
@@ -59,6 +60,7 @@ export const ITEM_WEIGHT: Record<ItemId, number> = {
   pick: 2.4,
   herb: 0.2,
   clay: 1.5,
+  sand: 1.5,
   crystal: 0.8,
   rope: 0.4,
   bucket: 1.2,
@@ -132,6 +134,7 @@ export const ITEM_LABEL: Record<ItemId, string> = {
   pick: "кирка",
   herb: "трава",
   clay: "глина",
+  sand: "песок",
   crystal: "кристалл",
   rope: "верёвка",
   bucket: "ведро",
@@ -203,6 +206,7 @@ export const GATHER_YIELD: Record<ItemId, number> = {
   fish: 2,
   herb: 1,
   clay: 2,
+  sand: 1,
   crystal: 1,
   axe: 0,
   pick: 0,

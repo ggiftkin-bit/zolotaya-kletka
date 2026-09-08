@@ -130,6 +130,7 @@ export type ItemId =
   | "pick"
   | "herb"
   | "clay"
+  | "sand"
   | "crystal"
   | "rope"
   | "bucket"
@@ -235,7 +236,7 @@ export type Tile = {
   chestLock: boolean;
   /** Yard-wide latch: locked gates block non-owners. */
   gateLock: boolean;
-  /** Dug pit. Neighbors merge visually. */
+  /** Dug pit. Dry ground, not water. Neighbors merge visually. Heals to plains in a week. */
   pit: boolean;
   /** Yellow clay bank along the river. Dig → 2 clay, then pit. */
   bank: boolean;

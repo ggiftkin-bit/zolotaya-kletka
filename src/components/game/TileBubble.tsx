@@ -12,7 +12,7 @@ import { occupantAt } from "@/game/fight";
 import { canFoundVillage, canPlaceBoard, canPutLiveName, clusterHint, hasOwnYard, namesTouchingYard, ownerFace, villageOf } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
 import { ownNearby, ownsMount, ridingHorse } from "@/game/mount";
-import { canDigReason, fillPay } from "@/game/pit";
+import { canDigReason, digLine, fillPay } from "@/game/pit";
 import { useGame, meetIsIgnored } from "@/game/store";
 import type { BuildingKind, ItemId, Tile } from "@/game/types";
 import { burnableFence, CLAD_STONE, isRoof, MATTER_LABEL, stoneFence } from "@/game/work";
@@ -510,7 +510,7 @@ function PickPane({
       {here && !tile.pit && canDigReason(g.world, tile, g.character.hand) == null && (
         <Sticker
           title="Копать"
-          sub={tile.bank ? "2 глины · яма" : "1 глина · яма"}
+          sub={digLine(tile)}
           ico={<Ico i={ICO.gather} className="size-11 overflow-hidden rounded-[12px]" />}
           onClick={() => g.excavateHere()}
         />

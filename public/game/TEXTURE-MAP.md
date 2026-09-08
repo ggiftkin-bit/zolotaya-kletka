@@ -36,3 +36,4 @@
 
 `fill-cobble.jpg`, `fill-dirt.jpg`, `fill-meadow.jpg`, `fill-swamp.jpg` — прошлая пачка.
 Река-форма — `paintRiverGround`, не открытка.
+Яма-грунт (`tile.pit`) — пол `v3-rov-suh.jpg`, сверху `v3-yama.png`. Не `fill-water.jpg`, не река. Соседние ямы — одна фигура. Запас пола — `fill-dirt.jpg` или `fill-sand.jpg`.

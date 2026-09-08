@@ -802,6 +802,9 @@ const OUTER = 12;
 const INNER = 4;
 const LAND_OUTER = 7;
 const LAND_INNER = 4;
+const PIT_BANK = 4;
+const PIT_OUTER = 16;
+const PIT_INNER = 6;
 
 type SoftFloor = "meadow" | "moss" | "field" | "swamp";
 
@@ -1141,7 +1144,7 @@ function collectPaintedProps(
       push(key, fx, fy, TILE * (1.2 + salt(15) * 0.15));
     }
   } else if (tile.biome === "swamp") {
-    if (tile.resource === "herb" && tile.amount > 0) {
+    if (!tile.pit && tile.resource === "herb" && tile.amount > 0) {
       push("reeds", x + 10 + salt(2) * 24, y + TILE - 6, 18 + salt(3) * 8);
       if (tile.amount > 2) push("reeds", x + 26 + salt(4) * 10, y + TILE - 8, 14 + salt(5) * 6);
     }
@@ -1152,6 +1155,7 @@ function collectPaintedProps(
     tile.amount > 0 &&
     tile.road === "none" &&
     !tile.plot &&
+    !tile.pit &&
     tile.building === "none" &&
     tile.biome !== "swamp" &&
     !isWooded(tile)
@@ -1527,6 +1531,7 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
 
   if (
     !isWater(tile) &&
+    !tile.pit &&
     tile.amount > 0 &&
     tile.resource &&
     tile.resource !== "herb" &&
@@ -2016,45 +2021,123 @@ function paintBank(ctx: CanvasRenderingContext2D, x: number, y: number) {
 }
 
 function paintPit(ctx: CanvasRenderingContext2D, tile: Tile, world: World, x: number, y: number) {
+  const n = sides4(world, tile.x, tile.y);
+  const nP = !!n.n?.pit;
+  const eP = !!n.e?.pit;
+  const sP = !!n.s?.pit;
+  const wP = !!n.w?.pit;
+  const seP = !!tileAt(world, tile.x + 1, tile.y + 1)?.pit;
+  const neP = !!tileAt(world, tile.x + 1, tile.y - 1)?.pit;
+  const swP = !!tileAt(world, tile.x - 1, tile.y + 1)?.pit;
+  const nwP = !!tileAt(world, tile.x - 1, tile.y - 1)?.pit;
+  const pitN = (nP ? 1 : 0) + (eP ? 1 : 0) + (sP ? 1 : 0) + (wP ? 1 : 0);
+  const anyLip = pitN < 4;
+  const pitDirt = "#6a5340";
+  const pitFloor = () => {
+    if (hasFill("moatDry")) useFill(ctx, "moatDry", pitDirt);
+    else if (hasFill("dirt")) useFill(ctx, "dirt", pitDirt);
+    else if (hasFill("sand")) useFill(ctx, "sand", SAND);
+    else ctx.fillStyle = pitDirt;
+  };
+
+  if (pitN >= 2) {
+    pitFloor();
+    ctx.fillRect(x, y, TILE, TILE);
+    useFill(ctx, "sand", SAND);
+    if (!nP) ctx.fillRect(x, y, TILE, PIT_BANK);
+    if (!sP) ctx.fillRect(x, y + TILE - PIT_BANK, TILE, PIT_BANK);
+    if (!wP) ctx.fillRect(x, y, PIT_BANK, TILE);
+    if (!eP) ctx.fillRect(x + TILE - PIT_BANK, y, PIT_BANK, TILE);
+    if (!nP && !wP) ctx.fillRect(x, y, PIT_BANK + PIT_OUTER, PIT_BANK + PIT_OUTER);
+    if (!nP && !eP) ctx.fillRect(x + TILE - PIT_BANK - PIT_OUTER, y, PIT_BANK + PIT_OUTER, PIT_BANK + PIT_OUTER);
+    if (!sP && !eP) ctx.fillRect(x + TILE - PIT_BANK - PIT_OUTER, y + TILE - PIT_BANK - PIT_OUTER, PIT_BANK + PIT_OUTER, PIT_BANK + PIT_OUTER);
+    if (!sP && !wP) ctx.fillRect(x, y + TILE - PIT_BANK - PIT_OUTER, PIT_BANK + PIT_OUTER, PIT_BANK + PIT_OUTER);
+  } else if (anyLip) {
+    useFill(ctx, "sand", SAND);
+    ctx.fillRect(x, y, TILE, TILE);
+  } else {
+    pitFloor();
+    ctx.fillRect(x, y, TILE, TILE);
+  }
+
+  const padN = nP ? 0 : PIT_BANK;
+  const padE = eP ? 0 : PIT_BANK;
+  const padS = sP ? 0 : PIT_BANK;
+  const padW = wP ? 0 : PIT_BANK;
+  const ix = x + padW;
+  const iy = y + padN;
+  const iw = TILE - padW - padE;
+  const ih = TILE - padN - padS;
+  const radii: [number, number, number, number] = [
+    padN && padW ? PIT_OUTER : 0,
+    padN && padE ? PIT_OUTER : 0,
+    padS && padE ? PIT_OUTER : 0,
+    padS && padW ? PIT_OUTER : 0,
+  ];
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(ix, iy, iw, ih, radii);
+  ctx.clip();
+  pitFloor();
+  ctx.fillRect(x, y, TILE, TILE);
   const img = getArt()?.sprYama;
-  const n = tileAt(world, tile.x, tile.y - 1)?.pit;
-  const s = tileAt(world, tile.x, tile.y + 1)?.pit;
-  const w = tileAt(world, tile.x - 1, tile.y)?.pit;
-  const e = tileAt(world, tile.x + 1, tile.y)?.pit;
-  const linked = !!(n || s || w || e);
-  if (img) {
-    const r = SPR_YAMA[linked ? "big" : "small"];
-    const size = linked ? 36 : 30;
+  if (img && pitN === 0) {
+    const r = SPR_YAMA.small;
+    const size = 32;
     drawSpr(ctx, img, r, x + (TILE - size) / 2, y + (TILE - size) / 2 + 1, size, size);
   } else {
-    const padN = n ? 0 : 7;
-    const padS = s ? 0 : 7;
-    const padW = w ? 0 : 7;
-    const padE = e ? 0 : 7;
-    const rx = x + padW;
-    const ry = y + padN;
-    const rw = TILE - padW - padE;
-    const rh = TILE - padN - padS;
-    ctx.fillStyle = "rgba(28, 22, 18, 0.82)";
-    ctx.beginPath();
-    ctx.roundRect(rx, ry, rw, rh, linked ? 4 : 12);
-    ctx.fill();
-    ctx.fillStyle = "rgba(58, 48, 36, 0.9)";
-    ctx.beginPath();
-    ctx.ellipse(x + TILE / 2, y + TILE / 2 + 2, rw * 0.28, rh * 0.22, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle = "rgba(28, 22, 18, 0.34)";
+    ctx.fillRect(ix, iy, iw, ih);
   }
-  if (tile.resource === "ore" && tile.amount > 0) {
-    ctx.fillStyle = "#6b4a2f";
+  ctx.fillStyle = "rgba(28, 22, 18, 0.22)";
+  ctx.beginPath();
+  ctx.ellipse(x + TILE / 2, y + TILE / 2 + 2, Math.max(6, iw * 0.28), Math.max(5, ih * 0.22), 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  const punch = (cx: number, cy: number, a0: number, a1: number) => {
+    useFill(ctx, "sand", SAND);
     ctx.beginPath();
-    ctx.arc(x + TILE * 0.62, y + TILE * 0.58, 3.2, 0, Math.PI * 2);
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, PIT_INNER, a0, a1, true);
+    ctx.closePath();
     ctx.fill();
+  };
+  if (nP && eP && !neP) punch(x + TILE, y, Math.PI, Math.PI / 2);
+  if (nP && wP && !nwP) punch(x, y, Math.PI / 2, 0);
+  if (sP && eP && !seP) punch(x + TILE, y + TILE, (Math.PI * 3) / 2, Math.PI);
+  if (sP && wP && !swP) punch(x, y + TILE, 0, (Math.PI * 3) / 2);
+
+  if (anyLip) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(70, 52, 32, 0.55)";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    if (!nP) {
+      ctx.moveTo(ix + radii[0], iy);
+      ctx.lineTo(ix + iw - radii[1], iy);
+    }
+    if (!sP) {
+      ctx.moveTo(ix + radii[3], iy + ih);
+      ctx.lineTo(ix + iw - radii[2], iy + ih);
+    }
+    if (!wP) {
+      ctx.moveTo(ix, iy + radii[0]);
+      ctx.lineTo(ix, iy + ih - radii[3]);
+    }
+    if (!eP) {
+      ctx.moveTo(ix + iw, iy + radii[1]);
+      ctx.lineTo(ix + iw, iy + ih - radii[2]);
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
 function paintHerb(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number) {
   if (paintedPropsOn()) return;
-  if (tile.building !== "none" || tile.caravan || tile.commons || tile.plot || tile.road !== "none") return;
+  if (tile.pit || tile.building !== "none" || tile.caravan || tile.commons || tile.plot || tile.road !== "none") return;
   const has = tile.resource === "herb" && tile.amount > 0;
   if (!has) return;
   const n = Math.min(5, Math.max(1, tile.amount));

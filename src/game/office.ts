@@ -30,6 +30,7 @@ export const LIVE_STOCK: ItemId[] = [
   "fish",
   "herb",
   "clay",
+  "sand",
   "crystal",
   "axe",
   "plank",

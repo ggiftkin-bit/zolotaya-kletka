@@ -1,3 +1,4 @@
+import { CELL_GONE } from "./bag";
 import { isForeignYard } from "./crime";
 import type { Inventory, ItemId, Tile, World } from "./types";
 import { tileAt } from "./worldgen";
@@ -18,15 +19,49 @@ export function fillNeedLine(inv: Inventory): string {
   return "Засыпать: 2 глины, либо 1 глина и дерево, либо 1 глина и камень.";
 }
 
-export function canDigReason(world: World, tile: Tile, hand: ItemId | null): string | null {
+/** Равнина / лес / поле — песок. Болото и берег — глина. Не пачка на 20. */
+export function digYield(tile: Tile): { item: ItemId; got: number } | null {
+  if (tile.bank) return { item: "clay", got: 2 };
+  if (tile.biome === "swamp") return { item: "clay", got: 1 };
+  if (tile.biome === "plains" || tile.biome === "forest" || tile.biome === "fertile") {
+    return { item: "sand", got: 1 };
+  }
+  return null;
+}
+
+function digRefuse(tile: Tile, hand: ItemId | null): string | null {
   if (hand !== "shovel") return "нужна лопата";
-  if (tile.pit) return "уже яма";
+  if (tile.pit) return CELL_GONE;
   if (tile.commons) return "поляну не копают";
   if (tile.road !== "none") return "тракт не копают";
   if (tile.biome === "river" || tile.biome === "ford" || tile.building === "moat") return "воду не копают";
   if (tile.biome === "mountain" || tile.biome === "ore") return "горы — киркой";
   if (tile.caravan) return "не здесь";
   if (tile.building !== "none") return "под домом нельзя";
+  if (!digYield(tile)) return "здесь лопатой не копают";
+  return null;
+}
+
+export function planDig(
+  tile: Tile,
+  hand: ItemId | null,
+): { ok: true; item: ItemId; got: number } | { ok: false; hint: string } {
+  const why = digRefuse(tile, hand);
+  if (why) return { ok: false, hint: why };
+  const y = digYield(tile);
+  if (!y) return { ok: false, hint: "здесь лопатой не копают" };
+  return { ok: true, ...y };
+}
+
+export function digLine(tile: Tile): string {
+  const y = digYield(tile);
+  if (!y) return "яма";
+  return y.got === 1 ? `1 ${y.item === "sand" ? "песок" : "глина"} · яма` : `${y.got} глины · яма`;
+}
+
+export function canDigReason(world: World, tile: Tile, hand: ItemId | null): string | null {
+  const why = digRefuse(tile, hand);
+  if (why) return why;
   if (isForeignYard(tile)) return "чужой двор";
   for (const [dx, dy] of [
     [1, 0],
@@ -37,7 +72,6 @@ export function canDigReason(world: World, tile: Tile, hand: ItemId | null): str
     const n = tileAt(world, tile.x + dx, tile.y + dy);
     if (n && isForeignYard(n)) return "чужой двор";
   }
-  if (tile.biome !== "plains" && tile.biome !== "fertile" && !tile.bank) return "здесь лопатой не копают";
   return null;
 }
 

@@ -39,6 +39,9 @@ export const GROW_CATCHUP_TICKS = 48;
 
 export const GROW_WRITE_BATCH = 200;
 
+/** Сухая яма зарастает за столько недель мира. Зиму за кадр не крутить. */
+export const PIT_HEAL_WEEKS = 1;
+
 const NEXT_SEASON: Record<Season, Season> = {
   spring: "summer",
   summer: "autumn",
@@ -47,7 +50,7 @@ const NEXT_SEASON: Record<Season, Season> = {
 };
 
 export function isWooded(tile: Tile) {
-  return tile.biome === "forest" && tile.amount >= 4;
+  return tile.biome === "forest" && tile.amount >= 4 && !tile.pit;
 }
 
 export function looksEmpty(tile: Tile) {
@@ -113,6 +116,20 @@ export function tickGrow(world: World, season: Season, everywhere = false) {
 }
 
 export function growTile(world: World, t: Tile, season: Season) {
+  if (t.pit) {
+    t.regen = (t.regen ?? PIT_HEAL_WEEKS) - 1;
+    if (t.regen > 0) return;
+    t.pit = false;
+    t.bank = false;
+    t.biome = "plains";
+    t.regen = 0;
+    t.scarred = false;
+    if (t.resource === "wood") {
+      t.resource = null;
+      t.amount = 0;
+    }
+    return;
+  }
   if (t.building === "field") {
     growField(world, t, season);
     return;
