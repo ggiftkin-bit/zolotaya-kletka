@@ -47,7 +47,7 @@ import { stampVillage, leaveVillage, hamletTitle, hasOwnYard, isOutsideYard, set
 import { cargoWeight, loadRatio, pailKg, stepEnergy, wornKg } from "./travel";
 import { atBench, CRAFTS, EAT_ORDER, EAT_SAT, PROF_BLURB, type CraftKind } from "./craft";
 import { markDepleted, tickGrow, REGROW_WAIT } from "./grow";
-import { fillStock, planBuyFromStock, planDonate, planGift, planSellToStock, seedStock } from "./office";
+import { fillStock, planBuyFromStock, planDonate, planGift, planSellToStock, seedStock, sellsToday, SELL_DAY_CAP, SELL_DAY_HINT, worldDayOf } from "./office";
 import { planGoldDeed } from "./gold";
 import { canParkOn, claimMount, mountAt, MOUNT_LABEL, ownNearby, ownsMount, parkNear, ridingHorse, ridingKind, settleOldCounts, stripRidden, takeOwnMount, type MountKind } from "./mount";
 import { lootOn, canOpenPlace } from "./places";
@@ -1037,9 +1037,18 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       speak(plan.hint, here.x, here.y, plan.hint, "bad");
       return;
     }
+    const day = worldDayOf(s.clock);
+    if (sellsToday(s.character, day) >= SELL_DAY_CAP) {
+      speak(SELL_DAY_HINT, here.x, here.y, SELL_DAY_HINT, "bad");
+      return;
+    }
     const prior = s.character;
     const priorStock = s.stock;
-    let c = bumpSkill({ ...s.character, inventory: plan.inv }, "trade", 0.15);
+    let c = bumpSkill(
+      { ...s.character, inventory: plan.inv, sells: sellsToday(s.character, day) + 1, sellDay: day },
+      "trade",
+      0.15,
+    );
     const last = `Купил ${plan.take} ${ITEM_LABEL[item]} за ${goldTxt(plan.gold)}. Склад ${plan.next[item]}.`;
     set({
       character: c,

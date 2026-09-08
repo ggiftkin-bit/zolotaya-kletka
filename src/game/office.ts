@@ -1,9 +1,13 @@
+import { TICKS_PER_DAY } from "./constants";
 import { caravanSell, goldTxt, sellQuote } from "./economy";
 import type { GiftId, Inventory, ItemId, Season } from "./types";
 
 export const STOCK_CAP = 100;
 export const STOCK_START = 40;
 export const DONATE_GOLD = 50;
+/** С одной почты за сутки книги. 13-я сдача — нет. */
+export const SELL_DAY_CAP = 12;
+export const SELL_DAY_HINT = "на сегодня хватит";
 
 export const GIFTS: Array<{ id: GiftId; label: string; gold: number }> = [
   { id: "gift_pin", label: "значок стола", gold: 200 },
@@ -81,6 +85,29 @@ export function stockOf(stock: Partial<Record<ItemId, number>> | undefined, item
 
 export function giftOrdered(gifts: Partial<Record<GiftId, "ordered">> | undefined, id: GiftId): boolean {
   return gifts?.[id] === "ordered";
+}
+
+/** Сутки мира по часам книги, не стола. */
+export function worldDayOf(clock: number): number {
+  return Math.floor(Math.max(0, clock) / TICKS_PER_DAY);
+}
+
+export function sellsToday(
+  body: { sells?: number; sellDay?: number } | null | undefined,
+  day: number,
+): number {
+  if (!body || body.sellDay !== day) return 0;
+  const n = Math.floor(Number(body.sells) || 0);
+  return n > 0 ? n : 0;
+}
+
+export function planSellDay(
+  body: { sells?: number; sellDay?: number } | null | undefined,
+  day: number,
+): { ok: true; sells: number; sellDay: number } | { ok: false; hint: string } {
+  const n = sellsToday(body, day);
+  if (n >= SELL_DAY_CAP) return { ok: false, hint: SELL_DAY_HINT };
+  return { ok: true, sells: n + 1, sellDay: day };
 }
 
 export function planSellToStock(

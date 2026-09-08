@@ -173,6 +173,9 @@ export type PawnBody = {
   due?: number;
   /** Призы конторы. Не вещь сумки. */
   gifts?: Partial<Record<GiftId, "ordered">>;
+  /** Сдачи лавке за сутки книги. Сброс с новым днём мира. */
+  sells?: number;
+  sellDay?: number;
 };
 
 export type PawnRow = {
@@ -378,6 +381,8 @@ export function packPawn(c: Character, travel: Travel | null = null): PawnBody {
     pacts: c.pacts,
     village: c.village,
     gifts: c.gifts ?? {},
+    sells: c.sells,
+    sellDay: c.sellDay,
   };
 }
 
@@ -443,6 +448,8 @@ export function unpackPawn(row: PawnRow): Character {
     pacts: packed.pacts ?? {},
     village: packed.village ?? "",
     gifts: packed.gifts ?? {},
+    sells: typeof packed.sells === "number" ? Math.max(0, Math.floor(packed.sells)) : 0,
+    sellDay: typeof packed.sellDay === "number" ? Math.floor(packed.sellDay) : 0,
   };
 }
 

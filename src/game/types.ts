@@ -339,6 +339,9 @@ export type Character = {
   village: string;
   /** Призы конторы. Не вещь сумки. */
   gifts?: Partial<Record<GiftId, "ordered">>;
+  /** Сдачи лавке за сутки книги. */
+  sells?: number;
+  sellDay?: number;
 };
 
 export type Floater = {

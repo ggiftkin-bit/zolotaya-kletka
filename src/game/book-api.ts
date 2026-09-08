@@ -8,7 +8,7 @@ import { GROW_CATCHUP_TICKS, GROW_WRITE_BATCH, TICK_MS, markDepleted, REGROW_WAI
 import type { Inventory, ItemId, Season, ServiceJob, Tile, Transport, World } from "./types";
 import { generateWorld } from "./worldgen";
 import { isItemId, settleService, serviceJobOf, stampTake } from "./market";
-import { fillStock, isGiftId, planBuyFromStock, planDonate, planGift, planSellToStock, stockOf, STOCK_CAP, STOCK_START } from "./office";
+import { fillStock, isGiftId, planBuyFromStock, planDonate, planGift, planSellDay, planSellToStock, stockOf, worldDayOf, STOCK_CAP, STOCK_START } from "./office";
 import { isGoldKind, planGoldDeed, START_GOLD } from "./gold";
 import { bagOf, canCraftHere, craftDefOf, giveOrSpill, GRANT_WOOD, isBagKind, planEat, planGather, startInv, takeBag } from "./bag";
 import { BOOST_ENERGY, busyEnergy, DEAD_MS, ENERGY_MAX, regenVigor, vigorOf } from "./pace";
@@ -283,6 +283,8 @@ function keepBookPurse(incoming: PawnBody, book: PawnBody | null | undefined): P
     deaths: vig.deaths,
     downAt: vig.downAt,
     deadUntil: vig.deadUntil,
+    sells: book?.sells,
+    sellDay: book?.sellDay,
   };
 }
 
@@ -1533,6 +1535,8 @@ export const writeOfficeDeed = createServerFn({ method: "POST" })
       const bag = bagOf(dbBody);
       const plan = planSellToStock(stock, bag, item, qty, season, trader);
       if (!plan.ok) return fail(plan.hint);
+      const cap = planSellDay(dbBody, worldDayOf(clock.clock));
+      if (!cap.ok) return fail(cap.hint);
       const have = stockOf(stock, item);
       const nextCount = have + plan.take;
       const upd = await sql.query<{ stock: unknown }>(
@@ -1553,7 +1557,7 @@ export const writeOfficeDeed = createServerFn({ method: "POST" })
       const fight = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
       const kept = keepBookPurse(fight, dbBody);
       const gold = dbGold + plan.gold;
-      const body = { ...kept, inventory: plan.inv, gold, due: 0, gifts };
+      const body = { ...kept, inventory: plan.inv, gold, due: 0, gifts, sells: cap.sells, sellDay: cap.sellDay };
       await writePawn(sql, userId, data.pawn, body);
       await sql.query(
         `insert into deed (world_id, user_id, kind, x, y, payload)
