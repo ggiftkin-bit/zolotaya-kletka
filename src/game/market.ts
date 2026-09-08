@@ -181,8 +181,12 @@ export function canPostService(tile: Tile, mine: boolean): boolean {
 }
 
 export function canPostFromBoard(board: Tile, mine: boolean, px: number, py: number): boolean {
-  if (!mine || board.burned || board.building !== "board") return false;
-  return chebyshev(px, py, board.x, board.y) <= 1;
+  if (board.burned || board.building !== "board") return false;
+  if (chebyshev(px, py, board.x, board.y) > 1) return false;
+  if (mine) return true;
+  /** Ничей столб: первый, кто вешает, становится хозяином. */
+  if (!board.owner && !board.plot) return true;
+  return false;
 }
 
 function atXY(world: World, x: number, y: number): Tile | null {

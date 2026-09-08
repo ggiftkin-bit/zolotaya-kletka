@@ -5059,6 +5059,7 @@ function serviceSpot(destX?: number, destY?: number): { dest: Tile; fromBoard: b
     if (!dest) return null;
     if (here?.building === "board") {
       if (!canPostFromBoard(here, isYours(here), s.character.x, s.character.y)) return null;
+      if (!here.owner) stampBoard(here);
       return { dest, fromBoard: true };
     }
     return { dest, fromBoard: false };
@@ -5144,7 +5145,15 @@ function postBring(item: ItemId, n: number, destX: number, destY: number, gold: 
   }
   const hang = onDest ? dest : serviceHere();
   if (!hang) return;
-  const fromBoard = hang.building === "board" || onDest;
+  const atBoard = serviceHere();
+  if (atBoard?.building === "board") {
+    if (!canPostFromBoard(atBoard, isYours(atBoard), s.character.x, s.character.y)) {
+      speak("Подойди к доске.", atBoard.x, atBoard.y, "подойди", "bad");
+      return;
+    }
+    if (!atBoard.owner) stampBoard(atBoard);
+  }
+  const fromBoard = hang.building === "board" || onDest || atBoard?.building === "board";
   if (fromBoard && hang.building === "board" && !canPostFromBoard(hang, isYours(hang), s.character.x, s.character.y)) {
     speak("Подойди к доске.", hang.x, hang.y, "подойди", "bad");
     return;

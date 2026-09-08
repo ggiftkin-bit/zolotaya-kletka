@@ -421,7 +421,7 @@ function PickPane({
       {tired && here && (
         <p className="text-[13px] text-danger">Сила на нуле. Жди или кружка сверху. Еда — сытость.</p>
       )}
-      {open && (here || (tile.building === "stall" && near)) && (
+      {open && (here || ((tile.building === "stall" || tile.building === "board") && near)) && (
         <Sticker
           title={tile.caravan ? "Открыть лавку" : `Открыть · ${placeTitle(tile, g.others)}`}
           sub={placeHint(tile)}
@@ -1442,8 +1442,10 @@ function BoardBody({ tile }: { tile: Tile }) {
   const name = tile.village;
   const rows = readable ? boardNotices(g.world, tile) : [];
   const mine = isYours(tile);
-  const canHang = mine && canPostFromBoard(tile, mine, g.character.x, g.character.y);
+  const canHang = canPostFromBoard(tile, mine, g.character.x, g.character.y);
   const [tab, setTab] = useState<"list" | "hang">("list");
+  const gate = firstOwnGate(g.world);
+  const shed = firstOwnShed(g.world);
 
   if (!live) {
     return <p className="mt-4 text-sm text-muted-foreground">В тумане доски нет. Подойди ближе.</p>;
@@ -1480,10 +1482,35 @@ function BoardBody({ tile }: { tile: Tile }) {
       <div>
         {tabs}
         <div className="mt-4 flex flex-col gap-2">
-          <p className="text-[13px] text-muted-foreground">
-            {name ? `«${name}». Заказы хозяина столба и этой улицы.` : "Заказы хозяина столба. Берут здесь или у цели."}
+          <p className="text-[13px] leading-snug text-muted-foreground">
+            Это знак, не калитка. Заказ пишут с листа — цель: калитка, склад или двор. На этот столб услугу не вешают.
           </p>
-          <p className="text-sm text-muted-foreground">{name ? "Пусто." : "Пока пусто — повесь у калитки или с листа."}</p>
+          {canHang ? (
+            <Sticker
+              title="Повесить заказ"
+              sub="привези · постой · отвези · сделай · построй"
+              ico={<Ico i={ICO.gold} className="size-11 overflow-hidden rounded-[12px]" />}
+              onClick={() => setTab("hang")}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">Чужой столб. Строка появится, когда хозяин повесит заказ.</p>
+          )}
+          {gate && (
+            <Sticker
+              title="К калитке"
+              sub="услуга живёт у дома. доска её показывает"
+              ico={<Ico i={ICO.stake} className="size-11 overflow-hidden rounded-[12px]" />}
+              onClick={() => g.goTo(gate.x, gate.y)}
+            />
+          )}
+          {shed && (
+            <Sticker
+              title="На склад"
+              sub="сюда просят привези"
+              ico={<Ico i={ICO.house} className="size-11 overflow-hidden rounded-[12px]" />}
+              onClick={() => g.goTo(shed.x, shed.y)}
+            />
+          )}
         </div>
       </div>
     );
@@ -1701,7 +1728,7 @@ function HangFromBoard({ tile }: { tile: Tile }) {
 
   return (
     <div className="mt-4 flex flex-col gap-2">
-      <p className="text-[13px] text-muted-foreground">Род → что → сколько → куда → золото. Заказ на цель.</p>
+      <p className="text-[13px] leading-snug text-muted-foreground">Заказ пишется на калитку, склад или двор. Этот столб только показывает. Род → куда → золото.</p>
       <Sticker title={SERVICE_LABEL.watch} sub="у калитки" ico={<Ico i={ICO.boots} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => setKind("watch")} />
       <Sticker title={SERVICE_LABEL.haul} sub="из сумки на цель" ico={<Ico i={ICO.wood} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => setKind("haul")} />
       <Sticker title={SERVICE_LABEL.bring} sub="своё на склад или калитку" ico={<Ico i={ICO.wood} className="size-11 overflow-hidden rounded-[12px]" />} onClick={() => setKind("bring")} />

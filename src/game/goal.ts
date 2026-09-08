@@ -15,7 +15,7 @@ export const BUILD_HINT: Record<Exclude<BuildingKind, "none">, string> = {
   well: "вода вокруг",
   workshop: "верстак",
   shop: "продаёт из тайника",
-  board: "знак на тракте, берегу, поляне, улице",
+  board: "знак у тракта. Повесить заказ на калитку",
   mine: "руда",
   tower: "смотрит ночь, не стреляет",
   bench: "доска · плотник",
@@ -61,7 +61,16 @@ export function nextGoal(s: GameState): string {
   if (c.hp < 50) return "Слаб. Крыша и настой";
   const own = s.world.tiles.some((t) => t.plot && t.owner === "you");
   if (!own) return "Застолби двор — два угла в режиме Двор";
+  if (here?.building === "board" && !here.burned) {
+    return "Доска: нажми Повесить. Заказ — на калитку или склад, не на этот столб";
+  }
   if ((inv.wood >= 12 || (inv.plank ?? 0) >= 4) && c.gold < 40) return "Сдай лишнее в лавку";
+  const hasBoard = s.world.tiles.some(
+    (t) => t.building === "board" && !t.burned && (t.owner === "you" || (!t.owner && !t.plot)),
+  );
+  if (!hasBoard && (inv.wood ?? 0) >= 6) return "Вбей доску у тракта — там лист заказов";
+  const hasJob = s.world.tiles.some((t) => t.service?.by === "you" || (t.order && t.owner === "you"));
+  if (hasBoard && !hasJob) return "Открой доску → Повесить. Цель — калитка, не столб";
   if (c.village) return `Староста · ${c.village}`;
   return "";
 }
