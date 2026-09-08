@@ -1,5 +1,5 @@
 import { CAPACITY, FIELD_CROP, GATHER_YIELD, ITEMS, ITEM_LABEL, ITEM_WEIGHT, PROFESSION_BIOME, zeroInv } from "./constants";
-import { canDoCraft, CRAFTS, EAT_ORDER, type CraftKind } from "./craft";
+import { canDoCraft, CRAFTS, EAT_ORDER, EAT_SAT, type CraftKind } from "./craft";
 import { cargoWeight } from "./travel";
 import type { Inventory, ItemId, Profession, Tile, Transport } from "./types";
 
@@ -88,6 +88,11 @@ export const BAG_KINDS = [
   "grant",
   "yard",
   "sleep",
+  "drink",
+  "pail",
+  "sip",
+  "pour",
+  "cook",
 ] as const;
 
 export type BagKind = (typeof BAG_KINDS)[number];
@@ -117,6 +122,33 @@ export function planGather(
 export function planEat(inv: Inventory, item: ItemId): { ok: true; inv: Inventory } | { ok: false; hint: string } {
   if (!EAT_ORDER.includes(item)) return { ok: false, hint: "Еды нет." };
   return takeBag(inv, { [item]: 1 });
+}
+
+export function eatSatiety(item: ItemId, profession: string): number {
+  const base = EAT_SAT[item] ?? 14;
+  return base + (profession === "baker" && item === "bread" ? 8 : 0);
+}
+
+export function isDrinkTile(tile: { biome: string; building: string }): boolean {
+  return tile.biome === "river" || tile.biome === "ford" || tile.building === "well";
+}
+
+export const SIP_WATER = 25;
+export const PAIL_FULL = 3;
+export const CISTERN_POUR = 5;
+export const CISTERN_CAP = 12;
+export const COOK_SAT = 28;
+export const COOK_HERB_SAT = 40;
+
+export function planCook(inv: Inventory): { ok: true; inv: Inventory; gain: number } | { ok: false; hint: string } {
+  const meal: ItemId | null = (inv.food ?? 0) > 0 ? "food" : (inv.fish ?? 0) > 0 ? "fish" : null;
+  if (!meal || (inv.wood ?? 0) <= 0) return { ok: false, hint: "Нужны еда или рыба и полено." };
+  const herb = (inv.herb ?? 0) > 0;
+  const need: Partial<Record<ItemId, number>> = { [meal]: 1, wood: 1 };
+  if (herb) need.herb = 1;
+  const paid = takeBag(inv, need);
+  if (!paid.ok) return paid;
+  return { ok: true, inv: paid.inv, gain: herb ? COOK_HERB_SAT : COOK_SAT };
 }
 
 export function craftDefOf(id: string) {

@@ -1,4 +1,4 @@
-import type { Character } from "./types";
+import type { Character, Season, Weather } from "./types";
 
 export const ENERGY_MAX = 18;
 /** Real ms per +1 energy in the field. */
@@ -109,6 +109,105 @@ export function regenVigor(
     energyAt: last + gained * ms,
     resting: energy >= ENERGY_MAX ? false : v.resting,
   };
+}
+
+/** Сытость / тепло / вода. Книга крутит тик мира, не стол. */
+export const START_SAT = 90;
+export const START_WARMTH = 90;
+export const START_WATER = 100;
+export const FLESH_CATCHUP_TICKS = 48;
+export const WORK_HUNGER = 6;
+export const RISE_SAT = 50;
+export const RISE_WARMTH = 70;
+export const RISE_WATER = 50;
+
+export type Flesh = {
+  satiety: number;
+  warmth: number;
+  water: number;
+  pail: number;
+  sipTick: number;
+  bodyTick: number;
+  hp: number;
+};
+
+function clamp100(n: number, fallback: number): number {
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(100, Math.floor(n)));
+}
+
+export function fleshOf(
+  body: {
+    satiety?: number;
+    warmth?: number;
+    water?: number;
+    pail?: number;
+    sipTick?: number;
+    bodyTick?: number;
+    hp?: number;
+  } | null | undefined,
+): Flesh {
+  if (!body) {
+    return {
+      satiety: START_SAT,
+      warmth: START_WARMTH,
+      water: START_WATER,
+      pail: 0,
+      sipTick: 0,
+      bodyTick: 0,
+      hp: START_HP,
+    };
+  }
+  const wp = splitBodyWater(body);
+  return {
+    satiety: clamp100(Number(body.satiety), START_SAT),
+    warmth: clamp100(Number(body.warmth), START_WARMTH),
+    water: wp.water,
+    pail: Math.max(0, Math.floor(wp.pail)),
+    sipTick: typeof body.sipTick === "number" && body.sipTick > 0 ? body.sipTick : 0,
+    bodyTick: typeof body.bodyTick === "number" && body.bodyTick > 0 ? body.bodyTick : 0,
+    hp: clamp100(Number(body.hp), START_HP),
+  };
+}
+
+/** Один тик мира, как стол крутил в worldTick. */
+export function tickFlesh(
+  f: Flesh,
+  clock: number,
+  opts: {
+    roof: boolean;
+    fire: boolean;
+    phase: "day" | "night";
+    season: Season;
+    weather: Weather;
+    alive: boolean;
+    maxTicks?: number;
+  },
+): Flesh {
+  const cap = opts.maxTicks ?? FLESH_CATCHUP_TICKS;
+  if (f.bodyTick <= 0) return { ...f, bodyTick: clock };
+  const ticks = Math.min(cap, Math.max(0, clock - f.bodyTick));
+  if (ticks <= 0) return { ...f, bodyTick: clock };
+  let satiety = f.satiety;
+  let warmth = f.warmth;
+  let water = f.water;
+  let hp = f.hp;
+  for (let i = 0; i < ticks; i++) {
+    satiety = Math.max(0, satiety - (opts.roof ? 1 : 2));
+    water = Math.max(0, water - (opts.roof ? 1 : 2));
+    if (opts.alive) {
+      if (opts.roof) warmth = Math.min(100, warmth + 4);
+      else if (opts.fire) warmth = Math.min(100, warmth + (opts.phase === "night" ? 3 : 1));
+      else if (opts.phase === "night") warmth = Math.max(0, warmth - (opts.season === "winter" ? 3 : 2));
+      else if (opts.weather === "rain" || opts.weather === "snow") warmth = Math.max(0, warmth - 1);
+      if (satiety === 0) hp = Math.max(0, hp - 3);
+      if (warmth === 0) hp = Math.max(0, hp - 2);
+      if (water === 0) hp = Math.max(0, hp - 2);
+      if (opts.roof && satiety > 40) hp = Math.min(100, hp + 3);
+      else if (satiety > 40 && warmth > 40 && water > 40) hp = Math.min(100, hp + 1);
+    }
+  }
+  return { ...f, satiety, warmth, water, hp, bodyTick: clock };
 }
 
 /** First death 0, then 10, 20, 30… */

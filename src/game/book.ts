@@ -152,6 +152,8 @@ export type PawnBody = {
   water: number;
   pail: number;
   sipTick?: number;
+  /** Последний тик мира, когда книга сняла голод / тепло / жажду. */
+  bodyTick?: number;
   energyAt: number;
   wanted: number;
   jailedUntil: number;

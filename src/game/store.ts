@@ -39,7 +39,7 @@ import { findPath, pathTotal } from "./path";
 import { canDigReason, fillNeedLine, fillPay, giveOrPile, takePaid } from "./pit";
 import { asPile, dumpAllOn, pileAdd, pileEmpty, pileSet, pullNeed, applyNeedPull } from "./pile";
 import { canCrossDiag, MAX_PLOT, clearYard, normRect, plotBounds, putGate, setYardGateLock, stampYard, upgradeYard, yardHasGate, yardWoodCost } from "./fence";
-import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, NO_STRENGTH, SKIP_GOLD, deathFee, energyPeriod, formatWait, splitBodyWater } from "./pace";
+import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, NO_STRENGTH, SKIP_GOLD, deathFee, energyPeriod, fleshOf, formatWait, splitBodyWater, tickFlesh } from "./pace";
 import { applyCatch, applyDriveFail, DRIVE_LABEL, harmCells, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, markCrime, ownerOf, planDriveOff, plotCells, punish, rollCaught, stealChance, takeLoot, unlockKind, fenceBurnCells } from "./crime";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
 import { clearGame, loadGame, saveGame } from "./save";
@@ -1278,7 +1278,27 @@ function sealHarm(kind: string, cells: Array<{ x: number; y: number }>, prior?: 
 }
 
 function sealBag(
-  kind: "gather" | "dig" | "hunt" | "fish" | "pickup" | "drop" | "chest-put" | "chest-take" | "craft" | "eat" | "spend" | "job" | "grant" | "yard" | "sleep",
+  kind:
+    | "gather"
+    | "dig"
+    | "hunt"
+    | "fish"
+    | "pickup"
+    | "drop"
+    | "chest-put"
+    | "chest-take"
+    | "craft"
+    | "eat"
+    | "spend"
+    | "job"
+    | "grant"
+    | "yard"
+    | "sleep"
+    | "drink"
+    | "pail"
+    | "sip"
+    | "pour"
+    | "cook",
   cell: { x: number; y: number },
   prior: Character,
   extra?: { item?: ItemId; qty?: number; craft?: string; need?: Partial<Record<ItemId, number>>; job?: string },
@@ -1553,19 +1573,21 @@ function worldTick() {
   let c = { ...s.character };
   const roof = hasRoofAt(s, c.x, c.y);
 
-  c.satiety = Math.max(0, c.satiety - (roof ? 1 : 2));
-  c.water = Math.max(0, c.water - (roof ? 1 : 2));
-  const fire = nearCamp(s.world, c.x, c.y);
-  if (c.life === "alive") {
-    if (roof) c.warmth = Math.min(100, c.warmth + 4);
-    else if (fire) c.warmth = Math.min(100, c.warmth + (phase === "night" ? 3 : 1));
-    else if (phase === "night") c.warmth = Math.max(0, c.warmth - (s.season === "winter" ? 3 : 2));
-    else if (s.weather === "rain" || s.weather === "snow") c.warmth = Math.max(0, c.warmth - 1);
-    if (c.satiety === 0) c.hp = Math.max(0, c.hp - 3);
-    if (c.warmth === 0) c.hp = Math.max(0, c.hp - 2);
-    if (c.water === 0) c.hp = Math.max(0, c.hp - 2);
-    if (roof && c.satiety > 40) c.hp = Math.min(100, c.hp + 3);
-    else if (c.satiety > 40 && c.warmth > 40 && c.water > 40) c.hp = Math.min(100, c.hp + 1);
+  if (!s.bookOn) {
+    const fire = nearCamp(s.world, c.x, c.y);
+    const f = tickFlesh(fleshOf({ ...c, bodyTick: clock - 1 }), clock, {
+      roof,
+      fire,
+      phase,
+      season,
+      weather,
+      alive: c.life === "alive",
+      maxTicks: 1,
+    });
+    c.satiety = f.satiety;
+    c.warmth = f.warmth;
+    c.water = f.water;
+    c.hp = f.hp;
   }
   if (c.hand && c.inventory[c.hand] <= 0) c.hand = null;
 
@@ -2803,9 +2825,7 @@ function cookHere() {
     log: pushLog(s.log, herb ? "Похлёбка. Сытость. Сила сама капает." : "Подогрел еду. Сытость, не сила."),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "горячее", tone: "ok" as const }].slice(-10),
   });
-  const bagNeed: Partial<Record<ItemId, number>> = { [meal]: 1, wood: 1 };
-  if (herb) bagNeed.herb = 1;
-  sealBag("spend", { x: tile.x, y: tile.y }, s.character, { need: bagNeed });
+  sealBag("cook", { x: tile.x, y: tile.y }, s.character);
 }
 
 function craftAxe() {
@@ -3902,12 +3922,14 @@ function fillBucket() {
     speak("Воду берут из реки, брода или колодца.", tile.x, tile.y, "нет воды", "bad");
     return;
   }
+  const prior = s.character;
   useGame.setState({
     character: { ...s.character, pail: 3, hand: s.character.hand === "bucket" ? "bucket" : s.character.hand },
     hint: null,
     log: pushLog(s.log, "Ведро полное · 3 глотка в путь. Это не питьё тела."),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "ведро", tone: "ok" as const }].slice(-10),
   });
+  sealBag("pail", { x: tile.x, y: tile.y }, prior);
 }
 
 function drinkWater() {
@@ -3922,12 +3944,14 @@ function drinkWater() {
     speak("Уже полный.", tile.x, tile.y, "полный", "ok");
     return;
   }
+  const prior = s.character;
   useGame.setState({
     character: { ...s.character, water: 100 },
     hint: null,
     log: pushLog(s.log, "Напился досыта. Вода тела 100."),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "вода 100", tone: "ok" as const }].slice(-10),
   });
+  sealBag("drink", { x: tile.x, y: tile.y }, prior);
 }
 
 function sipPail() {
@@ -3940,6 +3964,7 @@ function sipPail() {
     speak("Уже полный.", s.character.x, s.character.y, "полный", "ok");
     return;
   }
+  const prior = s.character;
   const water = Math.min(100, s.character.water + 25);
   useGame.setState({
     character: { ...s.character, pail: s.character.pail - 1, water },
@@ -3947,6 +3972,7 @@ function sipPail() {
     log: pushLog(s.log, `Глоток из ведра. Вода тела ${Math.round(water)}. Глотков ${s.character.pail - 1}.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: s.character.x, y: s.character.y, text: "+25 вода", tone: "ok" as const }].slice(-10),
   });
+  sealBag("sip", { x: s.character.x, y: s.character.y }, prior);
 }
 
 function pourWater() {
@@ -3957,6 +3983,7 @@ function pourWater() {
     speak("Ведро пустое. Набери у реки.", tile.x, tile.y, "пусто", "bad");
     return;
   }
+  const prior = s.character;
   tile.cistern = Math.min(12, (tile.cistern ?? 0) + 5);
   useGame.setState({
     character: { ...s.character, pail: s.character.pail - 1 },
@@ -3964,6 +3991,7 @@ function pourWater() {
     log: pushLog(s.log, `Вылил воду. Запас клетки ${tile.cistern}.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "полил", tone: "ok" as const }].slice(-10),
   });
+  sealBag("pour", { x: tile.x, y: tile.y }, prior);
 }
 
 function buyCart() {

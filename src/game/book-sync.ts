@@ -132,6 +132,24 @@ function applyVigor(res: {
   store.set({ character: { ...c, energy, hp, life, deaths, resting, energyAt } });
 }
 
+function applyFlesh(res: { satiety?: number; warmth?: number; water?: number; pail?: number }) {
+  if (typeof res.satiety !== "number" || !Number.isFinite(res.satiety) || !store) return;
+  const c = store.get().character;
+  const satiety = Math.max(0, Math.min(100, Math.floor(res.satiety)));
+  const warmth =
+    typeof res.warmth === "number" && Number.isFinite(res.warmth)
+      ? Math.max(0, Math.min(100, Math.floor(res.warmth)))
+      : c.warmth;
+  const water =
+    typeof res.water === "number" && Number.isFinite(res.water)
+      ? Math.max(0, Math.min(100, Math.floor(res.water)))
+      : c.water;
+  const pail =
+    typeof res.pail === "number" && Number.isFinite(res.pail) ? Math.max(0, Math.floor(res.pail)) : c.pail;
+  if (c.satiety === satiety && c.warmth === warmth && c.water === water && c.pail === pail) return;
+  store.set({ character: { ...c, satiety, warmth, water, pail } });
+}
+
 function applyOwned(res: {
   credit?: number;
   gold?: number;
@@ -142,10 +160,15 @@ function applyOwned(res: {
   hp?: number;
   life?: Character["life"];
   deaths?: number;
+  satiety?: number;
+  warmth?: number;
+  water?: number;
+  pail?: number;
 }) {
   applyCredit(res.credit, res.gold);
   applyBag(res.inventory);
   applyVigor(res);
+  applyFlesh(res);
 }
 
 function applyCredit(n: number | undefined, gold?: number) {
@@ -596,7 +619,17 @@ export async function commitBag(
     k: keyOf(cell.x, cell.y),
     sig,
   };
-  const writesTile = kind !== "eat" && kind !== "spend" && kind !== "job" && kind !== "grant" && kind !== "yard" && kind !== "sleep";
+  const writesTile =
+    kind !== "eat" &&
+    kind !== "spend" &&
+    kind !== "job" &&
+    kind !== "grant" &&
+    kind !== "yard" &&
+    kind !== "sleep" &&
+    kind !== "drink" &&
+    kind !== "pail" &&
+    kind !== "sip" &&
+    kind !== "cook";
   if (writesTile) lastSlim.set(pack.k, pack.sig);
   try {
     const res = await writeBagDeed({

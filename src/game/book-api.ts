@@ -10,8 +10,8 @@ import { generateWorld } from "./worldgen";
 import { isItemId, settleService, serviceJobOf, stampTake } from "./market";
 import { fillStock, isGiftId, planBuyFromStock, planDonate, planGift, planSellDay, planSellToStock, stockOf, worldDayOf, STOCK_CAP, STOCK_START } from "./office";
 import { isGoldKind, planGoldDeed, START_GOLD } from "./gold";
-import { bagOf, canCraftHere, craftDefOf, giveOrSpill, GRANT_WOOD, isBagKind, planEat, planGather, startInv, takeBag } from "./bag";
-import { BOOST_ENERGY, busyEnergy, DEAD_MS, ENERGY_MAX, regenVigor, vigorOf } from "./pace";
+import { bagOf, canCraftHere, CISTERN_CAP, CISTERN_POUR, craftDefOf, eatSatiety, giveOrSpill, GRANT_WOOD, isBagKind, isDrinkTile, PAIL_FULL, planCook, planEat, planGather, SIP_WATER, startInv, takeBag } from "./bag";
+import { BOOST_ENERGY, busyEnergy, DEAD_MS, ENERGY_MAX, fleshOf, regenVigor, RISE_SAT, RISE_WATER, RISE_WARMTH, tickFlesh, vigorOf, WORK_HUNGER } from "./pace";
 import { stepEnergy } from "./travel";
 import { isHamletOwner, isLivingOwner } from "./pact";
 import { defaultMatter, MATTER_HP, isRoof } from "./work";
@@ -266,9 +266,10 @@ function purseGold(book: PawnBody | null | undefined): number {
   return book ? purseOf(book) : START_GOLD;
 }
 
-/** Upsert фишки не берёт с клиента gold / due / gifts / inventory / energy / hp / life / deaths. */
+/** Upsert фишки не берёт с клиента gold / due / gifts / inventory / energy / hp / life / deaths / satiety / warmth / water. */
 function keepBookPurse(incoming: PawnBody, book: PawnBody | null | undefined): PawnBody {
   const vig = vigorOf(book);
+  const flesh = fleshOf(book);
   return {
     ...incoming,
     gold: purseGold(book),
@@ -285,6 +286,12 @@ function keepBookPurse(incoming: PawnBody, book: PawnBody | null | undefined): P
     deadUntil: vig.deadUntil,
     sells: book?.sells,
     sellDay: book?.sellDay,
+    satiety: flesh.satiety,
+    warmth: flesh.warmth,
+    water: flesh.water,
+    pail: flesh.pail,
+    sipTick: flesh.sipTick,
+    bodyTick: flesh.bodyTick,
   };
 }
 
@@ -297,6 +304,16 @@ function vigorOut(body: PawnBody) {
     hp: v.hp,
     life: v.life,
     deaths: v.deaths,
+  };
+}
+
+function fleshOut(body: PawnBody) {
+  const f = fleshOf(body);
+  return {
+    satiety: f.satiety,
+    warmth: f.warmth,
+    water: f.water,
+    pail: f.pail,
   };
 }
 
@@ -450,6 +467,17 @@ function asMiniWorld(tiles: Tile[]): World {
   return w;
 }
 
+async function campNear(sql: Sql, x: number, y: number): Promise<boolean> {
+  const rows = await sql.query<{ slim: SlimTile }>(
+    `select slim from tile where world_id = $1 and greatest(abs(x - $2), abs(y - $3)) <= 1`,
+    [WORLD_ID, x, y],
+  );
+  return rows.some((r) => {
+    const t = fatTile(asSlim(r.slim), 0, 0);
+    return t.building === "camp" && !t.burned;
+  });
+}
+
 async function mergeBookBody(
   sql: Sql,
   userId: string,
@@ -465,6 +493,7 @@ async function mergeBookBody(
   );
   const slim = here[0] ? asSlim(here[0].slim) : null;
   const walking = !!(pawn.body.travel && Array.isArray((pawn.body.travel as { path?: unknown }).path) && ((pawn.body.travel as { path?: unknown[] }).path?.length ?? 0) > 0);
+  const wasDead = row?.body?.life === "dead";
   kept = tickVigor(
     pawn.body,
     row?.body,
@@ -474,6 +503,30 @@ async function mergeBookBody(
     slim,
     walking,
   );
+  const clock = await advanceWorldClock(sql, userId);
+  if (wasDead && kept.life === "alive") {
+    kept = { ...kept, satiety: RISE_SAT, warmth: RISE_WARMTH, water: RISE_WATER, bodyTick: clock.clock };
+  }
+  const fire = await campNear(sql, pawn.x, pawn.y);
+  const shelter = slim ? roofOfSlim(slim, undefined) : false;
+  const f = tickFlesh(fleshOf(kept), clock.clock, {
+    roof: shelter,
+    fire,
+    phase: clock.phase,
+    season: clock.season,
+    weather: clock.weather,
+    alive: kept.life === "alive",
+  });
+  kept = {
+    ...kept,
+    satiety: f.satiety,
+    warmth: f.warmth,
+    water: f.water,
+    pail: f.pail,
+    sipTick: f.sipTick,
+    bodyTick: f.bodyTick,
+    hp: f.hp,
+  };
   return { body: kept, credit, gold: kept.gold, inventory: kept.inventory };
 }
 
@@ -1221,12 +1274,14 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
     let gold = START_GOLD;
     let inventory = startInv();
     let vigor = vigorOf(null);
+    let flesh = fleshOf(null);
     if (data.pawn) {
       const merged = await mergeBookBody(sql, context.userId, data.pawn);
       credit = merged.credit;
       gold = merged.gold;
       inventory = merged.inventory;
       vigor = vigorOf(merged.body);
+      flesh = fleshOf(merged.body);
       await writePawn(sql, context.userId, data.pawn, merged.body);
     } else {
       await sql.query(
@@ -1239,12 +1294,14 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       gold = purseOf(row?.body);
       inventory = bagOf(row?.body);
       vigor = vigorOf(row?.body);
+      flesh = fleshOf(row?.body);
       if (due > 0 && row?.body) {
         const body = { ...row.body, gold, due: 0 };
         await writePawn(sql, context.userId, { name: row.name, color: row.color, x: data.x, y: data.y }, body);
         credit = due;
         inventory = bagOf(body);
         vigor = vigorOf(body);
+        flesh = fleshOf(body);
       }
     }
     const clock = await advanceWorldClock(sql, context.userId);
@@ -1308,6 +1365,10 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       hp: vigor.hp,
       life: vigor.life,
       deaths: vigor.deaths,
+      satiety: flesh.satiety,
+      warmth: flesh.warmth,
+      water: flesh.water,
+      pail: flesh.pail,
     };
   });
 
@@ -1624,10 +1685,12 @@ export const writeGoldDeed = createServerFn({ method: "POST" })
     }
     const now = Date.now();
     let vig = vigorOf(fight, now);
+    let satiety = typeof fight.satiety === "number" ? fight.satiety : 90;
     if (data.kind === "boost") {
       vig = { ...vig, energy: Math.min(ENERGY_MAX, vig.energy + BOOST_ENERGY), energyAt: now };
     } else if (data.kind === "work") {
       vig = { ...vig, energy: Math.max(0, vig.energy - 4), energyAt: now };
+      satiety = Math.max(0, satiety - WORK_HUNGER);
     } else if (data.kind === "death" && vig.life !== "dead") {
       vig = {
         ...vig,
@@ -1653,6 +1716,7 @@ export const writeGoldDeed = createServerFn({ method: "POST" })
       deaths: vig.deaths,
       downAt: vig.downAt,
       deadUntil: vig.deadUntil,
+      satiety,
     };
     await writePawn(sql, userId, data.pawn, body);
     await sql.query(
@@ -1660,7 +1724,7 @@ export const writeGoldDeed = createServerFn({ method: "POST" })
        values ($1, $2, $3, $4, $5, $6::jsonb)`,
       [WORLD_ID, userId, `gold-${data.kind}`, data.pawn.x, data.pawn.y, JSON.stringify({ gold: plan.gold, delta: plan.delta })],
     );
-    return { ok: true as const, gold: plan.gold, credit: 0, inventory: inv, ...vigorOut(body) };
+    return { ok: true as const, gold: plan.gold, credit: 0, inventory: inv, ...vigorOut(body), ...fleshOut(body) };
   });
 
 export const writeServiceDeed = createServerFn({ method: "POST" })
@@ -1921,7 +1985,17 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       gold,
       inventory,
     });
-    const bagSoft = data.kind === "eat" || data.kind === "spend" || data.kind === "job" || data.kind === "grant" || data.kind === "yard" || data.kind === "sleep";
+    const bagSoft =
+      data.kind === "eat" ||
+      data.kind === "spend" ||
+      data.kind === "job" ||
+      data.kind === "grant" ||
+      data.kind === "yard" ||
+      data.kind === "sleep" ||
+      data.kind === "drink" ||
+      data.kind === "pail" ||
+      data.kind === "sip" ||
+      data.kind === "cook";
     if (!cur) return emptyFail("клетка уже другая");
     if (cur.ver !== t.ver && !bagSoft) {
       return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0, gold: 0, inventory: startInv() };
@@ -1938,6 +2012,12 @@ export const writeBagDeed = createServerFn({ method: "POST" })
     let gold = merged.gold;
     let resting = !!merged.body.resting;
     let energyAt = merged.body.energyAt;
+    const flesh0 = fleshOf(merged.body);
+    let satiety = flesh0.satiety;
+    let warmth = flesh0.warmth;
+    let water = flesh0.water;
+    let pail = flesh0.pail;
+    let sipTick = flesh0.sipTick;
     const written: { x: number; y: number; ver: number }[] = [];
     const clock = asClock(await readWorld(sql));
     const night = clock.phase === "night";
@@ -1968,6 +2048,7 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       const plan = planEat(inv, item);
       if (!plan.ok) return emptyFail(plan.hint, gold, inv);
       inv = plan.inv;
+      satiety = Math.min(100, satiety + eatSatiety(item, merged.body.profession));
     } else if (data.kind === "spend") {
       const rawNeed = data.need ?? {};
       const need: Partial<Record<ItemId, number>> = {};
@@ -2163,13 +2244,56 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       }
       resting = next;
       energyAt = Date.now();
+    } else if (data.kind === "drink") {
+      if (reach > 1) return emptyFail("подойди", gold, inv);
+      if (!isDrinkTile(live)) return emptyFail("нет воды", gold, inv);
+      if (water >= 100) return emptyFail("Уже полный.", gold, inv);
+      water = 100;
+      sipTick = clock.clock;
+    } else if (data.kind === "pail") {
+      if (reach > 1) return emptyFail("подойди", gold, inv);
+      if ((inv.bucket ?? 0) <= 0) return emptyFail("Нужно ведро в ноше.", gold, inv);
+      if (!isDrinkTile(live)) return emptyFail("нет воды", gold, inv);
+      pail = PAIL_FULL;
+    } else if (data.kind === "sip") {
+      if (pail <= 0) return emptyFail("Ведро пустое. Набери у реки.", gold, inv);
+      if (water >= 100) return emptyFail("Уже полный.", gold, inv);
+      pail -= 1;
+      water = Math.min(100, water + SIP_WATER);
+    } else if (data.kind === "pour") {
+      if (pail <= 0) return emptyFail("Ведро пустое. Набери у реки.", gold, inv);
+      pail -= 1;
+      live.cistern = Math.min(CISTERN_CAP, (live.cistern ?? 0) + CISTERN_POUR);
+      const ver = await bump(live, t.ver);
+      if (ver == null) return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0, gold, inventory: inv };
+      written.push({ x: t.x, y: t.y, ver });
+    } else if (data.kind === "cook") {
+      if (reach > 1) return emptyFail("подойди", gold, inv);
+      const house = live.building === "shack" || live.building === "house" || live.building === "camp";
+      if (!house || live.burned) return emptyFail("нет огня", gold, inv);
+      const plan = planCook(inv);
+      if (!plan.ok) return emptyFail(plan.hint, gold, inv);
+      inv = plan.inv;
+      satiety = Math.min(100, satiety + plan.gain);
     } else if (data.kind === "steal") {
       return emptyFail("кража — делом вреда", gold, inv);
     } else {
       return emptyFail("нет такого дела", gold, inv);
     }
 
-    const body = { ...merged.body, gold, due: 0, inventory: inv, resting, energyAt };
+    const body = {
+      ...merged.body,
+      gold,
+      due: 0,
+      inventory: inv,
+      resting,
+      energyAt,
+      satiety,
+      warmth,
+      water,
+      pail,
+      sipTick,
+    };
     await writePawn(sql, userId, data.pawn, body);
     await sql.query(
       `insert into deed (world_id, user_id, kind, x, y, payload)
@@ -2177,7 +2301,7 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       [WORLD_ID, userId, `bag-${data.kind}`, t.x, t.y, JSON.stringify({ item: data.item, qty: data.qty, craft: data.craft, job: data.job, n: written.length })],
     );
     await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
-    return { ok: true as const, written, credit: merged.credit, gold, inventory: inv, ...vigorOut(body) };
+    return { ok: true as const, written, credit: merged.credit, gold, inventory: inv, ...vigorOut(body), ...fleshOut(body) };
   });
 
 export const writeVillageDeed = createServerFn({ method: "POST" })
