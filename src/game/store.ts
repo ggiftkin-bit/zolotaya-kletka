@@ -1269,7 +1269,7 @@ function sealHarm(kind: string, cells: Array<{ x: number; y: number }>, prior?: 
 }
 
 function sealBag(
-  kind: "gather" | "dig" | "hunt" | "fish" | "pickup" | "drop" | "chest-put" | "chest-take" | "craft" | "eat" | "spend" | "job" | "grant" | "yard",
+  kind: "gather" | "dig" | "hunt" | "fish" | "pickup" | "drop" | "chest-put" | "chest-take" | "craft" | "eat" | "spend" | "job" | "grant" | "yard" | "sleep",
   cell: { x: number; y: number },
   prior: Character,
   extra?: { item?: ItemId; qty?: number; craft?: string; need?: Partial<Record<ItemId, number>>; job?: string },
@@ -2516,6 +2516,7 @@ function restHere() {
     speak("Сила полная. Ты в шалаше — тепло капает само. Лежать незачем.", tile.x, tile.y, "сила полная", "ok");
     return;
   }
+  const prior = s.character;
   const resting = !s.character.resting;
   if (resting) cancelNotice("walk");
   else cancelNotice("energy");
@@ -2529,11 +2530,11 @@ function restHere() {
     hint: { text: line, tone: "ok" },
     floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: resting ? "лежишь" : "встал", tone: "ok" as const }].slice(-10),
   });
+  sealBag("sleep", { x: tile.x, y: tile.y }, prior);
   if (resting) {
     const period = energyPeriod({ roof, sleeping: true, hungry: s.character.satiety < 25 });
     const need = Math.max(1, ENERGY_MAX - s.character.energy);
     scheduleNotice("energy", "Сила полная", "Отдохнул — можно вставать.", Date.now() + need * period);
-    useGame.getState().persist();
   }
 }
 

@@ -11,8 +11,10 @@ import { isItemId, settleService, serviceJobOf, stampTake } from "./market";
 import { fillStock, isGiftId, planBuyFromStock, planDonate, planGift, planSellToStock, stockOf, STOCK_CAP, STOCK_START } from "./office";
 import { isGoldKind, planGoldDeed, START_GOLD } from "./gold";
 import { bagOf, canCraftHere, craftDefOf, giveOrSpill, GRANT_WOOD, isBagKind, planEat, planGather, startInv, takeBag } from "./bag";
+import { BOOST_ENERGY, busyEnergy, DEAD_MS, ENERGY_MAX, regenVigor, vigorOf } from "./pace";
+import { stepEnergy } from "./travel";
 import { isHamletOwner, isLivingOwner } from "./pact";
-import { defaultMatter, MATTER_HP } from "./work";
+import { defaultMatter, MATTER_HP, isRoof } from "./work";
 import { asPile, pileAdd, pileEmpty, pileSet, pullNeed, SHED_REACH, applyNeedPull } from "./pile";
 import { STRIKE_CAP } from "./fight";
 import { makeJobs } from "./economy";
@@ -264,14 +266,97 @@ function purseGold(book: PawnBody | null | undefined): number {
   return book ? purseOf(book) : START_GOLD;
 }
 
-/** Upsert фишки не берёт с клиента gold / due / gifts / inventory. Нет строки — старт 20 и еда×6, топор. */
+/** Upsert фишки не берёт с клиента gold / due / gifts / inventory / energy / hp / life / deaths. */
 function keepBookPurse(incoming: PawnBody, book: PawnBody | null | undefined): PawnBody {
+  const vig = vigorOf(book);
   return {
     ...incoming,
     gold: purseGold(book),
     due: 0,
     gifts: { ...(book?.gifts ?? {}) },
     inventory: book ? bagOf(book) : startInv(),
+    energy: vig.energy,
+    energyAt: vig.energyAt,
+    resting: vig.resting,
+    hp: vig.hp,
+    life: vig.life,
+    deaths: vig.deaths,
+    downAt: vig.downAt,
+    deadUntil: vig.deadUntil,
+  };
+}
+
+function vigorOut(body: PawnBody) {
+  const v = vigorOf(body);
+  return {
+    energy: v.energy,
+    energyAt: v.energyAt,
+    resting: v.resting,
+    hp: v.hp,
+    life: v.life,
+    deaths: v.deaths,
+  };
+}
+
+function roofOfSlim(slim: SlimTile, profession: string | undefined): boolean {
+  const tile = fatTile(slim, 0, 0);
+  if (isRoof(tile) || tile.building === "tower") return true;
+  return profession === "hireling";
+}
+
+function tickVigor(
+  incoming: PawnBody,
+  book: PawnBody | null | undefined,
+  kept: PawnBody,
+  from: { x: number; y: number } | null,
+  to: { x: number; y: number },
+  slim: SlimTile | null,
+  walking: boolean,
+): PawnBody {
+  const now = Date.now();
+  let vig = vigorOf(kept, now);
+  const steps = from ? Math.max(Math.abs(from.x - to.x), Math.abs(from.y - to.y)) : 0;
+  if (steps > 0) {
+    const drain = steps * stepEnergy(transportOf(kept));
+    vig = { ...vig, energy: Math.max(0, vig.energy - drain) };
+  }
+  const inBusy = incoming.busy;
+  const wasBusy = book?.busy;
+  if (inBusy && inBusy.until > (wasBusy?.until ?? 0)) {
+    vig = { ...vig, energy: Math.max(0, vig.energy - busyEnergy(inBusy.kind)) };
+  }
+  const roof = slim ? roofOfSlim(slim, kept.profession) : false;
+  vig = regenVigor(vig, now, {
+    roof,
+    walking: walking || steps > 0,
+    hungry: (kept.satiety ?? 90) < 25,
+    busyUntil: inBusy?.until,
+    hired: !!inBusy?.hired,
+  });
+  if (vig.life === "down" && roof && now - (vig.downAt || now) >= 3_000) {
+    vig = { ...vig, life: "alive", hp: Math.max(20, vig.hp), downAt: 0, resting: true, energyAt: now };
+  }
+  if (vig.life === "dead" && vig.deadUntil > 0 && now >= vig.deadUntil) {
+    vig = {
+      ...vig,
+      life: "alive",
+      hp: 40,
+      energy: Math.max(vig.energy, 8),
+      downAt: 0,
+      deadUntil: 0,
+      resting: false,
+    };
+  }
+  return {
+    ...kept,
+    energy: vig.energy,
+    energyAt: vig.energyAt,
+    resting: vig.resting,
+    hp: vig.hp,
+    life: vig.life,
+    deaths: vig.deaths,
+    downAt: vig.downAt,
+    deadUntil: vig.deadUntil,
   };
 }
 
@@ -363,11 +448,30 @@ function asMiniWorld(tiles: Tile[]): World {
   return w;
 }
 
-async function mergeBookBody(sql: Sql, userId: string, body: PawnBody): Promise<{ body: PawnBody; credit: number; gold: number; inventory: Inventory }> {
-  const withFight = await mergeFightIntoPawnBody(sql, userId, body);
+async function mergeBookBody(
+  sql: Sql,
+  userId: string,
+  pawn: { x: number; y: number; body: PawnBody },
+): Promise<{ body: PawnBody; credit: number; gold: number; inventory: Inventory }> {
   const row = await readPawn(sql, userId);
   const credit = dueOf(row?.body);
-  const kept = keepBookPurse(withFight, row?.body);
+  let kept = keepBookPurse(pawn.body, row?.body);
+  kept = await mergeFightIntoPawnBody(sql, userId, kept);
+  const here = await sql.query<{ slim: SlimTile }>(
+    `select slim from tile where world_id = $1 and x = $2 and y = $3`,
+    [WORLD_ID, pawn.x, pawn.y],
+  );
+  const slim = here[0] ? asSlim(here[0].slim) : null;
+  const walking = !!(pawn.body.travel && Array.isArray((pawn.body.travel as { path?: unknown }).path) && ((pawn.body.travel as { path?: unknown[] }).path?.length ?? 0) > 0);
+  kept = tickVigor(
+    pawn.body,
+    row?.body,
+    kept,
+    row ? { x: row.x, y: row.y } : null,
+    { x: pawn.x, y: pawn.y },
+    slim,
+    walking,
+  );
   return { body: kept, credit, gold: kept.gold, inventory: kept.inventory };
 }
 
@@ -948,7 +1052,7 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
         JSON.stringify({ n: data.tiles.length, written: written.length }),
       ],
     );
-    const merged = await mergeBookBody(sql, context.userId, data.pawn.body);
+    const merged = await mergeBookBody(sql, context.userId, data.pawn);
     const body = { ...merged.body, gold: merged.gold + picked };
     await writePawn(sql, context.userId, data.pawn, body);
     await imprintSpot(sql, context.userId, data.pawn.x, data.pawn.y);
@@ -980,7 +1084,7 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     if (!data.tiles.length) {
-      const merged = await mergeBookBody(sql, context.userId, data.pawn.body);
+      const merged = await mergeBookBody(sql, context.userId, data.pawn);
       await writePawn(sql, context.userId, data.pawn, merged.body);
       return { ok: true as const, written: [] as { x: number; y: number; ver: number }[], credit: merged.credit, gold: merged.gold, inventory: merged.inventory };
     }
@@ -1063,7 +1167,7 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
         JSON.stringify({ n: data.tiles.length, harm: true }),
       ],
     );
-    const merged = await mergeBookBody(sql, context.userId, data.pawn.body);
+    const merged = await mergeBookBody(sql, context.userId, data.pawn);
     let bag = merged.inventory;
     const ride = transportOf(merged.body);
     if (data.kind === "pile" || data.kind === "steal") {
@@ -1114,11 +1218,13 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
     let credit = 0;
     let gold = START_GOLD;
     let inventory = startInv();
+    let vigor = vigorOf(null);
     if (data.pawn) {
-      const merged = await mergeBookBody(sql, context.userId, data.pawn.body);
+      const merged = await mergeBookBody(sql, context.userId, data.pawn);
       credit = merged.credit;
       gold = merged.gold;
       inventory = merged.inventory;
+      vigor = vigorOf(merged.body);
       await writePawn(sql, context.userId, data.pawn, merged.body);
     } else {
       await sql.query(
@@ -1130,11 +1236,13 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       const due = dueOf(row?.body);
       gold = purseOf(row?.body);
       inventory = bagOf(row?.body);
+      vigor = vigorOf(row?.body);
       if (due > 0 && row?.body) {
         const body = { ...row.body, gold, due: 0 };
         await writePawn(sql, context.userId, { name: row.name, color: row.color, x: data.x, y: data.y }, body);
         credit = due;
         inventory = bagOf(body);
+        vigor = vigorOf(body);
       }
     }
     const clock = await advanceWorldClock(sql, context.userId);
@@ -1192,6 +1300,12 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       gold,
       inventory,
       stock,
+      energy: vigor.energy,
+      energyAt: vigor.energyAt,
+      resting: vigor.resting,
+      hp: vigor.hp,
+      life: vigor.life,
+      deaths: vigor.deaths,
     };
   });
 
@@ -1331,7 +1445,7 @@ export const writeStallDeed = createServerFn({ method: "POST" })
     if (!upd[0]) {
       return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0 };
     }
-    const merged = await mergeBookBody(sql, userId, data.pawn.body);
+    const merged = await mergeBookBody(sql, userId, data.pawn);
     let inv = merged.inventory;
     if (data.kind === "stall-put" && incoming) {
       const paid = takeBag(inv, { [incoming.item]: incoming.n });
@@ -1496,7 +1610,7 @@ export const writeGoldDeed = createServerFn({ method: "POST" })
     const userId = context.userId;
     if (!isGoldKind(data.kind)) return { ok: false as const, hint: "нет такого дела", gold: 0, inventory: startInv() };
     const row = await readPawn(sql, userId);
-    const merged = await mergeBookBody(sql, userId, data.pawn.body);
+    const merged = await mergeBookBody(sql, userId, data.pawn);
     const plan = planGoldDeed(data.kind, merged.gold, row?.body?.deaths ?? 0);
     if (!plan.ok) return { ok: false as const, hint: plan.hint, gold: merged.gold, inventory: merged.inventory };
     const fight = await mergeFightIntoPawnBody(sql, userId, merged.body);
@@ -1504,14 +1618,45 @@ export const writeGoldDeed = createServerFn({ method: "POST" })
     if (data.kind === "lock") {
       inv = giveOrSpill(inv, transportOf(merged.body), "lock", 1).inv;
     }
-    const body = { ...fight, gold: plan.gold, due: 0, gifts: merged.body.gifts, inventory: inv };
+    const now = Date.now();
+    let vig = vigorOf(fight, now);
+    if (data.kind === "boost") {
+      vig = { ...vig, energy: Math.min(ENERGY_MAX, vig.energy + BOOST_ENERGY), energyAt: now };
+    } else if (data.kind === "work") {
+      vig = { ...vig, energy: Math.max(0, vig.energy - 4), energyAt: now };
+    } else if (data.kind === "death" && vig.life !== "dead") {
+      vig = {
+        ...vig,
+        life: "dead",
+        hp: 0,
+        deaths: vig.deaths + 1,
+        deadUntil: now + DEAD_MS,
+        downAt: 0,
+        resting: false,
+      };
+    }
+    const body = {
+      ...fight,
+      gold: plan.gold,
+      due: 0,
+      gifts: merged.body.gifts,
+      inventory: inv,
+      energy: vig.energy,
+      energyAt: vig.energyAt,
+      resting: vig.resting,
+      hp: vig.hp,
+      life: vig.life,
+      deaths: vig.deaths,
+      downAt: vig.downAt,
+      deadUntil: vig.deadUntil,
+    };
     await writePawn(sql, userId, data.pawn, body);
     await sql.query(
       `insert into deed (world_id, user_id, kind, x, y, payload)
        values ($1, $2, $3, $4, $5, $6::jsonb)`,
       [WORLD_ID, userId, `gold-${data.kind}`, data.pawn.x, data.pawn.y, JSON.stringify({ gold: plan.gold, delta: plan.delta })],
     );
-    return { ok: true as const, gold: plan.gold, credit: 0, inventory: inv };
+    return { ok: true as const, gold: plan.gold, credit: 0, inventory: inv, ...vigorOut(body) };
   });
 
 export const writeServiceDeed = createServerFn({ method: "POST" })
@@ -1641,7 +1786,7 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
       if (ver == null) {
         return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0 };
       }
-      const merged = await mergeBookBody(sql, userId, data.pawn.body);
+      const merged = await mergeBookBody(sql, userId, data.pawn);
       let inv = merged.inventory;
       if (data.kind === "service-done" && liveJob.kind === "bring" && liveJob.item && isItemId(liveJob.item)) {
         const paid = takeBag(inv, { [liveJob.item]: liveJob.n ?? 1 });
@@ -1695,7 +1840,7 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
       }
     }
 
-    const merged = await mergeBookBody(sql, userId, data.pawn.body);
+    const merged = await mergeBookBody(sql, userId, data.pawn);
     let gold = merged.gold;
     let inv = merged.inventory;
     const ride = transportOf(merged.body);
@@ -1772,7 +1917,7 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       gold,
       inventory,
     });
-    const bagSoft = data.kind === "eat" || data.kind === "spend" || data.kind === "job" || data.kind === "grant" || data.kind === "yard";
+    const bagSoft = data.kind === "eat" || data.kind === "spend" || data.kind === "job" || data.kind === "grant" || data.kind === "yard" || data.kind === "sleep";
     if (!cur) return emptyFail("клетка уже другая");
     if (cur.ver !== t.ver && !bagSoft) {
       return { ok: false as const, hint: "клетка уже другая", conflicts: asConflict(), written: [], credit: 0, gold: 0, inventory: startInv() };
@@ -1783,10 +1928,12 @@ export const writeBagDeed = createServerFn({ method: "POST" })
     }
     const liveSlim = asSlim(cur.slim);
     const live = fatTile(liveSlim, t.x, t.y);
-    const merged = await mergeBookBody(sql, userId, data.pawn.body);
+    const merged = await mergeBookBody(sql, userId, data.pawn);
     const ride = transportOf(merged.body);
     let inv = merged.inventory;
     let gold = merged.gold;
+    let resting = !!merged.body.resting;
+    let energyAt = merged.body.energyAt;
     const written: { x: number; y: number; ver: number }[] = [];
     const clock = asClock(await readWorld(sql));
     const night = clock.phase === "night";
@@ -2005,13 +2152,20 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       if (!b) return emptyFail("Здесь нет двора.", gold, inv);
       const refund = Math.floor(yardWoodCost(b.x1 - b.x0 + 1, b.y1 - b.y0 + 1) / 2);
       if (refund > 0) spill("wood", refund);
+    } else if (data.kind === "sleep") {
+      const next = !resting;
+      if (next && !roofOfSlim(liveSlim, merged.body.profession)) {
+        return emptyFail("нужен шалаш", gold, inv);
+      }
+      resting = next;
+      energyAt = Date.now();
     } else if (data.kind === "steal") {
       return emptyFail("кража — делом вреда", gold, inv);
     } else {
       return emptyFail("нет такого дела", gold, inv);
     }
 
-    const body = { ...merged.body, gold, due: 0, inventory: inv };
+    const body = { ...merged.body, gold, due: 0, inventory: inv, resting, energyAt };
     await writePawn(sql, userId, data.pawn, body);
     await sql.query(
       `insert into deed (world_id, user_id, kind, x, y, payload)
@@ -2019,7 +2173,7 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       [WORLD_ID, userId, `bag-${data.kind}`, t.x, t.y, JSON.stringify({ item: data.item, qty: data.qty, craft: data.craft, job: data.job, n: written.length })],
     );
     await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
-    return { ok: true as const, written, credit: merged.credit, gold, inventory: inv };
+    return { ok: true as const, written, credit: merged.credit, gold, inventory: inv, ...vigorOut(body) };
   });
 
 export const writeVillageDeed = createServerFn({ method: "POST" })
@@ -2045,7 +2199,7 @@ export const writeVillageDeed = createServerFn({ method: "POST" })
       return { ok: false as const, hint: "слишком широко", conflicts: [] as TilePacket[], written: [], credit: 0 };
     }
     if (!data.tiles.length) {
-      const merged = await mergeBookBody(sql, userId, data.pawn.body);
+      const merged = await mergeBookBody(sql, userId, data.pawn);
       await writePawn(sql, userId, data.pawn, merged.body);
       return { ok: true as const, written: [] as { x: number; y: number; ver: number }[], credit: merged.credit, gold: merged.gold, inventory: merged.inventory };
     }
@@ -2203,7 +2357,7 @@ export const writeVillageDeed = createServerFn({ method: "POST" })
         JSON.stringify({ name, n: data.tiles.length }),
       ],
     );
-    const merged = await mergeBookBody(sql, userId, data.pawn.body);
+    const merged = await mergeBookBody(sql, userId, data.pawn);
     await writePawn(sql, userId, data.pawn, merged.body);
     await imprintSpot(sql, userId, data.pawn.x, data.pawn.y);
     return { ok: true as const, written, credit: merged.credit, gold: merged.gold, inventory: merged.inventory };

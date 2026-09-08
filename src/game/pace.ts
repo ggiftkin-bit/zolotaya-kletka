@@ -18,6 +18,99 @@ export const DAY_MS = 240_000;
 
 export const NO_STRENGTH = "Нет силы. Ляг дома или кружка 8 золота.";
 
+export const START_HP = 100;
+
+export type Vigor = {
+  energy: number;
+  energyAt: number;
+  resting: boolean;
+  hp: number;
+  life: "alive" | "down" | "jailed" | "dead";
+  deaths: number;
+  downAt: number;
+  deadUntil: number;
+};
+
+export function vigorOf(
+  body: {
+    energy?: number;
+    energyAt?: number;
+    resting?: boolean;
+    hp?: number;
+    life?: string;
+    deaths?: number;
+    downAt?: number;
+    deadUntil?: number;
+  } | null | undefined,
+  now = Date.now(),
+): Vigor {
+  const life =
+    body?.life === "down" || body?.life === "jailed" || body?.life === "dead" ? body.life : "alive";
+  const energy = typeof body?.energy === "number" && Number.isFinite(body.energy) ? body.energy : ENERGY_MAX;
+  const hp = typeof body?.hp === "number" && Number.isFinite(body.hp) ? body.hp : START_HP;
+  return {
+    energy: Math.max(0, Math.min(ENERGY_MAX, energy)),
+    energyAt: typeof body?.energyAt === "number" && body.energyAt > 0 ? body.energyAt : now,
+    resting: !!body?.resting,
+    hp: Math.max(0, Math.min(100, Math.floor(hp))),
+    life,
+    deaths: Math.max(0, Math.floor(Number(body?.deaths) || 0)),
+    downAt: typeof body?.downAt === "number" ? body.downAt : 0,
+    deadUntil: typeof body?.deadUntil === "number" ? body.deadUntil : 0,
+  };
+}
+
+export function busyEnergy(kind: string): number {
+  if (kind === "lock") return 3;
+  if (kind === "catch") return 1;
+  if (kind === "watch" || kind === "haul" || kind === "bring") return 0;
+  if (
+    kind === "hunt" ||
+    kind === "fish" ||
+    kind === "chop" ||
+    kind === "mine" ||
+    kind === "forage" ||
+    kind === "craft" ||
+    kind === "dig" ||
+    kind === "build" ||
+    kind === "road" ||
+    kind === "fill" ||
+    kind === "burn" ||
+    kind === "drive"
+  ) {
+    return 2;
+  }
+  return 0;
+}
+
+/** Реген по часам. Книга крутит, не стол. */
+export function regenVigor(
+  v: Vigor,
+  now: number,
+  opts: { roof: boolean; walking: boolean; hungry: boolean; busyUntil?: number; hired?: boolean },
+): Vigor {
+  const paused = opts.walking || (!!opts.busyUntil && opts.busyUntil > now && !opts.hired);
+  if (paused) {
+    if (v.energyAt === now) return v;
+    return { ...v, energyAt: now };
+  }
+  if (v.energy >= ENERGY_MAX) {
+    if (v.resting) return { ...v, resting: false, energyAt: now };
+    return v;
+  }
+  const last = v.energyAt || now;
+  const ms = energyPeriod({ roof: opts.roof, sleeping: v.resting, hungry: opts.hungry });
+  const gained = Math.floor((now - last) / ms);
+  if (gained <= 0) return v;
+  const energy = Math.min(ENERGY_MAX, v.energy + gained);
+  return {
+    ...v,
+    energy,
+    energyAt: last + gained * ms,
+    resting: energy >= ENERGY_MAX ? false : v.resting,
+  };
+}
+
 /** First death 0, then 10, 20, 30… */
 export function deathFee(deaths: number): number {
   return Math.max(0, deaths) * 10;

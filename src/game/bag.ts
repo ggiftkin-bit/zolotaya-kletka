@@ -87,6 +87,7 @@ export const BAG_KINDS = [
   "job",
   "grant",
   "yard",
+  "sleep",
 ] as const;
 
 export type BagKind = (typeof BAG_KINDS)[number];

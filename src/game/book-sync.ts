@@ -28,6 +28,7 @@ import type { Character, GameState, GiftId, Inventory, ItemId, OtherPawn, Travel
 import type { GoldKind } from "./gold";
 import type { BagKind } from "./bag";
 import { bagOf, bagsEqual } from "./bag";
+import { ENERGY_MAX } from "./pace";
 import { spawnPoint } from "./worldgen";
 
 type StoreSlice = {
@@ -99,9 +100,52 @@ function applyBag(inv: Inventory | undefined) {
   store.set({ character: { ...c, inventory: next } });
 }
 
-function applyOwned(res: { credit?: number; gold?: number; inventory?: Inventory }) {
+function applyVigor(res: {
+  energy?: number;
+  energyAt?: number;
+  resting?: boolean;
+  hp?: number;
+  life?: Character["life"];
+  deaths?: number;
+}) {
+  if (typeof res.energy !== "number" || !Number.isFinite(res.energy) || !store) return;
+  const c = store.get().character;
+  const energy = Math.max(0, Math.min(ENERGY_MAX, res.energy));
+  const hp =
+    typeof res.hp === "number" && Number.isFinite(res.hp) ? Math.max(0, Math.min(100, Math.floor(res.hp))) : c.hp;
+  const life =
+    res.life === "alive" || res.life === "down" || res.life === "jailed" || res.life === "dead" ? res.life : c.life;
+  const deaths =
+    typeof res.deaths === "number" && Number.isFinite(res.deaths) ? Math.max(0, Math.floor(res.deaths)) : c.deaths;
+  const resting = typeof res.resting === "boolean" ? res.resting : c.resting;
+  const energyAt = typeof res.energyAt === "number" && res.energyAt > 0 ? res.energyAt : c.energyAt;
+  if (
+    c.energy === energy &&
+    c.hp === hp &&
+    c.life === life &&
+    c.deaths === deaths &&
+    c.resting === resting &&
+    c.energyAt === energyAt
+  ) {
+    return;
+  }
+  store.set({ character: { ...c, energy, hp, life, deaths, resting, energyAt } });
+}
+
+function applyOwned(res: {
+  credit?: number;
+  gold?: number;
+  inventory?: Inventory;
+  energy?: number;
+  energyAt?: number;
+  resting?: boolean;
+  hp?: number;
+  life?: Character["life"];
+  deaths?: number;
+}) {
   applyCredit(res.credit, res.gold);
   applyBag(res.inventory);
+  applyVigor(res);
 }
 
 function applyCredit(n: number | undefined, gold?: number) {
@@ -552,7 +596,7 @@ export async function commitBag(
     k: keyOf(cell.x, cell.y),
     sig,
   };
-  const writesTile = kind !== "eat" && kind !== "spend" && kind !== "job" && kind !== "grant" && kind !== "yard";
+  const writesTile = kind !== "eat" && kind !== "spend" && kind !== "job" && kind !== "grant" && kind !== "yard" && kind !== "sleep";
   if (writesTile) lastSlim.set(pack.k, pack.sig);
   try {
     const res = await writeBagDeed({
