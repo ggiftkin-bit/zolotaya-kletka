@@ -124,7 +124,7 @@ import { chebyshev, dummyHome, foeById, gearSlot, ghostLiveFoe, isWolfId, leaveC
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, FOG_LIVE, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
-import { bindBookStore, commitBag, commitGold, commitHarm, commitOffice, commitRoad, commitService, commitStall, commitVillage, flushBook, lookStreet, markFreshLive, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
+import { bindBookStore, commitBag, commitGold, commitHarm, commitOffice, commitRoad, commitService, commitStall, commitVillage, flushBook, forgetTravel, lookStreet, markFreshLive, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, rememberTravel, resetBookPawn } from "./book-sync";
 import {
   applyCargoPile,
   canReachStall,
@@ -374,6 +374,7 @@ function walkTo(x: number, y: number) {
     travel: { path, index: 0, elapsed: 0, total, t0 },
     character: { ...c, resting: false },
   });
+  rememberTravel({ path, index: 0, elapsed: 0, total, t0 });
   addFloater(x, y, c.life === "down" ? `ползу ${total.toFixed(0)}с` : `ход ${total.toFixed(0)}с`, "ok");
   const wallMs = (total / Math.max(0.25, s.timeScale)) * 1000;
   void ensureNotify().then((ok) => {
@@ -943,6 +944,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     const s = get();
     if (!s.travel) return;
     cancelNotice("walk");
+    forgetTravel();
     set({ travel: null, preview: null });
     speak("Стою.", s.character.x, s.character.y, "стой", "ok");
   },
@@ -1550,6 +1552,7 @@ function advanceTravel(now: number) {
     const c = useGame.getState().character;
     cancelNotice("walk");
     maybePingHidden("Пришёл", "Ход кончился — ты на месте.", "walk");
+    rememberTravel(travel);
     useGame.setState({
       character: { ...c, x, y, px: x, py: y, energy },
       travel: null,
@@ -1580,6 +1583,7 @@ function advanceTravel(now: number) {
     viewPos.y = y;
     const c = useGame.getState().character;
     cancelNotice("walk");
+    rememberTravel(travel);
     useGame.setState({
       character: { ...c, x, y, px: x, py: y, energy },
       travel: null,
@@ -2710,7 +2714,6 @@ function skipTravel() {
     return;
   }
   const prior = s.character;
-  cancelNotice("walk");
   const last = travel.path[travel.path.length - 1]!;
   viewPos.x = last.x;
   viewPos.y = last.y;
@@ -2723,17 +2726,27 @@ function skipTravel() {
       py: last.y,
       gold: plan.gold,
     },
-    travel: null,
-    preview: null,
     selected: { x: last.x, y: last.y },
-    log: pushLog(s.log, `Подорожная −${goldTxt(SKIP_GOLD)}. Пришёл сразу.`),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: last.x, y: last.y, text: "сразу", tone: "gold" as const }].slice(-10),
   });
-  void commitGold("skip", prior);
-  const landed = occupantAt(useGame.getState().dummies ?? [], useGame.getState().others ?? [], last.x, last.y);
-  if (landed && landed.life === "alive") {
-    useGame.setState({ inspect: { x: last.x, y: last.y } });
-  }
+  void commitGold("skip", prior).then((ok) => {
+    if (!ok) {
+      viewPos.x = prior.x;
+      viewPos.y = prior.y;
+      return;
+    }
+    cancelNotice("walk");
+    const live = useGame.getState();
+    useGame.setState({
+      travel: null,
+      preview: null,
+      log: pushLog(live.log, `Подорожная −${goldTxt(SKIP_GOLD)}. Пришёл сразу.`),
+      floaters: [...live.floaters, { id: ++floaterSeq, x: last.x, y: last.y, text: "сразу", tone: "gold" as const }].slice(-10),
+    });
+    const landed = occupantAt(useGame.getState().dummies ?? [], useGame.getState().others ?? [], last.x, last.y);
+    if (landed && landed.life === "alive") {
+      useGame.setState({ inspect: { x: last.x, y: last.y } });
+    }
+  });
 }
 
 function bailOut() {

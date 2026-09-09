@@ -49,6 +49,7 @@ let lastCell = "";
 let lastHitKey = "";
 let beating = false;
 let beatAgain = false;
+let lastTravel: Travel | null = null;
 
 function selfIdOf(): string {
   return store?.get().selfId || "";
@@ -234,13 +235,23 @@ function applyClock(clock: WorldClock, prev?: GameState): Partial<GameState> {
 }
 
 function pawnPayload(c: Character) {
+  const live = store?.get().travel ?? null;
+  if (live?.path.length) lastTravel = live;
   return {
     name: c.name,
     color: c.color,
     x: c.x,
     y: c.y,
-    body: packPawn(c, store?.get().travel ?? null),
+    body: packPawn(c, live ?? lastTravel),
   };
+}
+
+export function rememberTravel(t: Travel | null | undefined) {
+  if (t?.path.length) lastTravel = t;
+}
+
+export function forgetTravel() {
+  lastTravel = null;
 }
 
 function travelFromPocket(pocket: ReturnType<typeof loadGame>, x: number, y: number): Travel | null {
@@ -913,15 +924,23 @@ export async function beatBook(_force = false) {
       const nx = (res as { x: number }).x;
       const ny = (res as { y: number }).y;
       const hint = (res as { hint?: string }).hint;
-      const c = store.get().character;
+      const live = store.get();
+      const c = live.character;
+      const walking = !!(live.travel?.path.length);
       if (c.x !== nx || c.y !== ny) {
-        store.set({
-          character: { ...c, x: nx, y: ny, px: nx, py: ny },
-          travel: null,
-          preview: null,
-        });
+        if (!(walking && !hint)) {
+          store.set({
+            character: { ...c, x: nx, y: ny, px: nx, py: ny },
+            travel: hint ? null : live.travel,
+            preview: hint ? null : live.preview,
+          });
+        }
       }
       if (hint) store.speak?.(hint, nx, ny, hint, "bad");
+      if (lastTravel?.path.length) {
+        const end = lastTravel.path[lastTravel.path.length - 1];
+        if (hint || (end && nx === end.x && ny === end.y)) lastTravel = null;
+      }
     }
     rememberLive(store.get());
     if (res.fight) applyIncomingFight(res.fight, store.get().selfId);

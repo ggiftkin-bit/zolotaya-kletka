@@ -11,6 +11,7 @@ import { DONATE_GOLD, GIFTS, giftOrdered, LIVE_STOCK, stockOf } from "@/game/off
 import { occupantHere } from "@/game/fight";
 import { canFoundVillage, canPlaceBoard, canPutLiveName, clusterHint, hasOwnYard, namesTouchingYard, ownerFace, villageOf } from "@/game/pact";
 import {
+  MARKET_RENT,
   PEACE_HINT,
   ROAD_DAYS,
   ROAD_GOLD_WORDS,
@@ -133,7 +134,9 @@ function Sheet({ tile }: { tile: Tile }) {
                                 ? "поле"
                                 : BIOME_LABEL[tile.biome]
                         }`
-                    : tile.commons
+                    : tile.market
+                      ? "рынок"
+                      : tile.commons
                       ? "поляна"
                       : BIOME_LABEL[tile.biome];
 
@@ -624,7 +627,10 @@ function PickPane({
           onClick={() => onPane("yard")}
         />
       )}
-      {near && !tile.caravan && !isForeignYard(tile) && (
+      {near &&
+        !tile.caravan &&
+        !isForeignYard(tile) &&
+        !(tile.commons && !tile.market && !tile.plot && tile.building === "none") && (
         <Sticker
           title="Строить"
           sub="дорога и постройки"
@@ -2006,6 +2012,47 @@ function BuildPane({ tile }: { tile: Tile }) {
   const g = useGame();
   if (isForeignYard(tile)) {
     return <p className="mt-4 text-sm text-muted-foreground">чужой двор</p>;
+  }
+  if (tile.market && tile.building === "none") {
+    return (
+      <div className="mt-3">
+        <p className="text-[13px] text-muted-foreground">Прилавок · {goldTxt(MARKET_RENT)} в неделю. Здесь мир.</p>
+        <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">Рынок</p>
+        <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-11"
+            onClick={() => {
+              g.setBuildKind("stall");
+              g.doBuild(tile.x, tile.y);
+              g.closeInspect();
+            }}
+          >
+            {BUILDING_LABEL.stall}
+            <span className="ml-1 text-[10px] text-muted-foreground">{buildCostLine("stall")}</span>
+          </Button>
+          {canPlaceBoard(g.world, tile, isYours(tile)) && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-11"
+              onClick={() => {
+                g.setBuildKind("board");
+                g.doBuild(tile.x, tile.y);
+                g.closeInspect();
+              }}
+            >
+              {BUILDING_LABEL.board}
+              <span className="ml-1 text-[10px] text-muted-foreground">{BUILD_COST.board.wood} дер.</span>
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+  if (tile.commons && !tile.caravan && !tile.plot && tile.building === "none") {
+    return <p className="mt-3 text-[13px] text-muted-foreground">{PEACE_HINT}</p>;
   }
   return (
     <div className="mt-3">

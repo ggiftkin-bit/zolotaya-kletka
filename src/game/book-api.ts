@@ -37,7 +37,7 @@ import {
   type TilePacket,
   type WorldClock,
 } from "./book";
-import { patchStepWorld, planBookStep } from "./step";
+import { chebyshev, patchStepWorld, planBookStep, STEP_HINT } from "./step";
 import {
   BOARD_CAP,
   BOARD_CAP_HINT,
@@ -513,19 +513,27 @@ async function clampPawnPos(
   userId: string,
   from: { x: number; y: number } | null,
   pawn: { x: number; y: number; body: PawnBody },
+  travel = travelOf(pawn.body),
 ): Promise<{ x: number; y: number; hint?: string }> {
   if (!from) return { x: pawn.x, y: pawn.y };
+  let span = Math.max(1, chebyshev(from.x, from.y, pawn.x, pawn.y));
+  if (travel?.path?.length) {
+    for (const p of travel.path) {
+      span = Math.max(span, chebyshev(from.x, from.y, p.x, p.y));
+    }
+  }
+  const reach = Math.min(24, Math.max(1, span + 1));
   const rows = await sql.query<{ x: number; y: number; slim: SlimTile }>(
     `select x, y, slim from tile
-     where world_id = $1 and greatest(abs(x - $2), abs(y - $3)) <= 1`,
-    [WORLD_ID, from.x, from.y],
+     where world_id = $1 and greatest(abs(x - $2), abs(y - $3)) <= $4`,
+    [WORLD_ID, from.x, from.y, reach],
   );
   const cells = rows.map((r) => fatTile(asSlim(r.slim), r.x, r.y));
   if (!cells.some((t) => t.x === from.x && t.y === from.y)) {
     cells.push(fatTile({ b: "plains" }, from.x, from.y));
   }
   const world = patchStepWorld(MAP_W, MAP_H, cells);
-  return planBookStep(world, from, { x: pawn.x, y: pawn.y }, travelOf(pawn.body), userId);
+  return planBookStep(world, from, { x: pawn.x, y: pawn.y }, travel, userId);
 }
 
 async function mergeBookBody(
@@ -535,7 +543,8 @@ async function mergeBookBody(
 ): Promise<{ body: PawnBody; credit: number; gold: number; inventory: Inventory; x: number; y: number; hint?: string }> {
   const row = await readPawn(sql, userId);
   const credit = dueOf(row?.body);
-  const step = await clampPawnPos(sql, userId, row ? { x: row.x, y: row.y } : null, pawn);
+  const travel = travelOf(pawn.body) ?? travelOf(row?.body);
+  const step = await clampPawnPos(sql, userId, row ? { x: row.x, y: row.y } : null, pawn, travel);
   pawn.x = step.x;
   pawn.y = step.y;
   let kept = keepBookPurse(pawn.body, row?.body);
@@ -2013,7 +2022,15 @@ export const writeGoldDeed = createServerFn({ method: "POST" })
     const userId = context.userId;
     if (!isGoldKind(data.kind)) return { ok: false as const, hint: "нет такого дела", gold: 0, inventory: startInv() };
     const row = await readPawn(sql, userId);
+    const want = { x: data.pawn.x, y: data.pawn.y };
     const merged = await mergeBookBody(sql, userId, data.pawn);
+    if (data.kind === "skip") {
+      const travel = travelOf(data.pawn.body) ?? travelOf(row?.body);
+      const last = travel?.path?.[travel.path.length - 1];
+      if (last && want.x === last.x && want.y === last.y && (merged.x !== last.x || merged.y !== last.y)) {
+        return { ok: false as const, hint: STEP_HINT, gold: merged.gold, inventory: merged.inventory };
+      }
+    }
     const plan = planGoldDeed(data.kind, merged.gold, row?.body?.deaths ?? 0);
     if (!plan.ok) return { ok: false as const, hint: plan.hint, gold: merged.gold, inventory: merged.inventory };
     const fight = await mergeFightIntoPawnBody(sql, userId, merged.body);

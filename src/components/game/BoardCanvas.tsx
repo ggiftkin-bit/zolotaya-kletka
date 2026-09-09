@@ -1528,11 +1528,17 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
   paintFence(ctx, tile, x, y, world);
 
   if (tile.market && tile.building === "none" && !tile.pit && !isWater(tile)) {
-    ctx.fillStyle = "rgba(86, 74, 54, 0.38)";
-    ctx.fillRect(x + 5, y + 10, TILE - 10, TILE - 16);
-    ctx.strokeStyle = "rgba(62, 52, 38, 0.55)";
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(x + 5, y + 10, TILE - 10, TILE - 16);
+    ctx.fillStyle = "rgba(210, 192, 154, 0.34)";
+    ctx.fillRect(x, y, TILE, TILE);
+    ctx.fillStyle = "rgba(168, 148, 112, 0.22)";
+    ctx.beginPath();
+    ctx.ellipse(x + TILE * 0.48, y + TILE * 0.55, TILE * 0.36, TILE * 0.22, 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    const n = 2 + (hash01(tile.x, tile.y, 11) > 0.55 ? 1 : 0);
+    ctx.fillStyle = "rgba(92, 74, 48, 0.5)";
+    for (let i = 0; i < n; i++) {
+      ctx.fillRect(x + 5 + i * 6, y + TILE - 11 + (i % 2), 5, 1.7);
+    }
   }
 
   if (!isWater(tile)) paintHerb(ctx, tile, x, y);
