@@ -41,14 +41,14 @@ import { canDigReason, fillNeedLine, fillPay, giveOrPile, planDig, takePaid } fr
 import { asPile, dumpAllOn, pileAdd, pileEmpty, pileSet, pullNeed, applyNeedPull } from "./pile";
 import { canCrossDiag, MAX_PLOT, clearYard, normRect, plotBounds, putGate, setYardGateLock, stampYard, upgradeYard, yardHasGate, yardWoodCost } from "./fence";
 import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, NO_STRENGTH, SKIP_GOLD, deathFee, energyPeriod, fleshOf, formatWait, splitBodyWater, tickFlesh } from "./pace";
-import { applyCatch, applyDriveFail, DRIVE_LABEL, harmCells, hasLaw, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, markCrime, ownerOf, planDriveOff, plotCells, punish, rollCaught, stealChance, takeLoot, unlockKind, fenceBurnCells } from "./crime";
+import { applyCatch, applyDriveFail, DRIVE_LABEL, harmCells, hasLaw, hasTinder, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, markCrime, ownerOf, planDriveOff, plotCells, punish, rollCaught, stealChance, takeLoot, takeTinder, TINDER_HINT, unlockKind, fenceBurnCells } from "./crime";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
 import { clearGame, loadGame, saveGame } from "./save";
 import { stampVillage, leaveVillage, hamletTitle, hasOwnYard, isOutsideYard, setVillageLaw, planFoundOwners, canJoinVillage, namesTouchingYard, livingOwnersOf, villageOf, snapVillage, villageChangedCells, atNameSpot, normVillageName, canPlaceBoard, stampBoard, releaseBoard } from "./pact";
 import { cargoWeight, loadRatio, pailKg, stepEnergy, wornKg } from "./travel";
 import { atBench, CRAFTS, EAT_ORDER, EAT_SAT, PROF_BLURB, type CraftKind } from "./craft";
 import { markDepleted, tickGrow, PIT_HEAL_WEEKS, REGROW_WAIT } from "./grow";
-import { huntTake, planGather } from "./bag";
+import { huntTake, planGather, planScrap, planTonic } from "./bag";
 import { fillStock, planBuyFromStock, planDonate, planGift, planSellToStock, seedStock, sellsToday, SELL_DAY_CAP, SELL_DAY_HINT, worldDayOf } from "./office";
 import { planGoldDeed } from "./gold";
 import { canParkOn, claimMount, mountAt, MOUNT_LABEL, ownNearby, ownsMount, parkNear, ridingHorse, ridingKind, settleOldCounts, stripRidden, takeOwnMount, type MountKind } from "./mount";
@@ -564,6 +564,7 @@ type Actions = {
   fillPit: () => void;
   cladStone: () => void;
   scrapBurned: () => void;
+  scrapLive: () => void;
   offerFriend: () => void;
   formVillage: (name?: string) => void;
   joinVillage: (name?: string) => void;
@@ -1239,7 +1240,8 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   excavateHere: () => excavateHere(),
   fillPit: () => fillPitHere(),
   cladStone: () => cladStone(),
-  scrapBurned: () => scrapBurned(),
+  scrapBurned: () => scrapHere(),
+  scrapLive: () => scrapHere(),
   offerFriend: () => offerFriend(),
   formVillage: (name) => formVillage(name),
   joinVillage: (name) => joinVillage(name),
@@ -1303,7 +1305,9 @@ function sealBag(
     | "pail"
     | "sip"
     | "pour"
-    | "cook",
+    | "cook"
+    | "tonic"
+    | "scrap",
   cell: { x: number; y: number },
   prior: Character,
   extra?: { item?: ItemId; qty?: number; craft?: string; need?: Partial<Record<ItemId, number>>; job?: string },
@@ -2911,7 +2915,7 @@ function collectShop() {
 
 function equipHand(item: ItemId | null) {
   const s = useGame.getState();
-  if (item && !TOOL_ITEMS.includes(item as (typeof TOOL_ITEMS)[number])) {
+  if (item && item !== "herb" && !TOOL_ITEMS.includes(item as (typeof TOOL_ITEMS)[number])) {
     speak("Это не снасть.", s.character.x, s.character.y, "не снасть", "bad");
     return;
   }
@@ -3582,6 +3586,10 @@ function burnHere() {
     speak("Нет сил на огонь.", tile.x, tile.y, "нет сил", "bad");
     return;
   }
+  if (!hasTinder(s.character)) {
+    speak(TINDER_HINT, tile.x, tile.y, TINDER_HINT, "bad");
+    return;
+  }
   if (tile.building !== "none" && !tile.burned) {
     const matter = tile.matter || defaultMatter(tile.building);
     if (!canBurnMatter(matter)) {
@@ -3678,12 +3686,23 @@ function resolveLock(s: GameState, c0: Character, tile: NonNullable<ReturnType<t
 function resolveBurn(s: GameState, c0: Character, tile: NonNullable<ReturnType<typeof tileAt>>) {
   const prior = s.character;
   const foreign = !!(tile.owner && tile.owner !== "you");
+  const light = (): Character | null => {
+    const lit = takeTinder(c0);
+    if (!lit) {
+      useGame.setState({ character: c0, log: pushLog(s.log, TINDER_HINT) });
+      return null;
+    }
+    return lit;
+  };
   if (tile.building !== "none" && !tile.burned) {
     const matter = tile.matter || defaultMatter(tile.building);
     if (!canBurnMatter(matter)) {
       useGame.setState({ character: c0, log: pushLog(s.log, "Камень не берёт огонь.") });
       return;
     }
+    const lit = light();
+    if (!lit) return;
+    c0 = lit;
     tile.burned = true;
     tile.hp = 0;
     const chest = chestOf(tile);
@@ -3727,6 +3746,9 @@ function resolveBurn(s: GameState, c0: Character, tile: NonNullable<ReturnType<t
 
   const edge = burnableFence(tile, s.world);
   if (edge) {
+    const lit = light();
+    if (!lit) return;
+    c0 = lit;
     applyFenceBurn(tile, s.world, edge.side);
     markCrime(tile, c0.name);
     let c: Character = c0;
@@ -3790,10 +3812,10 @@ function cladStone() {
   });
 }
 
-function scrapBurned() {
+function scrapHere() {
   const s = useGame.getState();
   const tile = s.inspect ? tileAt(s.world, s.inspect.x, s.inspect.y) : hereTile();
-  if (!tile?.burned || tile.building === "none") {
+  if (!tile) {
     speak("Угля нет.", s.character.x, s.character.y, "нет угля", "bad");
     return;
   }
@@ -3802,18 +3824,45 @@ function scrapBurned() {
     speak("Подойди.", tile.x, tile.y, "подойди", "bad");
     return;
   }
-  const wood = tile.matter === "stone" ? 0 : 2;
+  const plan = planScrap(tile, "you");
+  if (!plan.ok) {
+    speak(plan.hint === "уже нет" ? "Уже нет." : plan.hint, tile.x, tile.y, plan.hint, "bad");
+    return;
+  }
+  const prior = s.character;
   if (tile.building === "board") releaseBoard(tile);
+  dumpAllOn(tile, chestOf(tile));
+  tile.chest = emptyChest();
   tile.building = "none";
   tile.burned = false;
   tile.hp = 0;
-  const inv = { ...s.character.inventory, wood: s.character.inventory.wood + wood };
+  let inv = { ...s.character.inventory };
+  const bits: string[] = [];
+  if (plan.mode === "burn") {
+    if (plan.coal > 0) {
+      const out = giveOrPile(inv, s.character.transport, tile, "coal", plan.coal);
+      inv = out.inv;
+      bits.push(out.piled ? "уголь кучей" : `+${plan.coal} уголь`);
+    } else {
+      bits.push("остов снят");
+    }
+  } else {
+    for (const [k, n] of Object.entries(plan.refund) as [ItemId, number][]) {
+      if (n <= 0) continue;
+      const out = giveOrPile(inv, s.character.transport, tile, k, n);
+      inv = out.inv;
+      bits.push(out.piled ? `${ITEM_LABEL[k]} кучей` : `+${n} ${ITEM_LABEL[k]}`);
+    }
+    if (!bits.length) bits.push("разобрал");
+  }
   useGame.setState({
     character: { ...s.character, inventory: inv },
     world: { ...s.world, tiles: s.world.tiles },
-    log: pushLog(s.log, wood ? "Разобрал уголь. +2 дерева." : "Разобрал камень."),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "разобрал", tone: "ok" as const }].slice(-10),
+    log: pushLog(s.log, `Разобрал. ${bits.join(" · ")}.`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: bits[0]!, tone: "ok" as const }].slice(-10),
   });
+  markFreshLive(useGame.getState());
+  sealBag("scrap", { x: tile.x, y: tile.y }, prior);
 }
 
 function offerFriend() {
@@ -4929,22 +4978,19 @@ function sowField() {
 
 function drinkTonic() {
   const s = useGame.getState();
-  if ((s.character.inventory.tonic ?? 0) <= 0) {
-    speak("Настоя нет. Варит целитель.", s.character.x, s.character.y, "нет настоя", "bad");
+  const plan = planTonic(s.character.inventory, s.character.hp);
+  if (!plan.ok) {
+    const full = plan.hint.startsWith("Цел");
+    speak(plan.hint, s.character.x, s.character.y, full ? "цел" : "нет настоя", full ? "ok" : "bad");
     return;
   }
-  if (s.character.hp >= 100) {
-    speak("Цел. Настой береги.", s.character.x, s.character.y, "цел", "ok");
-    return;
-  }
-  const inv = { ...s.character.inventory, tonic: s.character.inventory.tonic - 1 };
-  const hp = Math.min(100, s.character.hp + 28);
+  const prior = s.character;
   useGame.setState({
-    character: { ...s.character, inventory: inv, hp },
-    log: pushLog(s.log, `Настой. Раны ${Math.round(hp)}.`),
+    character: { ...s.character, inventory: plan.inv, hp: plan.hp },
+    log: pushLog(s.log, `Настой. Раны ${Math.round(plan.hp)}.`),
     floaters: [...s.floaters, { id: ++floaterSeq, x: s.character.x, y: s.character.y, text: "+раны", tone: "ok" as const }].slice(-10),
   });
-  sealBag("spend", { x: s.character.x, y: s.character.y }, s.character, { item: "tonic", qty: 1 });
+  sealBag("tonic", { x: s.character.x, y: s.character.y }, prior);
 }
 
 function buyFromShop(item: ItemId, qty: number) {

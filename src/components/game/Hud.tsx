@@ -662,7 +662,7 @@ export function Hud() {
                     k={cell}
                     n={inv[cell]}
                     canChest={!!ownChest}
-                    canHand={(TOOL_ITEMS as readonly string[]).includes(cell)}
+                    canHand={(TOOL_ITEMS as readonly string[]).includes(cell) || cell === "herb"}
                     hand={g.character.hand === cell}
                     wearSlot={gearSlot(cell)}
                     worn={wornOf(g.character, cell)}

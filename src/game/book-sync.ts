@@ -629,7 +629,8 @@ export async function commitBag(
     kind !== "drink" &&
     kind !== "pail" &&
     kind !== "sip" &&
-    kind !== "cook";
+    kind !== "cook" &&
+    kind !== "tonic";
   if (writesTile) lastSlim.set(pack.k, pack.sig);
   try {
     const res = await writeBagDeed({

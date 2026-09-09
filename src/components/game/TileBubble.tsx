@@ -625,11 +625,17 @@ function PickPane({
       )}
       {near &&
         ((tile.building !== "none" && !tile.burned) || !!burnableFence(tile, g.world) || stoneFence(tile, g.world)) && (
-          <Sticker title="Поджечь" sub="хворост и дерево. камень нет" dim onClick={() => g.burnHere()} />
+          <Sticker title="Поджечь" sub="трава в руке" dim onClick={() => g.burnHere()} />
         )}
       {near && tile.burned && tile.building !== "none" && (
-        <Sticker title="Разобрать уголь" onClick={() => g.scrapBurned()} />
+        <Sticker title="Разобрать" sub="уголь в сумку" onClick={() => g.scrapBurned()} />
       )}
+      {near &&
+        isYours(tile) &&
+        !tile.burned &&
+        (tile.building === "shack" || tile.building === "house") && (
+          <Sticker title="Разобрать" sub="половина цены назад" onClick={() => g.scrapLive()} />
+        )}
       {near && !tile.commons && tile.biome !== "river" && !tile.caravan && !tile.plot && (
         <Sticker
           title={g.plotMark ? "Замкнуть двор" : "Угол двора"}

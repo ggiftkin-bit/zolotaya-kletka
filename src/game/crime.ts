@@ -1,9 +1,24 @@
 import { JAIL_MS } from "./pace";
 import { plotBounds, setYardGateLock, yardStrength } from "./fence";
 import { asPile, pileTake } from "./pile";
+import { takeBag } from "./bag";
 import { FIELD_CROP } from "./constants";
-import type { Character, Dummy, ItemId, Tile, World } from "./types";
+import type { Character, Dummy, Inventory, ItemId, Tile, World } from "./types";
 import { tileAt } from "./worldgen";
+
+export const TINDER_HINT = "нечем зажечь";
+
+export function hasTinder(c: { hand: ItemId | null; inventory: Inventory }): boolean {
+  return c.hand === "herb" && (c.inventory.herb ?? 0) > 0;
+}
+
+export function takeTinder(c: Character): Character | null {
+  if (!hasTinder(c)) return null;
+  const paid = takeBag(c.inventory, { herb: 1 });
+  if (!paid.ok) return null;
+  const hand = c.hand === "herb" && (paid.inv.herb ?? 0) <= 0 ? null : c.hand;
+  return { ...c, inventory: paid.inv, hand };
+}
 
 export function isJailed(c: Character, now = Date.now()): boolean {
   return (c.jailedUntil ?? 0) > now;

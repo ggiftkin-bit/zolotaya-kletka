@@ -1,8 +1,10 @@
 import { CAPACITY, FIELD_CROP, GATHER_YIELD, ITEMS, ITEM_LABEL, ITEM_WEIGHT, PROFESSION_BIOME, zeroInv } from "./constants";
 import { canDoCraft, CRAFTS, EAT_ORDER, EAT_SAT, type CraftKind } from "./craft";
+import { BUILD_COST } from "./economy";
+import { TONIC_HP } from "./pace";
 import { cargoWeight } from "./travel";
-import { isAxeHand, isPickHand } from "./work";
-import type { Inventory, ItemId, Profession, Tile, Transport } from "./types";
+import { defaultMatter, isAxeHand, isPickHand } from "./work";
+import type { BuildingKind, Inventory, ItemId, Matter, Profession, Tile, Transport } from "./types";
 
 /** Первая запись фишки. Не мешок с клиента. */
 export function startInv(): Inventory {
@@ -94,6 +96,8 @@ export const BAG_KINDS = [
   "sip",
   "pour",
   "cook",
+  "tonic",
+  "scrap",
 ] as const;
 
 export type BagKind = (typeof BAG_KINDS)[number];
@@ -174,6 +178,55 @@ export function canCraftHere(id: string, profession: Profession, tile: Tile | nu
   const def = craftDefOf(id);
   if (!def) return false;
   return canDoCraft(def, profession, tile);
+}
+
+export function planTonic(
+  inv: Inventory,
+  hp: number,
+): { ok: true; inv: Inventory; hp: number } | { ok: false; hint: string } {
+  if (hp >= 100) return { ok: false, hint: "Цел. Настой береги." };
+  const paid = takeBag(inv, { tonic: 1 });
+  if (!paid.ok) return { ok: false, hint: "Настоя нет. Варит целитель." };
+  return { ok: true, inv: paid.inv, hp: Math.min(100, hp + TONIC_HP) };
+}
+
+/** Сгоревший остов: шалаш/костёр 1 уголь, прочее дерево 2. Камень — 0. */
+export function scrapCoalOf(building: BuildingKind, matter: Matter): number {
+  if (building === "none") return 0;
+  if (matter === "stone") return 0;
+  if (building === "shack" || building === "camp") return 1;
+  return 2;
+}
+
+export function halfBuildRefund(kind: Exclude<BuildingKind, "none">): Partial<Record<ItemId, number>> {
+  const cost = BUILD_COST[kind];
+  const out: Partial<Record<ItemId, number>> = {};
+  const wood = Math.floor((cost.wood ?? 0) / 2);
+  const stone = Math.floor((cost.stone ?? 0) / 2);
+  const plank = Math.floor((cost.plank ?? 0) / 2);
+  if (wood > 0) out.wood = wood;
+  if (stone > 0) out.stone = stone;
+  if (plank > 0) out.plank = plank;
+  return out;
+}
+
+export type ScrapPlan =
+  | { ok: true; mode: "burn"; coal: number }
+  | { ok: true; mode: "live"; refund: Partial<Record<ItemId, number>> }
+  | { ok: false; hint: string };
+
+export function planScrap(tile: Tile, selfId: string): ScrapPlan {
+  if (tile.building === "none") return { ok: false, hint: CELL_GONE };
+  if (tile.burned) {
+    const matter = tile.matter || defaultMatter(tile.building);
+    return { ok: true, mode: "burn", coal: scrapCoalOf(tile.building, matter) };
+  }
+  if (tile.building !== "shack" && tile.building !== "house") {
+    return { ok: false, hint: "Это не шалаш." };
+  }
+  const mine = !tile.owner || tile.owner === "you" || tile.owner === selfId;
+  if (!mine) return { ok: false, hint: "чужое" };
+  return { ok: true, mode: "live", refund: halfBuildRefund(tile.building) };
 }
 
 /** Испытание «выдать дерево». Книга кладёт столько, не стол. */

@@ -19,6 +19,7 @@ export const DAY_MS = 240_000;
 export const NO_STRENGTH = "Нет силы. Ляг дома или кружка 8 золота.";
 
 export const START_HP = 100;
+export const TONIC_HP = 28;
 
 export type Vigor = {
   energy: number;

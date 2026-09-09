@@ -10,7 +10,7 @@ import { generateWorld } from "./worldgen";
 import { isItemId, settleService, serviceJobOf, stampTake } from "./market";
 import { fillStock, isGiftId, planBuyFromStock, planDonate, planGift, planSellDay, planSellToStock, stockOf, worldDayOf, STOCK_CAP, STOCK_START } from "./office";
 import { isGoldKind, planGoldDeed, START_GOLD } from "./gold";
-import { bagOf, canCraftHere, CISTERN_CAP, CISTERN_POUR, CELL_GONE, craftDefOf, eatSatiety, giveOrSpill, GRANT_WOOD, huntTake, isBagKind, isDrinkTile, PAIL_FULL, planCook, planEat, planGather, SIP_WATER, startInv, takeBag } from "./bag";
+import { bagOf, canCraftHere, CISTERN_CAP, CISTERN_POUR, CELL_GONE, craftDefOf, eatSatiety, giveOrSpill, GRANT_WOOD, huntTake, isBagKind, isDrinkTile, PAIL_FULL, planCook, planEat, planGather, planScrap, planTonic, SIP_WATER, startInv, takeBag } from "./bag";
 import { BOOST_ENERGY, busyEnergy, DEAD_MS, ENERGY_MAX, fleshOf, regenVigor, RISE_SAT, RISE_WATER, RISE_WARMTH, tickFlesh, vigorOf, WORK_HUNGER } from "./pace";
 import { stepEnergy } from "./travel";
 import { isHamletOwner, isLivingOwner } from "./pact";
@@ -1185,6 +1185,21 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
   )
   .handler(async ({ context, data }) => {
     const sql = await getSql();
+    if (data.kind === "burn") {
+      const pre = await mergeBookBody(sql, context.userId, data.pawn);
+      const tinder = takeBag(pre.inventory, { herb: 1 });
+      if (!tinder.ok) {
+        return {
+          ok: false as const,
+          hint: "нечем зажечь",
+          conflicts: [] as TilePacket[],
+          written: [] as { x: number; y: number; ver: number }[],
+          credit: 0,
+          gold: pre.gold,
+          inventory: pre.inventory,
+        };
+      }
+    }
     if (!data.tiles.length) {
       const merged = await mergeBookBody(sql, context.userId, data.pawn);
       await writePawn(sql, context.userId, data.pawn, merged.body);
@@ -1295,8 +1310,16 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
       } else if (liveLocked && !incLocked) {
         bag = giveOrSpill(bag, ride, "lock", 1).inv;
       }
+    } else if (data.kind === "burn") {
+      const paid = takeBag(bag, { herb: 1 });
+      if (!paid.ok) {
+        return { ok: false as const, hint: "нечем зажечь", conflicts: [], written: [], credit: 0, gold: merged.gold, inventory: merged.inventory };
+      }
+      bag = paid.inv;
     }
-    const body = { ...merged.body, gold: merged.gold + picked, inventory: bag };
+    let hand = merged.body.hand;
+    if (hand === "herb" && (bag.herb ?? 0) <= 0) hand = null;
+    const body = { ...merged.body, gold: merged.gold + picked, inventory: bag, hand };
     await writePawn(sql, context.userId, data.pawn, body);
     await imprintSpot(sql, context.userId, data.pawn.x, data.pawn.y);
     return { ok: true as const, written, credit: merged.credit, gold: body.gold, inventory: body.inventory };
@@ -2042,7 +2065,8 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       data.kind === "drink" ||
       data.kind === "pail" ||
       data.kind === "sip" ||
-      data.kind === "cook";
+      data.kind === "cook" ||
+      data.kind === "tonic";
     const takesCell =
       data.kind === "gather" ||
       data.kind === "dig" ||
@@ -2050,7 +2074,8 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       data.kind === "fish" ||
       data.kind === "pickup" ||
       data.kind === "chest-take" ||
-      data.kind === "craft";
+      data.kind === "craft" ||
+      data.kind === "scrap";
     if (!cur) return emptyFail(takesCell ? CELL_GONE : "клетка уже другая");
     if (cur.ver !== t.ver && !bagSoft) {
       return {
@@ -2083,6 +2108,7 @@ export const writeBagDeed = createServerFn({ method: "POST" })
     let water = flesh0.water;
     let pail = flesh0.pail;
     let sipTick = flesh0.sipTick;
+    let hp = vigorOf(merged.body).hp;
     const written: { x: number; y: number; ver: number }[] = [];
     const clock = asClock(await readWorld(sql));
     const night = clock.phase === "night";
@@ -2368,6 +2394,29 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       if (!plan.ok) return emptyFail(plan.hint, gold, inv);
       inv = plan.inv;
       satiety = Math.min(100, satiety + plan.gain);
+    } else if (data.kind === "tonic") {
+      const plan = planTonic(inv, hp);
+      if (!plan.ok) return emptyFail(plan.hint, gold, inv);
+      inv = plan.inv;
+      hp = plan.hp;
+    } else if (data.kind === "scrap") {
+      const plan = planScrap(live, userId);
+      if (!plan.ok) return plan.hint === CELL_GONE ? lost() : emptyFail(plan.hint, gold, inv);
+      dumpAllOn(live, live.chest ?? zeroInv());
+      live.chest = zeroInv();
+      if (plan.mode === "burn") {
+        if (plan.coal > 0) spill("coal", plan.coal);
+      } else {
+        for (const [k, n] of Object.entries(plan.refund) as [ItemId, number][]) {
+          if (n > 0) spill(k, n);
+        }
+      }
+      live.building = "none";
+      live.burned = false;
+      live.hp = 0;
+      const ver = await bump(live, t.ver);
+      if (ver == null) return lost();
+      written.push({ x: t.x, y: t.y, ver });
     } else if (data.kind === "steal") {
       return emptyFail("кража — делом вреда", gold, inv);
     } else {
@@ -2386,6 +2435,7 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       water,
       pail,
       sipTick,
+      hp,
     };
     await writePawn(sql, userId, data.pawn, body);
     await sql.query(
