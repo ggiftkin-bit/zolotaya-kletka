@@ -2,6 +2,7 @@ import { ENERGY_MAX } from "./pace";
 import { HAMLETS } from "./pact";
 import { MEEPLE_COLORS } from "./constants";
 import type { Character, Dummy, ItemId, OtherPawn, Profession, Skills, World } from "./types";
+import { tileAt } from "./worldgen";
 
 export type Fighter = {
   id: string;
@@ -157,6 +158,55 @@ export function makeHamletDummies(world: World, prev?: Fighter[]): Dummy[] {
 
 export function dummyAt(dummies: Dummy[], x: number, y: number): Dummy | null {
   return dummies.find((d) => d.x === x && d.y === y) ?? null;
+}
+
+export function isWolfId(id: string) {
+  return id.startsWith("wolf:");
+}
+
+export function wolfDummy(tile: { x: number; y: number }): Dummy {
+  return {
+    id: `wolf:${tile.x}:${tile.y}`,
+    name: "Волк",
+    color: "#5c5346",
+    x: tile.x,
+    y: tile.y,
+    hp: 70,
+    energy: ENERGY_MAX,
+    satiety: 80,
+    warmth: 80,
+    water: 80,
+    hand: null,
+    body: null,
+    shield: null,
+    helm: null,
+    profession: "wanderer",
+    skills: zSkills(4, 2, 0),
+    life: "alive",
+    dummy: true,
+    downAt: 0,
+    inventory: { food: 1 },
+  };
+}
+
+export function wolfAt(world: World, x: number, y: number): Dummy | null {
+  const t = tileAt(world, x, y);
+  if (!t?.herd?.wild || t.herd.kind !== "wolf" || t.herd.count <= 0) return null;
+  return wolfDummy(t);
+}
+
+export function wolfById(world: World, id: string): Dummy | null {
+  if (!isWolfId(id)) return null;
+  const parts = id.split(":");
+  const x = Number(parts[1]);
+  const y = Number(parts[2]);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return wolfAt(world, x, y);
+}
+
+/** Живой, манекен или волк на клетке. */
+export function occupantHere(dummies: Dummy[], others: OtherPawn[], world: World, x: number, y: number): Dummy | null {
+  return occupantAt(dummies, others, x, y) ?? wolfAt(world, x, y);
 }
 
 /** Снимок живого на этом клиенте: hp/снасть после удара, не вечные 100. */

@@ -8,7 +8,7 @@ import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/pl
 import { FOG_DARK, FOG_LIVE, fogAt } from "@/game/book";
 import { bagGoods, bringDestLine, bringDests, boardNotices, BRING_GOODS, BRING_N, canPostFromBoard, canReadBoard, canSeeService, craftsAtTile, firstOwnGate, firstOwnShed, isCraftStation, isGateTile, SERVICE_DO, SERVICE_GOLD, SERVICE_LABEL, serviceJobOf, serviceLine, stallLine, stallOrderOf, STALL_PRICES } from "@/game/market";
 import { DONATE_GOLD, GIFTS, giftOrdered, LIVE_STOCK, stockOf } from "@/game/office";
-import { occupantAt } from "@/game/fight";
+import { occupantHere } from "@/game/fight";
 import { canFoundVillage, canPlaceBoard, canPutLiveName, clusterHint, hasOwnYard, namesTouchingYard, ownerFace, villageOf } from "@/game/pact";
 import { isForeignYard, isYours } from "@/game/crime";
 import { ownNearby, ownsMount, ridingHorse } from "@/game/mount";
@@ -299,7 +299,7 @@ function PickPane({
   const emptyYard = atOwn && tile.building === "none" && !tile.caravan;
   const shackUp = atOwn && tile.building === "shack" && g.character.inventory.wood >= 10 && g.character.inventory.stone >= 4;
   const down = g.character.life === "down";
-  const dummy = occupantAt(g.dummies ?? [], g.others ?? [], tile.x, tile.y);
+  const dummy = occupantHere(g.dummies ?? [], g.others ?? [], g.world, tile.x, tile.y);
   const locked =
     (g.character.jailedUntil ?? 0) > Date.now() ||
     g.character.life === "jailed" ||
@@ -492,7 +492,7 @@ function PickPane({
         <>
           <Sticker
             title="Встретиться"
-            sub={dummy.dummy ? `${dummy.name} · манекен хутора` : `${dummy.name} · человек`}
+            sub={dummy.id.startsWith("wolf:") ? "волк на клетке" : dummy.dummy ? `${dummy.name} · манекен хутора` : `${dummy.name} · человек`}
             ico={<Ico i={ICO.stake} className="size-11 overflow-hidden rounded-[12px]" />}
             onClick={() => g.startMeet(dummy.id)}
           />

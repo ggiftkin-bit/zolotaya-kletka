@@ -123,6 +123,7 @@ export const LIFE_INDEX = {
   deer: 1,
   horse: 2,
   cow: 3,
+  wolf: 1,
   pen: 4,
   stable: 5,
   well: 6,

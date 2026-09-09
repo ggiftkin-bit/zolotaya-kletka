@@ -265,7 +265,7 @@ function placeAnimals(tiles: Tile[], spawnX: number, spawnY: number, rng: () => 
   put(spawnX + 7, spawnY + 1, "hare", 2);
   put(spawnX - 6, spawnY + 3, "hare", 1);
   put(spawnX + 4, spawnY - 6, "deer", 1);
-  put(spawnX + 16, spawnY + 1, "horse", 2);
+  put(spawnX + 16, spawnY + 1, "horse", 1);
   put(spawnX - 18, spawnY - 4, "horse", 1);
 
   for (const t of tiles) {
@@ -274,8 +274,9 @@ function placeAnimals(tiles: Tile[], spawnX: number, spawnY: number, rng: () => 
     if (d < 8) continue;
     if (t.biome === "plains" && rng() < 0.035) t.herd = makeHerd("hare", 1 + Math.floor(rng() * 2), true);
     else if (t.biome === "forest" && rng() < 0.05) t.herd = makeHerd("deer", 1, true);
+    else if (t.biome === "forest" && d > 14 && rng() < 0.006) t.herd = makeHerd("wolf", 1, true);
     else if (t.biome === "plains" && d > 18 && rng() < 0.008) {
-      t.herd = makeHerd("horse", 1 + Math.floor(rng() * 2), true);
+      t.herd = makeHerd("horse", 1, true);
     }
   }
 }

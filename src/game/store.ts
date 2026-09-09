@@ -101,7 +101,7 @@ import type {
   Weather,
   Tile,
 } from "./types";
-import { chebyshev, dummyHome, foeById, gearSlot, ghostLiveFoe, leaveChance, makeHamletDummies, occupantAt, rememberLiveFoe, strikeDmg, talkChance, youFighter } from "./fight";
+import { chebyshev, dummyHome, foeById, gearSlot, ghostLiveFoe, isWolfId, leaveChance, makeHamletDummies, occupantAt, occupantHere, rememberLiveFoe, strikeDmg, talkChance, wolfById, youFighter } from "./fight";
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, FOG_LIVE, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
@@ -1531,13 +1531,13 @@ function advanceTravel(now: number) {
       finishService("done", "arrive");
       return;
     }
-    const landed = occupantAt(after.dummies ?? [], after.others ?? [], x, y);
+    const landed = occupantHere(after.dummies ?? [], after.others ?? [], after.world, x, y);
     if (landed && landed.life === "alive" && meetIgnore !== `${x},${y},${landed.id}`) {
       useGame.setState({ inspect: { x, y }, selected: { x, y } });
     }
     return;
   }
-  const occ = occupantAt(s.dummies ?? [], s.others ?? [], x, y);
+  const occ = occupantHere(s.dummies ?? [], s.others ?? [], s.world, x, y);
   if (stepped && occ && occ.life === "alive" && meetIgnore !== `${x},${y},${occ.id}`) {
     viewPos.x = x;
     viewPos.y = y;
@@ -1766,6 +1766,10 @@ function gatherHere() {
   if (busyBlock()) return;
   const tile = tileAt(s.world, s.character.x, s.character.y);
   if (!tile) return;
+  if (tile.herd && tile.herd.wild && tile.herd.kind === "wolf") {
+    speak("Волк. Встань и открой лист встречи.", tile.x, tile.y, "волк", "ok");
+    return;
+  }
   if (tile.herd && tile.herd.wild && (tile.herd.kind === "hare" || tile.herd.kind === "deer")) {
     huntHere();
     return;
@@ -5700,7 +5704,7 @@ function fillPitHere() {
 
 function foeOf(s: GameState) {
   if (!s.meet) return null;
-  const found = foeById(s.dummies ?? [], s.others ?? [], s.meet.foeId);
+  const found = foeById(s.dummies ?? [], s.others ?? [], s.meet.foeId) ?? wolfById(s.world, s.meet.foeId);
   const base =
     found ??
     ghostLiveFoe(s.meet.foeId, { x: s.character.x, y: s.character.y }, {
@@ -5779,7 +5783,7 @@ function yardFlags(s: GameState, x: number, y: number, who: string) {
 
 function startMeet(foeId: string) {
   const s = useGame.getState();
-  const foe = foeById(s.dummies ?? [], s.others ?? [], foeId);
+  const foe = foeById(s.dummies ?? [], s.others ?? [], foeId) ?? wolfById(s.world, foeId);
   if (!foe) {
     speak("Никого.", s.character.x, s.character.y, "пусто", "bad");
     return;
@@ -5950,9 +5954,19 @@ function meetHit() {
   if (nextFoe.hp <= 0) {
     nextFoe = { ...nextFoe, hp: 0, life: "down", downAt: Date.now() };
     if (tile) {
-      const drop = { ...emptyTheInv(c.inventory), ...nextFoe.inventory };
-      dumpAllOn(tile, drop, 0);
-      nextFoe = { ...nextFoe, inventory: {} };
+      if (isWolfId(foe.id)) {
+        const take = huntTake(c.hand, c.profession);
+        const drop = emptyTheInv(c.inventory);
+        drop.food = take.food;
+        if (take.hide) drop.hide = take.hide;
+        dumpAllOn(tile, drop, 0);
+        tile.herd = null;
+        nextFoe = { ...nextFoe, inventory: {} };
+      } else {
+        const drop = { ...emptyTheInv(c.inventory), ...nextFoe.inventory };
+        dumpAllOn(tile, drop, 0);
+        nextFoe = { ...nextFoe, inventory: {} };
+      }
     }
     useGame.setState({
       character: c,
@@ -5964,6 +5978,10 @@ function meetHit() {
       floaters: [...s.floaters, { id: ++floaterSeq, x: foe.x, y: foe.y, text: bits.join(" · "), tone: "ok" as const }].slice(-10),
     });
     useGame.getState().persist();
+    if (isWolfId(foe.id) && tile) {
+      markFreshLive(useGame.getState());
+      sealHarm("pile", harmCells(tile), s.character);
+    }
     if (live) void postStrikeFight(hit.dmg);
     return;
   }
@@ -6012,13 +6030,15 @@ function dummyAnswer() {
   if (scared && Math.random() < 0.55) {
     const tile = tileAt(s.world, foe.x, foe.y);
     if (tile && foe.inventory) dumpAllOn(tile, { ...emptyTheInv(c0.inventory), ...foe.inventory }, 0);
+    if (isWolfId(foe.id) && tile) tile.herd = null;
     const home = dummyHome(s.world, foe.id);
     const nextFoe: Dummy = {
       ...foe,
       inventory: {},
       energy: Math.max(0, foe.energy - 1),
-      x: home?.x ?? foe.x,
-      y: home?.y ?? foe.y,
+      x: isWolfId(foe.id) ? foe.x : (home?.x ?? foe.x),
+      y: isWolfId(foe.id) ? foe.y : (home?.y ?? foe.y),
+      life: isWolfId(foe.id) ? "down" : foe.life,
     };
     useGame.setState({
       dummies: applyDummy(s.dummies, nextFoe),
@@ -6028,6 +6048,10 @@ function dummyAnswer() {
       hint: { text: `${foe.name} отступил.`, tone: "ok" },
     });
     useGame.getState().persist();
+    if (isWolfId(foe.id) && tile) {
+      markFreshLive(useGame.getState());
+      sealHarm("pile", harmCells(tile), c0);
+    }
     return;
   }
   const flags = yardFlags(s, foe.x, foe.y, foe.id);
@@ -6071,6 +6095,15 @@ function dummyAnswer() {
       hint: { text: "Упал. Ползи к шалашу.", tone: "bad", keep: "down" },
       floaters: [...s.floaters, { id: ++floaterSeq, x: c.x, y: c.y, text: `−${hit.dmg}`, tone: "bad" as const }].slice(-10),
     });
+    if (isWolfId(foe.id) && Math.random() < 0.6) {
+      const wtile = tileAt(useGame.getState().world, foe.x, foe.y);
+      if (wtile?.herd?.kind === "wolf") {
+        wtile.herd = null;
+        useGame.setState({ world: { ...useGame.getState().world, tiles: useGame.getState().world.tiles } });
+        markFreshLive(useGame.getState());
+        sealHarm("pile", harmCells(wtile), c0);
+      }
+    }
     if (stripped.cells.length) sealHarm("wagon", stripped.cells, c0);
     useGame.getState().persist();
     return;

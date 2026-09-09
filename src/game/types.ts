@@ -169,7 +169,7 @@ export type GiftId = "gift_pin" | "gift_mug" | "gift_nft";
 
 export type WearKind = "axe" | "pick" | "spear" | "shovel" | "club" | "knife" | "steel_axe" | "steel_pick" | "steel_shovel";
 
-export type AnimalKind = "hare" | "deer" | "horse" | "cow";
+export type AnimalKind = "hare" | "deer" | "horse" | "cow" | "wolf";
 
 export type Herd = {
   kind: AnimalKind;
@@ -178,6 +178,8 @@ export type Herd = {
   hunger: number;
   /** Дни коровы во дворе. Дикие без срока. */
   age?: number;
+  /** Дни подряд к приплоду. Книга держит. */
+  bred?: number;
 };
 
 export type StallOrder = {

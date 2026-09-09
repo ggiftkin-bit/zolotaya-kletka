@@ -14,6 +14,7 @@ import { bagOf, canCraftHere, CISTERN_CAP, CISTERN_POUR, CELL_GONE, craftDefOf, 
 import { BOOST_ENERGY, busyEnergy, DEAD_MS, ENERGY_MAX, fleshOf, regenVigor, RISE_SAT, RISE_WATER, RISE_WARMTH, tickFlesh, vigorOf, WORK_HUNGER } from "./pace";
 import { stepEnergy } from "./travel";
 import { isHamletOwner, isLivingOwner } from "./pact";
+import { tickCowBirth, tickHorseBirth, tickWildHerds, tickWolfMorning, tickWolfSpawn } from "./life";
 import { defaultMatter, MATTER_HP, isRoof } from "./work";
 import { asPile, dumpAllOn, pileAdd, pileEmpty, pileSet, pullNeed, SHED_REACH, applyNeedPull } from "./pile";
 import { planDig } from "./pit";
@@ -812,8 +813,8 @@ async function writeGrownTiles(
   }
 }
 
-async function growWeeks(sql: Sql, seasons: Season[], userId: string) {
-  if (!seasons.length) return 0;
+async function growWeeks(sql: Sql, seasons: Season[], userId: string, daySalts: number[] = [], nightSalts: number[] = []) {
+  if (!seasons.length && !daySalts.length && !nightSalts.length) return 0;
   const rows = await sql.query<TileRow>(
     `select x, y, slim, ver, updated_at::text as updated_at from tile where world_id = $1`,
     [WORLD_ID],
@@ -837,6 +838,14 @@ async function growWeeks(sql: Sql, seasons: Season[], userId: string) {
     tiles[i] = fatTile({ b: "plains" }, x, y);
   }
   const world = { seed: WORLD_SEED, width: MAP_W, height: MAP_H, tiles };
+  for (const salt of daySalts) {
+    tickWolfMorning(world, salt);
+    tickWildHerds(world, salt);
+    tickCowBirth(world);
+    tickHorseBirth(world);
+    tickWolfSpawn(world, false, salt);
+  }
+  for (const salt of nightSalts) tickWolfSpawn(world, true, salt);
   for (const season of seasons) tickGrow(world, season, true);
   const grown: { x: number; y: number; slim: SlimTile; ver: number }[] = [];
   for (let i = 0; i < tiles.length; i++) {
@@ -877,13 +886,17 @@ async function advanceWorldClock(sql: Sql, userId: string): Promise<WorldClock> 
     }
     const ticks = Math.min(due, GROW_CATCHUP_TICKS);
     const seasons: Season[] = [];
+    const daySalts: number[] = [];
+    const nightSalts: number[] = [];
     for (let i = 0; i < ticks; i++) {
       const stepped = stepWorldClock(clock);
       clock = stepped.clock;
+      if (stepped.newDay) daySalts.push(clock.clock);
+      if (clock.tickOfDay === 4) nightSalts.push(clock.clock);
       if (stepped.newWeek) seasons.push(clock.season);
     }
-    if (seasons.length) {
-      await growWeeks(sql, seasons, userId);
+    if (seasons.length || daySalts.length || nightSalts.length) {
+      await growWeeks(sql, seasons, userId, daySalts, nightSalts);
     }
     const nextAt = due > GROW_CATCHUP_TICKS ? new Date(now) : new Date(atMs + ticks * TICK_MS);
     await sql.query(
