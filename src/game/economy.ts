@@ -60,6 +60,7 @@ export const BUILDING_LABEL = {
   moat: "ров",
   net: "сеть",
   camp: "костёр",
+  hall: "зал",
 } as const;
 
 export type BuildCost = { wood: number; stone: number; gold: number; plank?: number };
@@ -95,6 +96,7 @@ export const BUILD_COST: Record<
   moat: { wood: 2, stone: 0, gold: 0 },
   net: { wood: 4, stone: 0, gold: 0 },
   camp: { wood: 2, stone: 0, gold: 0 },
+  hall: { wood: 0, stone: 0, gold: 0 },
 };
 
 export function buildNeed(kind: Exclude<keyof typeof BUILDING_LABEL, "none">): Partial<Record<ItemId, number>> {

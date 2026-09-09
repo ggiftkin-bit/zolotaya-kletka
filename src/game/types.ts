@@ -93,7 +93,8 @@ export type BuildingKind =
   | "net"
   | "camp"
   | "mill"
-  | "sawmill";
+  | "sawmill"
+  | "hall";
 
 export type Profession =
   | "wanderer"
@@ -209,6 +210,20 @@ export type ServiceJob = {
   cargo?: Partial<Record<ItemId, number>>;
 };
 
+/** Казённый заказ дороги на зале. Золото из воздуха, казны нет. */
+export type RoadJob = {
+  ax: number;
+  ay: number;
+  bx: number;
+  by: number;
+  gold: number;
+  days: number;
+  /** 0 — висит без подрядчика. */
+  until: number;
+  who: string;
+  take?: string;
+};
+
 export type Tile = {
   x: number;
   y: number;
@@ -256,6 +271,12 @@ export type Tile = {
   order: StallOrder | null;
   /** Услуга двух почт. Золото в книге с первого тыка. */
   service: ServiceJob | null;
+  /** Клетка рынка у зала. Прилавок только здесь, кроме калитки двора. */
+  market: boolean;
+  /** Часы книги, до которых аренда рынка жива. */
+  rentUntil: number;
+  /** Заказ дороги на зале. */
+  roadJob: RoadJob | null;
 };
 
 export type Inventory = Record<ItemId, number>;
@@ -355,6 +376,8 @@ export type Character = {
   /** Сдачи лавке за сутки книги. */
   sells?: number;
   sellDay?: number;
+  /** Метка книги. Кнопкой стола не ставят. */
+  staff?: boolean;
 };
 
 export type Floater = {
@@ -453,6 +476,8 @@ export type GameState = {
   /** Склад тракта. Книга держит, не неделя лавки. */
   stock: Partial<Record<ItemId, number>>;
   plotMark: { x: number; y: number } | null;
+  /** Два угла казённой дороги. Как двор, не цифры. */
+  orderDraft: { ax?: number; ay?: number; bx?: number; by?: number } | null;
   log: string[];
   started: boolean;
   floaters: Floater[];

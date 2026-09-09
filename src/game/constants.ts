@@ -1,7 +1,7 @@
 import type { Biome, BuildingKind, Inventory, ItemId, Profession, Season, Transport, Weather } from "./types";
 
 /** Альфа. 0 всегда. Вторая цифра — новая механика. Третья — доработка. */
-export const GAME_VERSION = "0.26.0";
+export const GAME_VERSION = "0.27.0";
 
 /** Заливка паттерном (вода, луг, мох, камень, песок). false — плоские BIOME_FILL. */
 export const FILL_TEX = true;
@@ -323,6 +323,7 @@ export const BUILD_OK: Record<Exclude<BuildingKind, "none">, Biome[]> = {
   moat: ["plains", "fertile", "forest", "swamp"],
   net: ["plains", "fertile", "forest", "swamp", "ford"],
   camp: ["plains", "fertile", "forest", "swamp", "mountain"],
+  hall: ["plains"],
 };
 
 /** Ноша: все ненулевые, три квадрата в ряд. */

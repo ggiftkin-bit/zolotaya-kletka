@@ -45,6 +45,25 @@ import { applyCatch, applyDriveFail, DRIVE_LABEL, harmCells, hasLaw, hasTinder, 
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
 import { clearGame, loadGame, saveGame } from "./save";
 import { stampVillage, leaveVillage, hamletTitle, hasOwnYard, isOutsideYard, setVillageLaw, planFoundOwners, canJoinVillage, namesTouchingYard, livingOwnersOf, villageOf, snapVillage, villageChangedCells, atNameSpot, normVillageName, canPlaceBoard, stampBoard, releaseBoard } from "./pact";
+import { isGateTile } from "./market";
+import {
+  BOARD_CAP,
+  BOARD_CAP_HINT,
+  HALL_HINT,
+  MARKET_RENT,
+  MARKET_RENT_TICKS,
+  PEACE_HINT,
+  ROAD_EMPTY_HINT,
+  ROAD_GOLD_CAP,
+  STALL_HERE_HINT,
+  STALL_ONE_HINT,
+  STALL_RENT_HINT,
+  canPlaceMarketStall,
+  isPeace,
+  liveBoardCount,
+  liveMarketStall,
+  planRoadLine,
+} from "./meadow";
 import { cargoWeight, loadRatio, pailKg, stepEnergy, wornKg } from "./travel";
 import { atBench, CRAFTS, EAT_ORDER, EAT_SAT, PROF_BLURB, type CraftKind } from "./craft";
 import { markDepleted, tickGrow, PIT_HEAL_WEEKS, REGROW_WAIT } from "./grow";
@@ -105,7 +124,7 @@ import { chebyshev, dummyHome, foeById, gearSlot, ghostLiveFoe, isWolfId, leaveC
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, FOG_LIVE, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
-import { bindBookStore, commitBag, commitGold, commitHarm, commitOffice, commitService, commitStall, commitVillage, flushBook, lookStreet, markFreshLive, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
+import { bindBookStore, commitBag, commitGold, commitHarm, commitOffice, commitRoad, commitService, commitStall, commitVillage, flushBook, lookStreet, markFreshLive, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, resetBookPawn } from "./book-sync";
 import {
   applyCargoPile,
   canReachStall,
@@ -242,6 +261,7 @@ function makeCharacter(name: string, color: string): Character {
     pacts: {},
     village: "",
     gifts: {},
+    staff: false,
   };
 }
 
@@ -588,6 +608,9 @@ type Actions = {
   takeServiceAt: (x: number, y: number) => void;
   dropService: () => void;
   startMeet: (foeId: string) => void;
+  beginRoad: () => void;
+  hangRoad: (gold: number, days: number) => void;
+  takeRoad: () => void;
   meetPass: (foeId?: string) => void;
   meetHit: () => void;
   meetLeave: () => void;
@@ -638,6 +661,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   trader: makeTrader(1),
   stock: seedStock(),
   plotMark: null,
+  orderDraft: null,
   log: [],
   started: false,
   floaters: [],
@@ -732,6 +756,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         inspect: null,
         hint: null,
         plotMark: saved.plotMark ?? null,
+        orderDraft: saved.orderDraft ?? null,
         travel: saved.travel
           ? { ...saved.travel, t0: saved.travel.t0 ?? Date.now(), elapsed: saved.travel.elapsed ?? 0 }
           : null,
@@ -786,6 +811,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
         tickAt: Date.now(),
         jobs: prev.jobs.length ? prev.jobs : makeJobs(prev.week || 1),
         plotMark: null,
+        orderDraft: null,
         started: true,
         floaters: [],
         hint: null,
@@ -834,6 +860,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       trader: makeTrader(1),
       stock: seedStock(),
       plotMark: null,
+      orderDraft: null,
       started: true,
       floaters: [],
       hint: null,
@@ -854,7 +881,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     clearGame();
     void resetBookPawn();
     worldAcc = 0;
-    set({ started: false, travel: null, preview: null, log: [], jobs: [], floaters: [], inspect: null, plotMark: null, hint: null, others: [], meet: null, dummies: [] });
+    set({ started: false, travel: null, preview: null, log: [], jobs: [], floaters: [], inspect: null, plotMark: null, orderDraft: null, hint: null, others: [], meet: null, dummies: [] });
   },
 
   setTool: (tool) => set({ tool, preview: null, inspect: null, plotMark: tool === "claim" ? get().plotMark : null }),
@@ -871,6 +898,10 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   clickTile: (x, y) => {
     const s = get();
     if (!s.started) return;
+    if (s.orderDraft && (s.orderDraft.ax == null || s.orderDraft.bx == null)) {
+      markRoadCorner(x, y);
+      return;
+    }
     if (s.meet) {
       speak("Встреча. Сначала шаг листа.", s.character.x, s.character.y, "встреча", "ok");
       return;
@@ -1265,6 +1296,9 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   takeServiceAt: (x, y) => takeServiceAt(x, y),
   dropService: () => dropService(),
   startMeet: (foeId) => startMeet(foeId),
+  beginRoad: () => beginRoad(),
+  hangRoad: (gold, days) => hangRoad(gold, days),
+  takeRoad: () => takeRoad(),
   meetPass: (foeId) => meetPass(foeId),
   meetHit: () => meetHit(),
   meetLeave: () => meetLeave(),
@@ -2139,6 +2173,10 @@ function pickLock(kind: "chest" | "gate") {
   if (busyBlock()) return;
   const tile = s.inspect ? tileAt(s.world, s.inspect.x, s.inspect.y) : hereTile();
   if (!tile) return;
+  if (isPeace(tile)) {
+    speak(PEACE_HINT, tile.x, tile.y, PEACE_HINT, "ok");
+    return;
+  }
   const near = Math.max(Math.abs(s.character.x - tile.x), Math.abs(s.character.y - tile.y)) <= 1;
   if (!near) {
     speak("Подойди к замку.", tile.x, tile.y, "подойди", "bad");
@@ -2325,6 +2363,10 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
   if (kind === "none") return;
   if (kind === "workshop") kind = "bench";
   if (kind === "mine") kind = "adit";
+  if (kind === "hall") {
+    speak(HALL_HINT, x, y, "зал", "bad");
+    return;
+  }
   if (kind === "shop") {
     speak("Лавка — на тракте, не зданием.", x, y, "не здесь", "bad");
     return;
@@ -2352,7 +2394,26 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
   }
   if (kind === "board") {
     if (!canPlaceBoard(s.world, tile, isYours(tile))) {
-      speak("Доску ставят на тракте, берегу, поляне или улице имени.", x, y, "не здесь", "bad");
+      speak("Доску ставят на тракте, берегу, поляне или рынке.", x, y, "не здесь", "bad");
+      return;
+    }
+    if (liveBoardCount(s.world, "you") >= BOARD_CAP) {
+      speak(BOARD_CAP_HINT, x, y, BOARD_CAP_HINT, "bad");
+      return;
+    }
+  } else if (kind === "stall") {
+    const gate = isGateTile(tile) && isYours(tile);
+    if (canPlaceMarketStall(tile)) {
+      if (liveMarketStall(s.world, "you")) {
+        speak(STALL_ONE_HINT, x, y, "один", "bad");
+        return;
+      }
+      if (c.gold < MARKET_RENT) {
+        speak(STALL_RENT_HINT, x, y, "мало золота", "bad");
+        return;
+      }
+    } else if (!gate) {
+      speak(STALL_HERE_HINT, x, y, "не здесь", "bad");
       return;
     }
   } else if (tile.commons) {
@@ -2403,7 +2464,9 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
     return;
   }
   applyNeedPull(s.world, tile, pulled);
-  const next = { ...c, inventory: pulled.inv, gold: c.gold - cost.gold, energy: Math.max(0, c.energy - 2) };
+  let gold = c.gold - cost.gold;
+  if (kind === "stall" && canPlaceMarketStall(tile)) gold -= MARKET_RENT;
+  const next = { ...c, inventory: pulled.inv, gold: Math.max(0, gold), energy: Math.max(0, c.energy - 2) };
   const ms = buildMs(kind, next);
   useGame.setState({ world: { ...s.world, tiles: s.world.tiles } });
   const bagNeed: Partial<Record<ItemId, number>> = {};
@@ -2513,8 +2576,8 @@ function buyFromTrader(item: ItemId, qty: number) {
 function buyGift(id: GiftId) {
   const s = useGame.getState();
   const tile = hereTile();
-  if (!tile?.caravan) {
-    speak("Контора — у лавки на тракте.", s.character.x, s.character.y, "нет лавки", "bad");
+  if (tile?.building !== "hall") {
+    speak("Контора — в зале.", s.character.x, s.character.y, "нет зала", "bad");
     return;
   }
   const plan = planGift(s.character.gold, s.character.gifts, id);
@@ -2538,8 +2601,8 @@ function buyGift(id: GiftId) {
 function donateTable() {
   const s = useGame.getState();
   const tile = hereTile();
-  if (!tile?.caravan) {
-    speak("Поддержать стол — у лавки на тракте.", s.character.x, s.character.y, "нет лавки", "bad");
+  if (tile?.building !== "hall") {
+    speak("Поддержать стол — в зале.", s.character.x, s.character.y, "нет зала", "bad");
     return;
   }
   const plan = planDonate();
@@ -2750,6 +2813,10 @@ function stealHere() {
   if (busyBlock()) return;
   const tile = s.inspect ? tileAt(s.world, s.inspect.x, s.inspect.y) : hereTile();
   if (!tile) return;
+  if (isPeace(tile)) {
+    speak(PEACE_HINT, tile.x, tile.y, PEACE_HINT, "ok");
+    return;
+  }
   const near = Math.max(Math.abs(s.character.x - tile.x), Math.abs(s.character.y - tile.y)) <= 1;
   if (!near) {
     speak("Крадут рядом.", tile.x, tile.y, "подойди", "bad");
@@ -3220,6 +3287,10 @@ function resolveBuild(s: GameState, c0: Character, tile: NonNullable<ReturnType<
   tile.hp = MATTER_HP[tile.matter];
   tile.burned = false;
   if (kind === "board") stampBoard(tile);
+  if (kind === "stall" && tile.market) {
+    tile.owner = "you";
+    tile.rentUntil = s.clock + MARKET_RENT_TICKS;
+  }
   if (kind === "field") tile.resource = FIELD_CROP;
   const c = bumpSkill(c0, "build", 0.2);
   useGame.setState({
@@ -3581,6 +3652,14 @@ function burnHere() {
   if (busyBlock()) return;
   const tile = s.inspect ? tileAt(s.world, s.inspect.x, s.inspect.y) : hereTile();
   if (!tile) return;
+  if (tile.building === "hall") {
+    speak(HALL_HINT, tile.x, tile.y, "зал", "bad");
+    return;
+  }
+  if (isPeace(tile)) {
+    speak(PEACE_HINT, tile.x, tile.y, PEACE_HINT, "ok");
+    return;
+  }
   const near = Math.max(Math.abs(s.character.x - tile.x), Math.abs(s.character.y - tile.y)) <= 1;
   if (!near) {
     speak("Огонь — рядом.", tile.x, tile.y, "подойди", "bad");
@@ -5781,6 +5860,114 @@ function yardFlags(s: GameState, x: number, y: number, who: string) {
   };
 }
 
+function beginRoad() {
+  const s = useGame.getState();
+  if (!s.character.staff) {
+    speak("Заказ видит только метка книги.", s.character.x, s.character.y, "нет", "bad");
+    return;
+  }
+  const tile = hereTile();
+  if (tile?.building !== "hall") {
+    speak("Заказ — у зала.", s.character.x, s.character.y, "зал", "bad");
+    return;
+  }
+  useGame.setState({
+    orderDraft: {},
+    inspect: null,
+    log: pushLog(s.log, "Ткни первый угол дороги на земле."),
+    hint: { text: "Ткни первый угол.", tone: "ok" },
+  });
+}
+
+function markRoadCorner(x: number, y: number) {
+  const s = useGame.getState();
+  const draft = s.orderDraft;
+  if (!draft) return;
+  if (draft.ax == null || draft.ay == null) {
+    useGame.setState({
+      orderDraft: { ax: x, ay: y },
+      log: pushLog(s.log, `Угол 1 · ${x},${y}. Ткни второй.`),
+      hint: { text: "Ткни второй угол.", tone: "ok" },
+      floaters: [...s.floaters, { id: ++floaterSeq, x, y, text: "угол 1", tone: "ok" as const }].slice(-10),
+    });
+    return;
+  }
+  const line = planRoadLine(s.world, draft.ax, draft.ay, x, y);
+  if (!line.ok) {
+    speak(line.hint, x, y, "нет", "bad");
+    useGame.setState({ orderDraft: null });
+    return;
+  }
+  const hall = s.world.tiles.find((t) => t.building === "hall");
+  useGame.setState({
+    orderDraft: { ax: draft.ax, ay: draft.ay, bx: x, by: y },
+    inspect: hall ? { x: hall.x, y: hall.y } : { x: s.character.x, y: s.character.y },
+    log: pushLog(s.log, `Линия ${line.cells.length} кл. На зале — золото и срок.`),
+    hint: { text: "На зале: золото и срок.", tone: "ok" },
+    floaters: [...s.floaters, { id: ++floaterSeq, x, y, text: "угол 2", tone: "ok" as const }].slice(-10),
+  });
+}
+
+function hangRoad(gold: number, days: number) {
+  const s = useGame.getState();
+  const d = s.orderDraft;
+  if (!s.character.staff) {
+    speak("Заказ видит только метка книги.", s.character.x, s.character.y, "нет", "bad");
+    return;
+  }
+  if (!d || d.ax == null || d.ay == null || d.bx == null || d.by == null) {
+    speak("Два угла на земле.", s.character.x, s.character.y, "углы", "bad");
+    return;
+  }
+  const g = Math.floor(gold);
+  const n = Math.floor(days);
+  if (g <= 0 || n <= 0) {
+    speak(ROAD_EMPTY_HINT, s.character.x, s.character.y, "пусто", "bad");
+    return;
+  }
+  if (g > ROAD_GOLD_CAP) {
+    speak(`Потолок ${ROAD_GOLD_CAP}.`, s.character.x, s.character.y, "потолок", "bad");
+    return;
+  }
+  const prior = s.character;
+  const hall = hereTile();
+  if (hall?.building === "hall") {
+    hall.roadJob = { ax: d.ax, ay: d.ay, bx: d.bx, by: d.by, gold: g, days: n, until: 0, who: s.selfId || "you" };
+  }
+  useGame.setState({
+    world: { ...s.world, tiles: s.world.tiles },
+    orderDraft: null,
+    log: pushLog(s.log, `Заказ дороги · ${g} золота · ${n} сут.`),
+    hint: { text: "Заказ висит.", tone: "ok" },
+  });
+  void commitRoad("road-post", prior, { ax: d.ax, ay: d.ay, bx: d.bx, by: d.by, gold: g, days: n }).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
+function takeRoad() {
+  const s = useGame.getState();
+  const tile = hereTile();
+  if (tile?.building !== "hall" || !tile.roadJob) {
+    speak("Заказа нет.", s.character.x, s.character.y, "нет", "bad");
+    return;
+  }
+  if (tile.roadJob.take) {
+    speak("уже взяли", s.character.x, s.character.y, "уже взяли", "bad");
+    return;
+  }
+  const prior = s.character;
+  tile.roadJob = { ...tile.roadJob, take: s.selfId || "you", until: s.clock + tile.roadJob.days * TICKS_PER_DAY };
+  useGame.setState({
+    world: { ...s.world, tiles: s.world.tiles },
+    log: pushLog(s.log, "Взял заказ дороги."),
+    hint: { text: "Клетки твои до срока.", tone: "ok" },
+  });
+  void commitRoad("road-take", prior).then((ok) => {
+    if (!ok) void pullSpot(true);
+  });
+}
+
 function startMeet(foeId: string) {
   const s = useGame.getState();
   const foe = foeById(s.dummies ?? [], s.others ?? [], foeId) ?? wolfById(s.world, foeId);
@@ -5791,6 +5978,11 @@ function startMeet(foeId: string) {
   const why = meetWhy(s, foe);
   if (why) {
     speak(why, foe.x, foe.y, "нельзя", "bad");
+    return;
+  }
+  const at = tileAt(s.world, foe.x, foe.y);
+  if (isPeace(at)) {
+    speak(PEACE_HINT, foe.x, foe.y, PEACE_HINT, "ok");
     return;
   }
   cancelNotice("walk");

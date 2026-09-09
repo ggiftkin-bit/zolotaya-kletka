@@ -217,6 +217,7 @@ export type ScrapPlan =
 
 export function planScrap(tile: Tile, selfId: string): ScrapPlan {
   if (tile.building === "none") return { ok: false, hint: CELL_GONE };
+  if (tile.building === "hall") return { ok: false, hint: "Зал не разбирают." };
   if (tile.burned) {
     const matter = tile.matter || defaultMatter(tile.building);
     return { ok: true, mode: "burn", coal: scrapCoalOf(tile.building, matter) };

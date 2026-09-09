@@ -1,6 +1,6 @@
 import { MAP_H, MAP_W, zeroInv } from "./constants";
 import { asPile, pileEmpty } from "./pile";
-import type { BuildingKind, FenceKind, Inventory, ItemId, Matter, RoadKind, Tile, GameState, ServiceJob, ServiceKind } from "./types";
+import type { BuildingKind, FenceKind, Inventory, ItemId, Matter, RoadKind, Tile, GameState, ServiceJob, ServiceKind, RoadJob } from "./types";
 import { defaultMatter, MATTER_HP } from "./work";
 
 const KEY = "zolotaya-kletka-v8";
@@ -61,6 +61,22 @@ export type SlimTile = {
     ck?: string;
     cg?: Partial<Record<ItemId, number>>;
     d?: number;
+  };
+  /** Рынок у зала. Не путать с mk — следом преступления. */
+  mr?: 1;
+  /** Аренда рынка: часы книги. */
+  ru?: number;
+  /** Заказ дороги на зале. */
+  rj?: {
+    ax: number;
+    ay: number;
+    bx: number;
+    by: number;
+    g: number;
+    d: number;
+    u: number;
+    wh: string;
+    tk?: string;
   };
 };
 
@@ -140,6 +156,42 @@ function slimChest(c?: Inventory | null): Partial<Inventory> | undefined {
   return n ? o : undefined;
 }
 
+function slimRoadJob(job: RoadJob | null | undefined): SlimTile["rj"] | undefined {
+  if (!job || job.gold <= 0 || job.days <= 0) return undefined;
+  const o: NonNullable<SlimTile["rj"]> = {
+    ax: job.ax,
+    ay: job.ay,
+    bx: job.bx,
+    by: job.by,
+    g: job.gold,
+    d: job.days,
+    u: job.until,
+    wh: job.who,
+  };
+  if (job.take) o.tk = job.take;
+  return o;
+}
+
+function fatRoadJob(raw: SlimTile["rj"] | undefined): RoadJob | null {
+  if (!raw || typeof raw !== "object") return null;
+  if (typeof raw.ax !== "number" || typeof raw.ay !== "number" || typeof raw.bx !== "number" || typeof raw.by !== "number") {
+    return null;
+  }
+  if (typeof raw.g !== "number" || raw.g <= 0 || typeof raw.d !== "number" || raw.d <= 0 || !raw.wh) return null;
+  const job: RoadJob = {
+    ax: Math.floor(raw.ax),
+    ay: Math.floor(raw.ay),
+    bx: Math.floor(raw.bx),
+    by: Math.floor(raw.by),
+    gold: Math.floor(raw.g),
+    days: Math.floor(raw.d),
+    until: typeof raw.u === "number" && raw.u > 0 ? Math.floor(raw.u) : 0,
+    who: raw.wh,
+  };
+  if (raw.tk) job.take = raw.tk;
+  return job;
+}
+
 export function slimTile(t: Tile): SlimTile {
   const o: SlimTile = { b: t.biome };
   if (t.road !== "none") o.rd = t.road;
@@ -183,6 +235,10 @@ export function slimTile(t: Tile): SlimTile {
   if (t.order && t.order.n > 0 && t.order.gold > 0) o.or = { i: t.order.item, n: t.order.n, g: t.order.gold };
   const sv = slimService(t.service);
   if (sv) o.sv = sv;
+  if (t.market) o.mr = 1;
+  if (t.rentUntil) o.ru = t.rentUntil;
+  const rj = slimRoadJob(t.roadJob);
+  if (rj) o.rj = rj;
   return o;
 }
 
@@ -232,6 +288,9 @@ export function fatTile(raw: Partial<Tile> & { b?: Tile["biome"] }, x: number, y
     bank: !!(raw.bank ?? slim.bk),
     order: fatOrder(slim.or),
     service: fatService(slim.sv),
+    market: !!(raw as Tile).market || !!slim.mr,
+    rentUntil: (raw as Tile).rentUntil ?? slim.ru ?? 0,
+    roadJob: (raw as Tile).roadJob ?? fatRoadJob(slim.rj),
   };
 }
 
@@ -341,6 +400,7 @@ export function saveGame(state: GameState): boolean {
     trader: state.trader,
     stock: state.stock,
     plotMark: state.plotMark,
+    orderDraft: state.orderDraft,
     travel: state.travel,
     clockAt: state.clockAt ?? Date.now(),
     log: (state.log ?? []).slice(0, 16),

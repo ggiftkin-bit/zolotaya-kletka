@@ -10,6 +10,13 @@ import { bagGoods, bringDestLine, bringDests, boardNotices, BRING_GOODS, BRING_N
 import { DONATE_GOLD, GIFTS, giftOrdered, LIVE_STOCK, stockOf } from "@/game/office";
 import { occupantHere } from "@/game/fight";
 import { canFoundVillage, canPlaceBoard, canPutLiveName, clusterHint, hasOwnYard, namesTouchingYard, ownerFace, villageOf } from "@/game/pact";
+import {
+  PEACE_HINT,
+  ROAD_DAYS,
+  ROAD_GOLD_WORDS,
+  isPeace,
+  roadJobOf,
+} from "@/game/meadow";
 import { isForeignYard, isYours } from "@/game/crime";
 import { ownNearby, ownsMount, ridingHorse } from "@/game/mount";
 import { canDigReason, digLine, fillPay } from "@/game/pit";
@@ -317,6 +324,7 @@ function PickPane({
 
   return (
     <div className="mt-4 flex flex-col gap-2">
+      {isPeace(tile) && <p className="text-[13px] text-muted-foreground">{PEACE_HINT}</p>}
       {!here && riverBlock && (
         <p className="text-[13px] text-danger">{tile.building === "moat" ? "Ров. Обходи или строй мост." : "Река. Обходи или строй мост."}</p>
       )}
@@ -488,7 +496,7 @@ function PickPane({
       {dummy && dummy.life !== "alive" && (
         <p className="text-[13px] text-muted-foreground">{dummy.name} лежит. Не добивать.</p>
       )}
-      {dummy && dummy.life === "alive" && here && !down && !locked && !meetIsIgnored(tile.x, tile.y, dummy.id) && (
+      {dummy && dummy.life === "alive" && here && !down && !locked && !meetIsIgnored(tile.x, tile.y, dummy.id) && !isPeace(tile) && (
         <>
           <Sticker
             title="Встретиться"
@@ -555,7 +563,7 @@ function PickPane({
       )}
       {tile.owner && tile.owner !== "you" && near && (
         <>
-          {tile.gateLock && (
+          {!isPeace(tile) && tile.gateLock && (
             <Sticker
               title="Взломать калитку"
               sub="засов. если поймают — яма, замок цел"
@@ -563,7 +571,7 @@ function PickPane({
               onClick={() => g.pickLock("gate")}
             />
           )}
-          {tile.chestLock && (
+          {!isPeace(tile) && tile.chestLock && (
             <Sticker
               title="Взломать сундук"
               sub="если поймают — по законам"
@@ -571,11 +579,13 @@ function PickPane({
               onClick={() => g.pickLock("chest")}
             />
           )}
-          <Sticker
-            title={`Украсть у ${ownerFace(tile.owner, g.others) || "чужой"}`}
-            sub="С соседней клетки. Поймают — яма, залог 20."
-            onClick={() => g.stealHere()}
-          />
+          {!isPeace(tile) && (
+            <Sticker
+              title={`Украсть у ${ownerFace(tile.owner, g.others) || "чужой"}`}
+              sub="С соседней клетки. Поймают — яма, залог 20."
+              onClick={() => g.stealHere()}
+            />
+          )}
           {g.character.pacts[tile.owner] !== "friend" && !(tile.building === "board" && tile.burned) && (
             <Sticker title="Дружить" sub={`${ownerFace(tile.owner, g.others) || "чужой"} кивнёт`} onClick={() => g.offerFriend()} />
           )}
@@ -624,6 +634,8 @@ function PickPane({
         />
       )}
       {near &&
+        !isPeace(tile) &&
+        tile.building !== "hall" &&
         ((tile.building !== "none" && !tile.burned) || !!burnableFence(tile, g.world) || stoneFence(tile, g.world)) && (
           <Sticker title="Поджечь" sub="трава в руке" dim onClick={() => g.burnHere()} />
         )}
@@ -686,6 +698,7 @@ function PlacePane({ tile, here, near }: { tile: Tile; here: boolean; near: bool
   }
   const mine = isYours(tile);
   if (tile.caravan) return <LavkaBody tile={tile} />;
+  if (tile.building === "hall") return <HallBody tile={tile} />;
   if (tile.building === "shop") return <ShopBody tile={tile} />;
   if (!mine && isForeignYard(tile)) return <ForeignStation tile={tile} />;
   if (tile.building === "shack" || tile.building === "house" || tile.building === "shed") {
@@ -851,23 +864,14 @@ function WorkshopBody({ tile }: { tile: Tile }) {
 
 function LavkaBody({ tile }: { tile: Tile }) {
   const g = useGame();
-  const [door, setDoor] = useState<"lavka" | "office">("lavka");
   const haveWagon =
     g.character.wagon ||
     g.character.transport === "wagon" ||
     tile.wagon === "you" ||
     g.world.tiles.some((t) => t.wagon === "you");
-  if (door === "office") {
-    return <OfficeBody onBack={() => setDoor("lavka")} />;
-  }
   return (
     <div className="mt-3">
       <p className="text-[13px] text-muted-foreground">{g.trader.last}</p>
-      <div className="mt-1.5">
-        <Button size="sm" className="h-11 w-full" variant="secondary" onClick={() => setDoor("office")}>
-          Контора
-        </Button>
-      </div>
       <p className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">Ход</p>
       <div className="mt-1.5 flex gap-1.5">
         {!ownsMount(g.world, g.character, "cart") ? (
@@ -929,13 +933,15 @@ function LavkaBody({ tile }: { tile: Tile }) {
   );
 }
 
-function OfficeBody({ onBack }: { onBack: () => void }) {
+function OfficeBody({ onBack }: { onBack?: () => void }) {
   const g = useGame();
   return (
     <div className="mt-3 flex flex-col gap-2">
-      <Button className="h-11" variant="outline" onClick={onBack}>
-        ← Лавка
-      </Button>
+      {onBack ? (
+        <Button className="h-11" variant="outline" onClick={onBack}>
+          ← Зал
+        </Button>
+      ) : null}
       <p className="font-display text-2xl leading-none">Контора</p>
       <p className="text-[13px] text-muted-foreground">Приз в сумку не кладётся. Выдаст админ.</p>
       {GIFTS.map((prize) => {
@@ -957,6 +963,69 @@ function OfficeBody({ onBack }: { onBack: () => void }) {
       <Button className="h-12 w-full text-base" onClick={() => g.donateTable()}>
         Поддержать стол · +{goldTxt(DONATE_GOLD)}
       </Button>
+    </div>
+  );
+}
+
+function HallBody({ tile }: { tile: Tile }) {
+  const g = useGame();
+  const [door, setDoor] = useState<"hall" | "office">("hall");
+  const [gld, setGld] = useState<number | null>(null);
+  const job = roadJobOf(tile);
+  const draft = g.orderDraft;
+  const ready = !!(draft && draft.ax != null && draft.bx != null);
+  if (door === "office") return <OfficeBody onBack={() => setDoor("hall")} />;
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      <p className="text-[13px] text-muted-foreground">Мир поляны. Призы и донат — здесь. Лавка тракта торгует сырьём как была.</p>
+      <Button size="sm" className="h-11 w-full" variant="secondary" onClick={() => setDoor("office")}>
+        Контора
+      </Button>
+      {g.character.staff && !ready && (
+        <Sticker title="Заказ" sub="два угла на земле, золото словом, срок" onClick={() => g.beginRoad()} />
+      )}
+      {g.character.staff && ready && (
+        <>
+          <p className="text-[13px] text-muted-foreground">
+            Углы {draft!.ax},{draft!.ay} → {draft!.bx},{draft!.by}. Слово золота, потом срок.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {ROAD_GOLD_WORDS.map((n) => (
+              <Button key={n} size="sm" className="h-11" variant={gld === n ? "secondary" : "outline"} onClick={() => setGld(n)}>
+                {n} зол.
+              </Button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {ROAD_DAYS.map((d) => (
+              <Button
+                key={d}
+                size="sm"
+                className="h-11"
+                variant="outline"
+                disabled={!gld}
+                onClick={() => gld && g.hangRoad(gld, d)}
+              >
+                {d} сут.
+              </Button>
+            ))}
+          </div>
+        </>
+      )}
+      {job && (
+        <div className="rounded-[14px] border border-border bg-raised px-3 py-2">
+          <p className="font-display text-lg leading-none">Дорога</p>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            {job.ax},{job.ay} → {job.bx},{job.by} · {job.gold} золота · {job.days} сут.
+            {job.take ? " · взяли" : ""}
+          </p>
+          {!job.take && (
+            <Button className="mt-2 h-11 w-full" onClick={() => g.takeRoad()}>
+              Взять
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

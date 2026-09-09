@@ -76,7 +76,7 @@ export const CLAD_STONE = 16;
 export function defaultMatter(kind: BuildingKind): Matter {
   if (kind === "none") return "wood";
   if (kind === "shack" || kind === "stakes" || kind === "camp") return "wattle";
-  if (kind === "well" || kind === "forge" || kind === "oven" || kind === "jail" || kind === "moat" || kind === "mill") return "stone";
+  if (kind === "well" || kind === "forge" || kind === "oven" || kind === "jail" || kind === "moat" || kind === "mill" || kind === "hall") return "stone";
   return "wood";
 }
 

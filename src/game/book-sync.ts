@@ -17,7 +17,7 @@ import {
   type BookFight,
   type WorldClock,
 } from "./book";
-import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, readStreetNotices, strikeBookFight, writeBagDeed, writeGoldDeed, writeHarmDeed, writeOfficeDeed, writeServiceDeed, writeStallDeed, writeVillageDeed, writeWorldDeed } from "./book-api";
+import { closeBookFight, dropPawn, heartbeatWorld, openBookFight, openWorldBook, readStreetNotices, strikeBookFight, writeBagDeed, writeGoldDeed, writeHarmDeed, writeOfficeDeed, writeRoadDeed, writeServiceDeed, writeStallDeed, writeVillageDeed, writeWorldDeed } from "./book-api";
 import { rememberLiveFoe } from "./fight";
 import { makeJobs, makeTrader } from "./economy";
 import { fillStock } from "./office";
@@ -567,6 +567,45 @@ export async function commitOffice(
   }
 }
 
+export async function commitRoad(
+  kind: "road-post" | "road-take",
+  prior?: Character,
+  extra?: { ax?: number; ay?: number; bx?: number; by?: number; gold?: number; days?: number },
+) {
+  if (!store) return false;
+  const s = store.get();
+  if (s.started) saveGame(s);
+  if (!s.bookOn || !s.started) return true;
+  try {
+    const res = await writeRoadDeed({
+      data: {
+        kind,
+        pawn: pawnPayload(s.character),
+        ax: extra?.ax,
+        ay: extra?.ay,
+        bx: extra?.bx,
+        by: extra?.by,
+        gold: extra?.gold,
+        days: extra?.days,
+      },
+    });
+    if (!res) return false;
+    if (res.ok) {
+      applyOwned(res);
+      void pullSpot(true);
+      return true;
+    }
+    if (prior) store.set({ character: prior });
+    store.speak?.(res.hint || "нет", s.character.x, s.character.y, res.hint || "нет", "bad");
+    saveGame(store.get());
+    return false;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg !== "Unauthorized") console.warn("[книга] заказ", err);
+    return false;
+  }
+}
+
 export async function commitGold(kind: GoldKind, prior?: Character) {
   if (!store) return false;
   const s = store.get();
@@ -870,6 +909,20 @@ export async function beatBook(_force = false) {
       ...applyClock(res.clock, live),
     });
     applyOwned(res);
+    if (typeof (res as { x?: number }).x === "number" && typeof (res as { y?: number }).y === "number") {
+      const nx = (res as { x: number }).x;
+      const ny = (res as { y: number }).y;
+      const hint = (res as { hint?: string }).hint;
+      const c = store.get().character;
+      if (c.x !== nx || c.y !== ny) {
+        store.set({
+          character: { ...c, x: nx, y: ny, px: nx, py: ny },
+          travel: null,
+          preview: null,
+        });
+      }
+      if (hint) store.speak?.(hint, nx, ny, hint, "bad");
+    }
     rememberLive(store.get());
     if (res.fight) applyIncomingFight(res.fight, store.get().selfId);
     else if (store.get().meet?.live) {

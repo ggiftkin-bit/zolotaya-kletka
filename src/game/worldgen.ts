@@ -2,6 +2,7 @@ import { createNoise2D } from "simplex-noise";
 import { FIELD_CROP, MAP_H, MAP_W, zeroInv } from "./constants";
 import { allDarkFog, allOnesVer, maskLiveFog } from "./book";
 import { makeHerd } from "./life";
+import { stampHallMarket } from "./meadow";
 import { HAMLETS, PLAYER_FIELD } from "./pact";
 import { rngFromSeed } from "./rng";
 import type { Biome, RoadKind, Tile, World } from "./types";
@@ -500,9 +501,13 @@ export function migrateStations(world: World) {
     if (t.gateLock == null) t.gateLock = false;
     if (t.pit == null) t.pit = false;
     if (t.bank == null) t.bank = false;
+    if (t.market == null) t.market = false;
+    if (t.rentUntil == null) t.rentUntil = 0;
+    if (t.roadJob === undefined) t.roadJob = null;
   }
   stampClayBanks(world);
   stampMeadowHerb(world.tiles);
+  stampHallMarket(world);
 }
 
 export function stampMeadowHerb(tiles: Tile[]) {
@@ -652,11 +657,14 @@ function cloneWorld(world: World): World {
       regen: t.regen ?? 0,
       order: t.order ? { ...t.order } : null,
       service: t.service ? { ...t.service, cargo: t.service.cargo ? { ...t.service.cargo } : undefined } : null,
+      market: !!t.market,
+      rentUntil: t.rentUntil ?? 0,
+      roadJob: t.roadJob ? { ...t.roadJob } : null,
     })),
   };
 }
 
-const CACHE_VER = "v16-";
+const CACHE_VER = "v17-";
 
 export function warmupWorld(seed: string) {
   if (worldCache.has(CACHE_VER + seed)) return;
@@ -727,6 +735,9 @@ function buildWorld(seed: string): World {
         bank: false,
         order: null,
         service: null,
+        market: false,
+        rentUntil: 0,
+        roadJob: null,
       };
     }
   }
@@ -831,6 +842,8 @@ function buildWorld(seed: string): World {
     t.commons = true;
     t.road = t.road === "none" ? "dirt" : t.road;
   }
+
+  stampHallMarket({ seed, width: MAP_W, height: MAP_H, tiles });
 
   placeAnimals(tiles, spawn.x, spawn.y, extraRng);
 

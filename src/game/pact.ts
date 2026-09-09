@@ -303,7 +303,7 @@ export function isOutsideYard(world: World, x: number, y: number): boolean {
   return false;
 }
 
-/** Доска — знак на дороге: тракт, берег, поляна, улица имени. Плот не берёт. */
+/** Доска — знак на тракте, берегу, поляне или рынке. В лес и чужой двор — нет. */
 export function canPlaceBoard(_world: World, tile: Tile, _mine: boolean): boolean {
   if (tile.burned) return false;
   if (tile.building !== "none") return false;
@@ -311,11 +311,11 @@ export function canPlaceBoard(_world: World, tile: Tile, _mine: boolean): boolea
   if (tile.biome === "river") return false;
   if (tile.owner && tile.owner !== "you") return false;
   if (tile.plot || tile.owned) return false;
+  if (tile.biome === "forest" && tile.road === "none" && !tile.commons && !tile.market && !tile.bank) return false;
   const tract = tile.road !== "none";
-  const glade = !!tile.commons;
+  const glade = !!tile.commons || !!tile.market;
   const shore = !!tile.bank || tile.biome === "ford";
-  const street = !!tile.village;
-  return tract || glade || shore || street;
+  return tract || glade || shore;
 }
 
 /** Хозяин столба. Плот не ставим. */

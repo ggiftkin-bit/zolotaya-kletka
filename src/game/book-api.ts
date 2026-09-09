@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql, type Sql } from "@/lib/db";
-import { MAP_H, MAP_W, zeroInv } from "./constants";
+import { MAP_H, MAP_W, TICKS_PER_DAY, zeroInv } from "./constants";
 import { slimTile, fatTile, type SlimTile } from "./save";
 import { GROW_CATCHUP_TICKS, GROW_WRITE_BATCH, TICK_MS, markDepleted, PIT_HEAL_WEEKS, REGROW_WAIT, stepWorldClock, tickGrow } from "./grow";
 import type { Inventory, ItemId, Season, ServiceJob, Tile, Transport, World } from "./types";
@@ -27,6 +27,7 @@ import {
   WORLD_SEED,
   darkWorld,
   fightPairId,
+  travelOf,
   type BookFight,
   type BookSnapshot,
   type FightSnap,
@@ -36,11 +37,37 @@ import {
   type TilePacket,
   type WorldClock,
 } from "./book";
+import { patchStepWorld, planBookStep } from "./step";
+import {
+  BOARD_CAP,
+  BOARD_CAP_HINT,
+  HALL_HINT,
+  MARKET_RENT,
+  MARKET_RENT_TICKS,
+  PEACE_HINT,
+  ROAD_EMPTY_HINT,
+  ROAD_GOLD_CAP,
+  ROAD_LINE_HINT,
+  ROAD_STAFF_HINT,
+  ROAD_TAKEN_HINT,
+  STALL_HERE_HINT,
+  STALL_ONE_HINT,
+  STALL_RENT_HINT,
+  civicWriteHint,
+  collectElbows,
+  expireMarketTile,
+  hallPos,
+  isPeaceSlim,
+  keepCivicSlim,
+  marketSpots,
+  planRoadLine,
+  settleRoadJob,
+} from "./meadow";
 
 const slimSchema: z.ZodType<SlimTile> = z.any();
 
 /** Ордер, услуга, имя — книга держит, пока дело не пишет их само. */
-function keepSlimKeys(src: string, keys: Array<"or" | "sv" | "vg">): string {
+function keepSlimKeys(src: string, keys: Array<"or" | "sv" | "vg" | "mr" | "ru" | "rj">): string {
   const minus = keys.map((k) => `- '${k}'`).join(" ");
   const restore = keys
     .map((k) => `|| case when t.slim ? '${k}' then jsonb_build_object('${k}', t.slim->'${k}') else '{}'::jsonb end`)
@@ -288,6 +315,7 @@ function keepBookPurse(incoming: PawnBody, book: PawnBody | null | undefined): P
     deadUntil: vig.deadUntil,
     sells: book?.sells,
     sellDay: book?.sellDay,
+    staff: !!book?.staff,
     satiety: flesh.satiety,
     warmth: flesh.warmth,
     water: flesh.water,
@@ -480,13 +508,36 @@ async function campNear(sql: Sql, x: number, y: number): Promise<boolean> {
   });
 }
 
+async function clampPawnPos(
+  sql: Sql,
+  userId: string,
+  from: { x: number; y: number } | null,
+  pawn: { x: number; y: number; body: PawnBody },
+): Promise<{ x: number; y: number; hint?: string }> {
+  if (!from) return { x: pawn.x, y: pawn.y };
+  const rows = await sql.query<{ x: number; y: number; slim: SlimTile }>(
+    `select x, y, slim from tile
+     where world_id = $1 and greatest(abs(x - $2), abs(y - $3)) <= 1`,
+    [WORLD_ID, from.x, from.y],
+  );
+  const cells = rows.map((r) => fatTile(asSlim(r.slim), r.x, r.y));
+  if (!cells.some((t) => t.x === from.x && t.y === from.y)) {
+    cells.push(fatTile({ b: "plains" }, from.x, from.y));
+  }
+  const world = patchStepWorld(MAP_W, MAP_H, cells);
+  return planBookStep(world, from, { x: pawn.x, y: pawn.y }, travelOf(pawn.body), userId);
+}
+
 async function mergeBookBody(
   sql: Sql,
   userId: string,
   pawn: { x: number; y: number; body: PawnBody },
-): Promise<{ body: PawnBody; credit: number; gold: number; inventory: Inventory }> {
+): Promise<{ body: PawnBody; credit: number; gold: number; inventory: Inventory; x: number; y: number; hint?: string }> {
   const row = await readPawn(sql, userId);
   const credit = dueOf(row?.body);
+  const step = await clampPawnPos(sql, userId, row ? { x: row.x, y: row.y } : null, pawn);
+  pawn.x = step.x;
+  pawn.y = step.y;
   let kept = keepBookPurse(pawn.body, row?.body);
   kept = await mergeFightIntoPawnBody(sql, userId, kept);
   const here = await sql.query<{ slim: SlimTile }>(
@@ -541,7 +592,7 @@ async function mergeBookBody(
         }
         await sql.query(
           `update tile t
-           set slim = ${keepSlimKeys("$4::jsonb", ["or", "sv", "vg"])},
+           set slim = ${keepSlimKeys("$4::jsonb", CIVIC_KEYS)},
                ver = t.ver + 1, updated_at = now(), updated_by = $5
            where t.world_id = $1 and t.x = $2 and t.y = $3`,
           [WORLD_ID, pawn.x, pawn.y, JSON.stringify(slimTile(live)), userId],
@@ -562,7 +613,7 @@ async function mergeBookBody(
       };
     }
   }
-  return { body: kept, credit, gold: kept.gold, inventory: kept.inventory };
+  return { body: kept, credit, gold: kept.gold, inventory: kept.inventory, x: pawn.x, y: pawn.y, hint: step.hint };
 }
 
 async function writePawn(
@@ -676,7 +727,7 @@ async function applyServiceSettle(
           pileAdd(dest, result.out.item, result.out.n);
           await sql.query(
             `update tile t
-             set slim = ${keepSlimKeys("$4::jsonb", ["or", "sv", "vg"])},
+             set slim = ${keepSlimKeys("$4::jsonb", CIVIC_KEYS)},
                  ver = t.ver + 1, updated_at = now(), updated_by = $5
              where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $6`,
             [WORLD_ID, dx, dy, JSON.stringify(slimTile(dest)), actor, destRow.ver],
@@ -974,6 +1025,111 @@ async function birthIfEmpty(sql: Sql): Promise<boolean> {
   return true;
 }
 
+const CIVIC_KEYS: Array<"or" | "sv" | "vg" | "mr" | "ru" | "rj"> = ["or", "sv", "vg", "mr", "ru", "rj"];
+
+async function migrateMeadowStations(sql: Sql) {
+  const hall = hallPos();
+  const here = await sql.query<{ slim: SlimTile }>(
+    `select slim from tile where world_id = $1 and x = $2 and y = $3`,
+    [WORLD_ID, hall.x, hall.y],
+  );
+  if (!here[0]) return;
+  const slim = asSlim(here[0].slim);
+  if (slim.bd !== "hall" && (!slim.bd || slim.bd === "none") && !slim.pt && !slim.cv) {
+    await sql.query(
+      `update tile
+       set slim = slim || '{"bd":"hall"}'::jsonb,
+           ver = ver + 1, updated_at = now()
+       where world_id = $1 and x = $2 and y = $3
+         and coalesce(slim->>'bd', 'none') in ('none', '')`,
+      [WORLD_ID, hall.x, hall.y],
+    );
+  }
+  const at =
+    slim.bd === "hall"
+      ? hall
+      : (
+          await sql.query<{ x: number; y: number }>(
+            `select x, y from tile where world_id = $1 and slim->>'bd' = 'hall' limit 1`,
+            [WORLD_ID],
+          )
+        )[0] ?? hall;
+  for (const p of marketSpots(at)) {
+    await sql.query(
+      `update tile
+       set slim = slim || '{"mr":1}'::jsonb,
+           ver = ver + 1, updated_at = now()
+       where world_id = $1 and x = $2 and y = $3
+         and coalesce(slim->>'mr', '0') <> '1'
+         and coalesce(slim->>'bd', 'none') <> 'hall'
+         and slim->>'cv' is null`,
+      [WORLD_ID, p.x, p.y],
+    );
+  }
+}
+
+async function loadFatCell(sql: Sql, x: number, y: number): Promise<{ live: Tile; slim: SlimTile; ver: number } | null> {
+  const rows = await sql.query<TileRow>(
+    `select x, y, slim, ver, updated_at::text as updated_at from tile where world_id = $1 and x = $2 and y = $3`,
+    [WORLD_ID, x, y],
+  );
+  const r = rows[0];
+  if (!r) return null;
+  const slim = asSlim(r.slim);
+  return { live: fatTile(slim, r.x, r.y), slim, ver: r.ver };
+}
+
+async function writeFatCell(sql: Sql, tile: Tile, userId: string) {
+  await sql.query(
+    `update tile t
+     set slim = $4::jsonb, ver = t.ver + 1, updated_at = now(), updated_by = $5
+     where t.world_id = $1 and t.x = $2 and t.y = $3`,
+    [WORLD_ID, tile.x, tile.y, JSON.stringify(slimTile(tile)), userId],
+  );
+}
+
+async function settleMeadow(sql: Sql, clock: number, userId: string) {
+  await migrateMeadowStations(sql);
+  const hallRow = await sql.query<{ x: number; y: number }>(
+    `select x, y from tile where world_id = $1 and slim->>'bd' = 'hall' limit 1`,
+    [WORLD_ID],
+  );
+  const hallAt = hallRow[0] ?? hallPos();
+  for (const p of marketSpots(hallAt)) {
+    const cell = await loadFatCell(sql, p.x, p.y);
+    if (!cell) continue;
+    if (expireMarketTile(cell.live, clock)) await writeFatCell(sql, cell.live, userId);
+  }
+  const hall = await loadFatCell(sql, hallAt.x, hallAt.y);
+  if (!hall) return;
+  const world: World = {
+    seed: WORLD_SEED,
+    width: MAP_W,
+    height: MAP_H,
+    tiles: new Array(MAP_W * MAP_H),
+  };
+  for (let i = 0; i < world.tiles.length; i++) {
+    world.tiles[i] = fatTile({ b: "plains" }, i % MAP_W, (i / MAP_W) | 0);
+  }
+  world.tiles[hall.live.y * MAP_W + hall.live.x] = hall.live;
+  const job = hall.live.roadJob;
+  if (job) {
+    for (const c of collectElbows(job.ax, job.ay, job.bx, job.by)) {
+      const cell = await loadFatCell(sql, c.x, c.y);
+      if (cell) world.tiles[c.y * MAP_W + c.x] = cell.live;
+    }
+  }
+  const settled = settleRoadJob(world, hall.live, clock);
+  if (settled.changed) await writeFatCell(sql, hall.live, userId);
+  if (settled.pay) {
+    const row = await readPawn(sql, settled.pay.who);
+    if (row?.body) {
+      const gold = purseOf(row.body) + settled.pay.gold;
+      await writePawn(sql, settled.pay.who, row, { ...row.body, gold, due: 0 });
+    }
+  }
+}
+
 async function loadSpot(
   sql: Sql,
   px: number,
@@ -1055,6 +1211,7 @@ export const openWorldBook = createServerFn({ method: "POST" })
     const sql = await getSql();
     const born = await birthIfEmpty(sql);
     const clock = await advanceWorldClock(sql, context.userId);
+    await settleMeadow(sql, clock.clock, context.userId);
     let pawn = await readPawn(sql, context.userId);
     if (pawn?.body) {
       const credit = dueOf(pawn.body);
@@ -1110,47 +1267,85 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
     const conflicts: TilePacket[] = [];
     const written: { x: number; y: number; ver: number }[] = [];
     let picked = 0;
+    let rentGold = 0;
+    const clock = asClock(await readWorld(sql));
+    const asConflictTile = (live: TileRow) => ({
+      x: live.x,
+      y: live.y,
+      slim: asSlim(live.slim),
+      ver: live.ver,
+      updatedAt: live.updated_at,
+    });
+    const failWrite = async (hint: string, live?: TileRow) => {
+      const merged = await mergeBookBody(sql, context.userId, data.pawn);
+      await writePawn(sql, context.userId, { ...data.pawn, x: merged.x, y: merged.y }, merged.body);
+      return {
+        ok: false as const,
+        hint,
+        conflicts: live ? [asConflictTile(live)] : [],
+        written: [] as { x: number; y: number; ver: number }[],
+        credit: merged.credit,
+        gold: merged.gold,
+        inventory: merged.inventory,
+      };
+    };
     for (const t of data.tiles) {
       const live = await sql.query<TileRow>(
         `select x, y, slim, ver, updated_at::text as updated_at
          from tile where world_id = $1 and x = $2 and y = $3`,
         [WORLD_ID, t.x, t.y],
       );
-      const liveOn = ((live[0] ? asSlim(live[0].slim).on : "") || "").trim();
-      if (liveOn && liveOn !== context.userId && liveOn !== "you") {
-        if (live[0]) {
-          conflicts.push({
-            x: live[0].x,
-            y: live[0].y,
-            slim: asSlim(live[0].slim),
-            ver: live[0].ver,
-            updatedAt: live[0].updated_at,
-          });
+      const row = live[0];
+      const liveSlim = row ? asSlim(row.slim) : ({ b: "plains" } as SlimTile);
+      const civic = civicWriteHint(liveSlim, t.slim);
+      if (civic) return failWrite(civic, row);
+      let nextSlim = keepCivicSlim(liveSlim, t.slim);
+      if (nextSlim.bd === "board" && liveSlim.bd !== "board") {
+        const n = await sql.query<{ n: number }>(
+          `select count(*)::int as n from tile
+           where world_id = $1 and slim->>'bd' = 'board' and slim->>'br' is null
+             and slim->>'on' = $2`,
+          [WORLD_ID, context.userId],
+        );
+        if ((n[0]?.n ?? 0) >= BOARD_CAP) return failWrite(BOARD_CAP_HINT, row);
+      }
+      if (nextSlim.bd === "stall" && liveSlim.bd !== "stall") {
+        if (liveSlim.mr) {
+          const have = await sql.query<{ n: number }>(
+            `select count(*)::int as n from tile
+             where world_id = $1 and slim->>'bd' = 'stall' and slim->>'mr' = '1'
+               and slim->>'on' = $2`,
+            [WORLD_ID, context.userId],
+          );
+          if ((have[0]?.n ?? 0) >= 1) return failWrite(STALL_ONE_HINT, row);
+          const purse = purseGold((await readPawn(sql, context.userId))?.body);
+          if (purse < MARKET_RENT) return failWrite(STALL_RENT_HINT, row);
+          nextSlim = { ...nextSlim, mr: 1, ru: clock.clock + MARKET_RENT_TICKS, on: context.userId };
+          rentGold += MARKET_RENT;
+        } else if (liveSlim.co && !liveSlim.fn && !liveSlim.fw) {
+          return failWrite(STALL_HERE_HINT, row);
         }
+      }
+      const liveOn = (liveSlim.on || "").trim();
+      if (liveOn && liveOn !== context.userId && liveOn !== "you" && nextSlim.bd !== liveSlim.bd) {
+        if (row) conflicts.push(asConflictTile(row));
         continue;
       }
+      if (!row) continue;
       const upd = await sql.query<{ ver: number }>(
         `update tile t
-         set slim = ${keepSlimKeys("$5::jsonb", ["or", "sv", "vg"])},
+         set slim = ${keepSlimKeys("$5::jsonb", CIVIC_KEYS)},
              ver = t.ver + 1, updated_at = now(), updated_by = $6
          where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
          returning ver`,
-        [WORLD_ID, t.x, t.y, t.ver, JSON.stringify(t.slim), context.userId],
+        [WORLD_ID, t.x, t.y, t.ver, JSON.stringify(nextSlim), context.userId],
       );
       if (upd[0]) {
         written.push({ x: t.x, y: t.y, ver: upd[0].ver });
-        if (live[0]) picked += goldTakenFromSlim(asSlim(live[0].slim), t.slim);
+        picked += goldTakenFromSlim(liveSlim, nextSlim);
         continue;
       }
-      if (live[0]) {
-        conflicts.push({
-          x: live[0].x,
-          y: live[0].y,
-          slim: asSlim(live[0].slim),
-          ver: live[0].ver,
-          updatedAt: live[0].updated_at,
-        });
-      }
+      conflicts.push(asConflictTile(row));
     }
     const origin = data.tiles[0];
     const x = origin?.x ?? data.pawn.x;
@@ -1168,9 +1363,24 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
       ],
     );
     const merged = await mergeBookBody(sql, context.userId, data.pawn);
-    const body = { ...merged.body, gold: merged.gold + picked };
-    await writePawn(sql, context.userId, data.pawn, body);
-    await imprintSpot(sql, context.userId, data.pawn.x, data.pawn.y);
+    let gold = merged.gold + picked;
+    if (rentGold > 0) {
+      if (gold < rentGold) {
+        return {
+          ok: false as const,
+          hint: STALL_RENT_HINT,
+          conflicts,
+          written,
+          credit: merged.credit,
+          gold: merged.gold,
+          inventory: merged.inventory,
+        };
+      }
+      gold -= rentGold;
+    }
+    const body = { ...merged.body, gold };
+    await writePawn(sql, context.userId, { ...data.pawn, x: merged.x, y: merged.y }, body);
+    await imprintSpot(sql, context.userId, merged.x, merged.y);
     if (conflicts.length) {
       return {
         ok: false as const,
@@ -1198,6 +1408,23 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
   )
   .handler(async ({ context, data }) => {
     const sql = await getSql();
+    if (data.kind === "steal" || data.kind === "lock" || data.kind === "burn") {
+      for (const t of data.tiles) {
+        const live = await sql.query<{ slim: SlimTile }>(
+          `select slim from tile where world_id = $1 and x = $2 and y = $3`,
+          [WORLD_ID, t.x, t.y],
+        );
+        const slim = live[0] ? asSlim(live[0].slim) : ({ b: "plains" } as SlimTile);
+        if (slim.bd === "hall" && data.kind === "burn") {
+          const merged = await mergeBookBody(sql, context.userId, data.pawn);
+          return { ok: false as const, hint: HALL_HINT, conflicts: [], written: [], credit: 0, gold: merged.gold, inventory: merged.inventory };
+        }
+        if (isPeaceSlim(slim)) {
+          const merged = await mergeBookBody(sql, context.userId, data.pawn);
+          return { ok: false as const, hint: PEACE_HINT, conflicts: [], written: [], credit: 0, gold: merged.gold, inventory: merged.inventory };
+        }
+      }
+    }
     if (data.kind === "burn") {
       const pre = await mergeBookBody(sql, context.userId, data.pawn);
       const tinder = takeBag(pre.inventory, { herb: 1 });
@@ -1230,7 +1457,7 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
       if (live[0]) picked += goldTakenFromSlim(slim, t.slim);
     }
     const incoming = JSON.stringify(
-      data.tiles.map((t) => ({ x: t.x, y: t.y, slim: t.slim, ver: t.ver })),
+      data.tiles.map((t, i) => ({ x: t.x, y: t.y, slim: keepCivicSlim(liveBy[i] ?? { b: "plains" }, t.slim), ver: t.ver })),
     );
     const rows = await sql.query<{ written: unknown; conflicts: unknown }>(
       `with incoming as (
@@ -1246,7 +1473,7 @@ export const writeHarmDeed = createServerFn({ method: "POST" })
        ),
        upd as (
          update tile as t
-         set slim = ${keepSlimKeys("i.slim", ["or", "sv", "vg"])},
+         set slim = ${keepSlimKeys("i.slim", CIVIC_KEYS)},
              ver = t.ver + 1, updated_at = now(), updated_by = $3
          from incoming i
          where t.world_id = $1 and t.x = i.x and t.y = i.y and t.ver = i.ver
@@ -1358,6 +1585,9 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
     let inventory = startInv();
     let vigor = vigorOf(null);
     let flesh = fleshOf(null);
+    let px = data.x;
+    let py = data.y;
+    let stepHint: string | undefined;
     if (data.pawn) {
       const merged = await mergeBookBody(sql, context.userId, data.pawn);
       credit = merged.credit;
@@ -1365,12 +1595,25 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       inventory = merged.inventory;
       vigor = vigorOf(merged.body);
       flesh = fleshOf(merged.body);
-      await writePawn(sql, context.userId, data.pawn, merged.body);
+      px = merged.x;
+      py = merged.y;
+      stepHint = merged.hint;
+      await writePawn(sql, context.userId, { ...data.pawn, x: px, y: py }, merged.body);
     } else {
+      const row0 = await readPawn(sql, context.userId);
+      const step = await clampPawnPos(
+        sql,
+        context.userId,
+        row0 ? { x: row0.x, y: row0.y } : null,
+        { x: data.x, y: data.y, body: row0?.body ?? ({} as PawnBody) },
+      );
+      px = step.x;
+      py = step.y;
+      stepHint = step.hint;
       await sql.query(
         `update pawn set x = $3, y = $4, seen_at = now(), updated_at = now()
          where world_id = $1 and user_id = $2`,
-        [WORLD_ID, context.userId, data.x, data.y],
+        [WORLD_ID, context.userId, px, py],
       );
       const row = await readPawn(sql, context.userId);
       const due = dueOf(row?.body);
@@ -1380,7 +1623,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       flesh = fleshOf(row?.body);
       if (due > 0 && row?.body) {
         const body = { ...row.body, gold, due: 0 };
-        await writePawn(sql, context.userId, { name: row.name, color: row.color, x: data.x, y: data.y }, body);
+        await writePawn(sql, context.userId, { name: row.name, color: row.color, x: px, y: py }, body);
         credit = due;
         inventory = bagOf(body);
         vigor = vigorOf(body);
@@ -1388,14 +1631,15 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       }
     }
     const clock = await advanceWorldClock(sql, context.userId);
-    await settleAround(sql, data.x, data.y, context.userId);
+    await settleMeadow(sql, clock.clock, context.userId);
+    await settleAround(sql, px, py, context.userId);
     const liveRows = await sql.query<TileRow>(
       `select x, y, slim, ver, updated_at::text as updated_at
        from tile
        where world_id = $1
          and greatest(abs(x - $2), abs(y - $3)) <= $4
          and updated_at > $5::timestamptz`,
-      [WORLD_ID, data.x, data.y, FOG_FETCH, data.since || "1970-01-01T00:00:00.000Z"],
+      [WORLD_ID, px, py, FOG_FETCH, data.since || "1970-01-01T00:00:00.000Z"],
     );
     const live: TilePacket[] = liveRows.map((r) => ({
       x: r.x,
@@ -1410,7 +1654,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
        from tile
        where world_id = $1
          and greatest(abs(x - $2), abs(y - $3)) <= $4`,
-      [WORLD_ID, data.x, data.y, FOG_FETCH],
+      [WORLD_ID, px, py, FOG_FETCH],
     );
     const fill: TilePacket[] = fillRows.map((r) => ({
       x: r.x,
@@ -1424,10 +1668,10 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
        where world_id = $1 and user_id <> $2
          and greatest(abs(x - $3), abs(y - $4)) <= $5
          and seen_at > now() - interval '2 minutes'`,
-      [WORLD_ID, context.userId, data.x, data.y, FOG_FETCH],
+      [WORLD_ID, context.userId, px, py, FOG_FETCH],
     );
     const others: OtherPawn[] = otherRows.map(pawnAsOther);
-    await imprintSpot(sql, context.userId, data.x, data.y);
+    await imprintSpot(sql, context.userId, px, py);
     const fight = await loadOpenFight(sql, context.userId);
     const stock = await ensureStock(sql);
     return {
@@ -1452,6 +1696,9 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       warmth: flesh.warmth,
       water: flesh.water,
       pail: flesh.pail,
+      x: px,
+      y: py,
+      hint: stepHint,
     };
   });
 
@@ -1581,7 +1828,7 @@ export const writeStallDeed = createServerFn({ method: "POST" })
     }
     const upd = await sql.query<{ ver: number }>(
       `update tile t
-       set slim = ${keepSlimKeys("$5::jsonb", ["sv", "vg"])},
+       set slim = ${keepSlimKeys("$5::jsonb", ["sv", "vg", "mr", "ru", "rj"])},
            ver = t.ver + 1, updated_at = now(), updated_by = $6
        where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
          and t.slim->>'bd' = 'stall'
@@ -1637,8 +1884,14 @@ export const writeOfficeDeed = createServerFn({ method: "POST" })
     const gifts = { ...(dbBody?.gifts ?? {}) };
 
     const fail = (hint: string) => ({ ok: false as const, hint, stock, credit: 0, gold: dbGold, inventory: bagOf(dbBody) });
+    const at = await sql.query<{ slim: SlimTile }>(
+      `select slim from tile where world_id = $1 and x = $2 and y = $3`,
+      [WORLD_ID, row?.x ?? data.pawn.x, row?.y ?? data.pawn.y],
+    );
+    const hereSlim = at[0] ? asSlim(at[0].slim) : ({ b: "plains" } as SlimTile);
 
     if (data.kind === "donate") {
+      if (hereSlim.bd !== "hall") return fail("Контора — в зале.");
       const plan = planDonate();
       const fight = await mergeFightIntoPawnBody(sql, userId, data.pawn.body);
       const kept = keepBookPurse(fight, dbBody);
@@ -1654,6 +1907,7 @@ export const writeOfficeDeed = createServerFn({ method: "POST" })
     }
 
     if (data.kind === "gift") {
+      if (hereSlim.bd !== "hall") return fail("Контора — в зале.");
       const id = data.gift ?? "";
       if (!isGiftId(id)) return fail("Нет такого приза.");
       const plan = planGift(dbGold, gifts, id);
@@ -1673,6 +1927,7 @@ export const writeOfficeDeed = createServerFn({ method: "POST" })
 
     const item = data.item ?? "";
     if (!isItemId(item)) return fail("Лавка это не берёт.");
+    if (!hereSlim.cv) return fail("Сырьё — в лавке на тракте.");
     const qty = Math.max(1, Math.floor(data.qty ?? 1));
 
     if (data.kind === "stock-sell") {
@@ -1951,7 +2206,7 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
 
     const upd = await sql.query<{ ver: number }>(
       `update tile t
-       set slim = ${keepSlimKeys("$5::jsonb", ["or", "vg"])},
+       set slim = ${keepSlimKeys("$5::jsonb", ["or", "vg", "mr", "ru", "rj"])},
            ver = t.ver + 1, updated_at = now(), updated_by = $6
        where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
        returning ver`,
@@ -1980,7 +2235,7 @@ export const writeServiceDeed = createServerFn({ method: "POST" })
         if (!sameOwner && !sameName) continue;
         const shedUpd = await sql.query<{ ver: number }>(
           `update tile t
-           set slim = ${keepSlimKeys("$5::jsonb", ["or", "sv", "vg"])},
+           set slim = ${keepSlimKeys("$5::jsonb", CIVIC_KEYS)},
                ver = t.ver + 1, updated_at = now(), updated_by = $6
            where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
              and t.slim->>'bd' = 'shed'
@@ -2133,7 +2388,7 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       if (minN > 0) params.push(minN);
       const upd = await sql.query<{ ver: number }>(
         `update tile t
-         set slim = ${keepSlimKeys("$5::jsonb", ["or", "sv", "vg"])},
+         set slim = ${keepSlimKeys("$5::jsonb", CIVIC_KEYS)},
              ver = t.ver + 1, updated_at = now(), updated_by = $6
          where t.world_id = $1 and t.x = $2 and t.y = $3 and t.ver = $4
            ${extra}
@@ -2753,6 +3008,13 @@ export const openBookFight = createServerFn({ method: "POST" })
     if (Math.max(Math.abs(mx - foe.x), Math.abs(my - foe.y)) > 1) {
       return { ok: false as const, hint: "не на его клетке" };
     }
+    const spot = await sql.query<{ slim: SlimTile }>(
+      `select slim from tile where world_id = $1 and x = $2 and y = $3`,
+      [WORLD_ID, mx, my],
+    );
+    if (spot[0] && isPeaceSlim(asSlim(spot[0].slim))) {
+      return { ok: false as const, hint: PEACE_HINT };
+    }
     const existing = await loadOpenFight(sql, context.userId);
     if (existing && (existing.aId === data.foeId || existing.bId === data.foeId)) {
       return { ok: true as const, fight: existing };
@@ -2854,5 +3116,78 @@ export const closeBookFight = createServerFn({ method: "POST" })
       [WORLD_ID, fight.id],
     );
     return { ok: true as const, fight: { ...fight, status: "done" as const } };
+  });
+
+export const writeRoadDeed = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: unknown) =>
+    z
+      .object({
+        kind: z.enum(["road-post", "road-take"]),
+        pawn: pawnInSchema,
+        ax: z.number().optional(),
+        ay: z.number().optional(),
+        bx: z.number().optional(),
+        by: z.number().optional(),
+        gold: z.number().optional(),
+        days: z.number().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const userId = context.userId;
+    const merged = await mergeBookBody(sql, userId, data.pawn);
+    const fail = (hint: string) => ({
+      ok: false as const,
+      hint,
+      credit: merged.credit,
+      gold: merged.gold,
+      inventory: merged.inventory,
+    });
+    const hallRow = await sql.query<TileRow>(
+      `select x, y, slim, ver, updated_at::text as updated_at from tile where world_id = $1 and slim->>'bd' = 'hall' limit 1`,
+      [WORLD_ID],
+    );
+    const hall = hallRow[0];
+    if (!hall) return fail("зала нет");
+    if (Math.max(Math.abs(merged.x - hall.x), Math.abs(merged.y - hall.y)) > 1) {
+      return fail("подойди к залу");
+    }
+    const live = fatTile(asSlim(hall.slim), hall.x, hall.y);
+    if (data.kind === "road-post") {
+      if (!merged.body.staff) return fail(ROAD_STAFF_HINT);
+      const ax = Math.floor(data.ax ?? 0);
+      const ay = Math.floor(data.ay ?? 0);
+      const bx = Math.floor(data.bx ?? 0);
+      const by = Math.floor(data.by ?? 0);
+      const gold = Math.floor(data.gold ?? 0);
+      const days = Math.floor(data.days ?? 0);
+      if (gold <= 0 || days <= 0) return fail(ROAD_EMPTY_HINT);
+      if (gold > ROAD_GOLD_CAP) return fail(`Потолок ${ROAD_GOLD_CAP}.`);
+      const probe: World = { seed: WORLD_SEED, width: MAP_W, height: MAP_H, tiles: new Array(MAP_W * MAP_H) };
+      for (let i = 0; i < probe.tiles.length; i++) {
+        probe.tiles[i] = fatTile({ b: "plains" }, i % MAP_W, (i / MAP_W) | 0);
+      }
+      probe.tiles[hall.y * MAP_W + hall.x] = live;
+      for (const c of collectElbows(ax, ay, bx, by)) {
+        const cell = await loadFatCell(sql, c.x, c.y);
+        if (cell) probe.tiles[c.y * MAP_W + c.x] = cell.live;
+      }
+      const judged = planRoadLine(probe, ax, ay, bx, by);
+      if (!judged.ok) return fail(judged.hint || ROAD_LINE_HINT);
+      live.roadJob = { ax, ay, bx, by, gold, days, until: 0, who: userId };
+      await writeFatCell(sql, live, userId);
+      await writePawn(sql, userId, { ...data.pawn, x: merged.x, y: merged.y }, merged.body);
+      return { ok: true as const, hint: "", credit: merged.credit, gold: merged.gold, inventory: merged.inventory };
+    }
+    const job = live.roadJob;
+    if (!job) return fail("заказа нет");
+    if (job.take) return fail(ROAD_TAKEN_HINT);
+    const clock = asClock(await readWorld(sql));
+    live.roadJob = { ...job, take: userId, until: clock.clock + job.days * TICKS_PER_DAY };
+    await writeFatCell(sql, live, userId);
+    await writePawn(sql, userId, { ...data.pawn, x: merged.x, y: merged.y }, merged.body);
+    return { ok: true as const, hint: "", credit: merged.credit, gold: merged.gold, inventory: merged.inventory };
   });
 

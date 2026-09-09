@@ -178,6 +178,8 @@ export type PawnBody = {
   /** Сдачи лавке за сутки книги. Сброс с новым днём мира. */
   sells?: number;
   sellDay?: number;
+  /** Метка книги. Кнопкой стола не ставят. */
+  staff?: boolean;
 };
 
 export type PawnRow = {
@@ -385,6 +387,7 @@ export function packPawn(c: Character, travel: Travel | null = null): PawnBody {
     gifts: c.gifts ?? {},
     sells: c.sells,
     sellDay: c.sellDay,
+    staff: !!c.staff,
   };
 }
 
@@ -452,6 +455,7 @@ export function unpackPawn(row: PawnRow): Character {
     gifts: packed.gifts ?? {},
     sells: typeof packed.sells === "number" ? Math.max(0, Math.floor(packed.sells)) : 0,
     sellDay: typeof packed.sellDay === "number" ? Math.floor(packed.sellDay) : 0,
+    staff: !!(packed as { staff?: boolean }).staff,
   };
 }
 
