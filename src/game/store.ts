@@ -792,8 +792,11 @@ export const useGame = create<GameState & Actions>((set, get) => ({
       viewPos.x = character.x;
       viewPos.y = character.y;
       worldAcc = 0;
+      const tiles = prev.world.tiles.map((t) => ({ ...t }));
+      const raw = { ...prev.world, tiles };
+      migrateStations(raw);
       const world = maskLiveFog(
-        { ...prev.world, fog: allDarkFog(prev.world.tiles.length), ver: prev.world.ver ?? prev.world.tiles.map(() => 1) },
+        { ...raw, fog: allDarkFog(tiles.length), ver: prev.world.ver ?? tiles.map(() => 1) },
         character.x,
         character.y,
       );

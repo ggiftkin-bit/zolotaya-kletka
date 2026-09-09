@@ -1527,6 +1527,14 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
 
   paintFence(ctx, tile, x, y, world);
 
+  if (tile.market && tile.building === "none" && !tile.pit && !isWater(tile)) {
+    ctx.fillStyle = "rgba(86, 74, 54, 0.38)";
+    ctx.fillRect(x + 5, y + 10, TILE - 10, TILE - 16);
+    ctx.strokeStyle = "rgba(62, 52, 38, 0.55)";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x + 5, y + 10, TILE - 10, TILE - 16);
+  }
+
   if (!isWater(tile)) paintHerb(ctx, tile, x, y);
 
   if (
@@ -2245,6 +2253,8 @@ function drawMinimap(
       ctx.fillStyle = BIOME_FILL[t.biome === "forest" && t.amount < 4 ? "plains" : t.biome];
       if (t.plot && t.building !== "field" && !t.pit && t.biome !== "river" && t.biome !== "ford") ctx.fillStyle = "#8a7d64";
       else if (t.commons && !t.plot && t.biome !== "river") ctx.fillStyle = "#b09e82";
+      if (t.market) ctx.fillStyle = "#9a8a6e";
+      if (t.building === "hall") ctx.fillStyle = "#6e5a3a";
       if (fog === FOG_MEM) ctx.fillStyle = "#3a3228";
       if (t.bank && !t.pit) ctx.fillStyle = "#c9b06a";
       if (t.pit) ctx.fillStyle = "#3a3228";

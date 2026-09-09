@@ -1038,7 +1038,7 @@ async function migrateMeadowStations(sql: Sql) {
   if (slim.bd !== "hall" && (!slim.bd || slim.bd === "none") && !slim.pt && !slim.cv) {
     await sql.query(
       `update tile
-       set slim = slim || '{"bd":"hall"}'::jsonb,
+       set slim = (slim - 'rs' - 'n') || '{"bd":"hall","mt":"stone"}'::jsonb,
            ver = ver + 1, updated_at = now()
        where world_id = $1 and x = $2 and y = $3
          and coalesce(slim->>'bd', 'none') in ('none', '')`,
