@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql, type Sql } from "@/lib/db";
-import { MAP_H, MAP_W } from "./constants";
+import { MAP_H, MAP_W, zeroInv } from "./constants";
 import { slimTile, fatTile, type SlimTile } from "./save";
 import { GROW_CATCHUP_TICKS, GROW_WRITE_BATCH, TICK_MS, markDepleted, PIT_HEAL_WEEKS, REGROW_WAIT, stepWorldClock, tickGrow } from "./grow";
 import type { Inventory, ItemId, Season, ServiceJob, Tile, Transport, World } from "./types";
@@ -15,7 +15,7 @@ import { BOOST_ENERGY, busyEnergy, DEAD_MS, ENERGY_MAX, fleshOf, regenVigor, RIS
 import { stepEnergy } from "./travel";
 import { isHamletOwner, isLivingOwner } from "./pact";
 import { defaultMatter, MATTER_HP, isRoof } from "./work";
-import { asPile, pileAdd, pileEmpty, pileSet, pullNeed, SHED_REACH, applyNeedPull } from "./pile";
+import { asPile, dumpAllOn, pileAdd, pileEmpty, pileSet, pullNeed, SHED_REACH, applyNeedPull } from "./pile";
 import { planDig } from "./pit";
 import { STRIKE_CAP } from "./fight";
 import { makeJobs } from "./economy";
@@ -528,6 +528,39 @@ async function mergeBookBody(
     bodyTick: f.bodyTick,
     hp: f.hp,
   };
+  if (kept.life === "alive") {
+    if (shelter) {
+      kept = { ...kept, hp: Math.max(1, kept.hp) };
+    } else if (kept.hp <= 0) {
+      const live = slim ? fatTile(slim, pawn.x, pawn.y) : null;
+      if (live) {
+        dumpAllOn(live, bagOf(kept));
+        for (const id of [kept.body, kept.shield, kept.helm]) {
+          if (id) pileAdd(live, id, 1);
+        }
+        await sql.query(
+          `update tile t
+           set slim = ${keepSlimKeys("$4::jsonb", ["or", "sv", "vg"])},
+               ver = t.ver + 1, updated_at = now(), updated_by = $5
+           where t.world_id = $1 and t.x = $2 and t.y = $3`,
+          [WORLD_ID, pawn.x, pawn.y, JSON.stringify(slimTile(live)), userId],
+        );
+      }
+      kept = {
+        ...kept,
+        hp: 0,
+        life: "down",
+        downAt: Date.now(),
+        inventory: zeroInv(),
+        body: null,
+        shield: null,
+        helm: null,
+        hand: null,
+        busy: null,
+        resting: false,
+      };
+    }
+  }
   return { body: kept, credit, gold: kept.gold, inventory: kept.inventory };
 }
 
@@ -1070,6 +1103,19 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
          from tile where world_id = $1 and x = $2 and y = $3`,
         [WORLD_ID, t.x, t.y],
       );
+      const liveOn = ((live[0] ? asSlim(live[0].slim).on : "") || "").trim();
+      if (liveOn && liveOn !== context.userId && liveOn !== "you") {
+        if (live[0]) {
+          conflicts.push({
+            x: live[0].x,
+            y: live[0].y,
+            slim: asSlim(live[0].slim),
+            ver: live[0].ver,
+            updatedAt: live[0].updated_at,
+          });
+        }
+        continue;
+      }
       const upd = await sql.query<{ ver: number }>(
         `update tile t
          set slim = ${keepSlimKeys("$5::jsonb", ["or", "sv", "vg"])},

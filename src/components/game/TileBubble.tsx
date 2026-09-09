@@ -683,6 +683,7 @@ function PlacePane({ tile, here, near }: { tile: Tile; here: boolean; near: bool
   if (tile.building === "shop") return <ShopBody tile={tile} />;
   if (!mine && isForeignYard(tile)) return <ForeignStation tile={tile} />;
   if (tile.building === "shack" || tile.building === "house" || tile.building === "shed") {
+    if (!mine) return <ForeignStation tile={tile} />;
     return <HomeBody tile={tile} />;
   }
   if (

@@ -58,7 +58,7 @@ export function nextGoal(s: GameState): string {
     if (ownRoof) return "Зайди в шалаш — там тепло и сон";
     return "Холодно. Нужен шалаш";
   }
-  if (c.satiety < 25) return "Голоден. Съешь из сумки";
+  if (c.satiety < 25) return roofNow ? "Голоден. Съешь" : "Голоден. Съешь из сумки";
   if (c.energy < 1) return roofNow ? "Силы нет. Нажми Спать" : "Силы нет. Лечь дома или кружка";
   if (c.hp < 50) return "Слаб. Крыша и настой";
   const own = s.world.tiles.some((t) => t.plot && t.owner === "you");

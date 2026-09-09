@@ -153,6 +153,7 @@ export function stampYard(world: World, x0: number, y0: number, x1: number, y1: 
     for (let x = x0; x <= x1; x++) {
       const t = tileAt(world, x, y);
       if (!t) continue;
+      if (t.owner && t.owner !== "you") continue;
       t.owned = true;
       t.plot = true;
       t.owner = t.owner || "you";

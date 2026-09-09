@@ -200,11 +200,14 @@ export function tickFlesh(
       else if (opts.fire) warmth = Math.min(100, warmth + (opts.phase === "night" ? 3 : 1));
       else if (opts.phase === "night") warmth = Math.max(0, warmth - (opts.season === "winter" ? 3 : 2));
       else if (opts.weather === "rain" || opts.weather === "snow") warmth = Math.max(0, warmth - 1);
-      if (satiety === 0) hp = Math.max(0, hp - 3);
-      if (warmth === 0) hp = Math.max(0, hp - 2);
-      if (water === 0) hp = Math.max(0, hp - 2);
+      if (!opts.roof) {
+        if (satiety === 0) hp = Math.max(0, hp - 3);
+        if (warmth === 0) hp = Math.max(0, hp - 2);
+        if (water === 0) hp = Math.max(0, hp - 2);
+      }
       if (opts.roof && satiety > 40) hp = Math.min(100, hp + 3);
       else if (satiety > 40 && warmth > 40 && water > 40) hp = Math.min(100, hp + 1);
+      if (opts.roof) hp = Math.max(1, hp);
     }
   }
   return { ...f, satiety, warmth, water, hp, bodyTick: clock };

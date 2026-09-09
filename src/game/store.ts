@@ -1599,27 +1599,44 @@ function worldTick() {
   let dumped: { x: number; y: number } | null = null;
   let parkedMount: Array<{ x: number; y: number }> = [];
   if (c.hp <= 0 && c.life === "alive") {
-    dumped = dumpCargo(s.world, c.x, c.y, c.inventory, 0, [c.body, c.shield, c.helm]);
-    c.inventory = emptyTheInv(c.inventory);
-    c.body = null;
-    c.shield = null;
-    c.helm = null;
-    c.hand = null;
-    const stripped = stripRidden(s.world, c, c.x, c.y);
-    c = stripped.c;
-    parkedMount = stripped.cells;
-    c.life = "down";
-    c.downAt = Date.now();
-    c.hp = 0;
-    c.busy = null;
-    c.resting = false;
-    cancelNotice("walk");
-    log = pushLog(log, "Упал. Ноша на клетке. Ползи к шалашу — там поднимешься. Без крыши через 90 с — погиб.");
-    useGame.setState({
-      travel: null,
-      preview: null,
-      hint: { text: "Упал. Ползи к шалашу.", tone: "bad", keep: "down" },
-    });
+    if (roof) {
+      c.hp = 1;
+    } else if (!s.bookOn) {
+      dumped = dumpCargo(s.world, c.x, c.y, c.inventory, 0, [c.body, c.shield, c.helm]);
+      c.inventory = emptyTheInv(c.inventory);
+      c.body = null;
+      c.shield = null;
+      c.helm = null;
+      c.hand = null;
+      const stripped = stripRidden(s.world, c, c.x, c.y);
+      c = stripped.c;
+      parkedMount = stripped.cells;
+      c.life = "down";
+      c.downAt = Date.now();
+      c.hp = 0;
+      c.busy = null;
+      c.resting = false;
+      cancelNotice("walk");
+      log = pushLog(log, "Упал. Ноша на клетке. Ползи к шалашу — там поднимешься. Без крыши через 90 с — погиб.");
+      useGame.setState({
+        travel: null,
+        preview: null,
+        hint: { text: "Упал. Ползи к шалашу.", tone: "bad", keep: "down" },
+      });
+    } else {
+      c.life = "down";
+      c.downAt = Date.now();
+      c.hp = 0;
+      c.busy = null;
+      c.resting = false;
+      cancelNotice("walk");
+      log = pushLog(log, "Упал. Ноша на клетке. Ползи к шалашу — там поднимешься. Без крыши через 90 с — погиб.");
+      useGame.setState({
+        travel: null,
+        preview: null,
+        hint: { text: "Упал. Ползи к шалашу.", tone: "bad", keep: "down" },
+      });
+    }
   }
 
   let newDay = false;
@@ -1848,6 +1865,10 @@ function finishYard(ax: number, ay: number, bx: number, by: number) {
         speak("Внутри река, поляна или лавка — так двор не ставят.", bx, by, "не сюда", "bad");
         return;
       }
+      if (isForeignYard(t) || (t.owner && t.owner !== "you")) {
+        speak("Чужой дом. Тын его не забирает.", bx, by, "чужой дом", "bad");
+        return;
+      }
     }
   }
   const wood = yardWoodCost(w, h);
@@ -2007,7 +2028,7 @@ function hangLock(kind: "chest" | "gate") {
     speak("Подойди.", tile.x, tile.y, "подойди", "bad");
     return;
   }
-  const mine = tile.owner === "you" || tile.owned || (!tile.owner && tile.plot);
+  const mine = isYours(tile);
   if (!mine) {
     speak("Замок вешают на своё.", tile.x, tile.y, "не твоё", "bad");
     return;
@@ -2066,7 +2087,7 @@ function takeLock(kind: "chest" | "gate") {
     speak("Подойди.", tile.x, tile.y, "подойди", "bad");
     return;
   }
-  const mine = tile.owner === "you" || tile.owned || (!tile.owner && tile.plot);
+  const mine = isYours(tile);
   if (!mine) {
     speak("Чужой замок не снимают — его взламывают.", tile.x, tile.y, "не твоё", "bad");
     return;
@@ -2348,7 +2369,7 @@ function buildOn(x: number, y: number, kind: BuildingKind) {
     return;
   }
   if (tile.building !== "none") {
-    if (!(kind === "house" && tile.building === "shack" && (tile.owner === "you" || tile.owned || tile.plot))) {
+    if (!(kind === "house" && tile.building === "shack" && isYours(tile))) {
       speak("Клетка занята.", x, y, "занято", "bad");
       return;
     }
