@@ -10,7 +10,7 @@ import { generateWorld } from "./worldgen";
 import { isItemId, settleService, serviceJobOf, stampTake } from "./market";
 import { fillStock, isGiftId, planBuyFromStock, planDonate, planGift, planSellDay, planSellToStock, stockOf, worldDayOf, STOCK_CAP, STOCK_START } from "./office";
 import { isGoldKind, planGoldDeed, START_GOLD } from "./gold";
-import { bagOf, canCraftHere, CISTERN_CAP, CISTERN_POUR, CELL_GONE, craftDefOf, eatSatiety, giveOrSpill, GRANT_WOOD, isBagKind, isDrinkTile, PAIL_FULL, planCook, planEat, planGather, SIP_WATER, startInv, takeBag } from "./bag";
+import { bagOf, canCraftHere, CISTERN_CAP, CISTERN_POUR, CELL_GONE, craftDefOf, eatSatiety, giveOrSpill, GRANT_WOOD, huntTake, isBagKind, isDrinkTile, PAIL_FULL, planCook, planEat, planGather, SIP_WATER, startInv, takeBag } from "./bag";
 import { BOOST_ENERGY, busyEnergy, DEAD_MS, ENERGY_MAX, fleshOf, regenVigor, RISE_SAT, RISE_WATER, RISE_WARMTH, tickFlesh, vigorOf, WORK_HUNGER } from "./pace";
 import { stepEnergy } from "./travel";
 import { isHamletOwner, isLivingOwner } from "./pact";
@@ -2188,10 +2188,11 @@ export const writeBagDeed = createServerFn({ method: "POST" })
         live.herd.count -= Math.random() < 0.4 ? 1 : 0;
         if (live.herd.count <= 0) live.herd = null;
       } else {
-        const got = spear ? 2 : 1;
+        const take = huntTake(merged.body.hand, merged.body.profession);
         live.herd.count -= 1;
         if (live.herd.count <= 0) live.herd = null;
-        spill("food", got);
+        spill("food", take.food);
+        if (take.hide > 0) spill("hide", take.hide);
       }
       const ver = await bump(live, t.ver);
       if (ver == null) return lost();

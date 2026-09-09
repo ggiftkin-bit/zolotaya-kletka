@@ -125,6 +125,11 @@ export function planGather(
   return { ok: true, item: res, got };
 }
 
+/** Успех охоты. Еда как была. Шкуру снимает только охотник. */
+export function huntTake(hand: ItemId | null, profession: Profession): { food: number; hide: number } {
+  return { food: hand === "spear" ? 2 : 1, hide: profession === "hunter" ? 1 : 0 };
+}
+
 export function planEat(inv: Inventory, item: ItemId): { ok: true; inv: Inventory } | { ok: false; hint: string } {
   if (!EAT_ORDER.includes(item)) return { ok: false, hint: "Еды нет." };
   return takeBag(inv, { [item]: 1 });

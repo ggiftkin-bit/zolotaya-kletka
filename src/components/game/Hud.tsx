@@ -57,6 +57,8 @@ const GEAR_PACK: ItemId[] = [
   "board_shield",
   "bar_shield",
   "wadded",
+  "vest",
+  "hood",
   "helm",
 ];
 

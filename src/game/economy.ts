@@ -12,6 +12,7 @@ export const PROFESSION_LABEL: Record<Profession, string> = {
   smith: "кузнец",
   trader: "торговец",
   healer: "целитель",
+  hunter: "охотник",
   hireling: "наёмник",
 };
 
@@ -124,6 +125,7 @@ export const SELL_PACK: Partial<Record<ItemId, { n: number; gold: number }>> = {
   food: { n: 4, gold: 1 },
   grain: { n: 4, gold: 1 },
   fish: { n: 3, gold: 1 },
+  hide: { n: 4, gold: 1 },
   ore: { n: 2, gold: 1 },
   coal: { n: 3, gold: 1 },
 };
@@ -168,6 +170,10 @@ export const SELL_GOLD: Record<ItemId, number> = {
   steel_axe: 0,
   steel_pick: 0,
   steel_shovel: 0,
+  hide: 0,
+  leather: 1,
+  vest: 2,
+  hood: 2,
 };
 
 /** Покупка в лавке. Не ×2 к сдаче. */
@@ -208,6 +214,10 @@ export const BUY_GOLD: Record<ItemId, number> = {
   steel_axe: 0,
   steel_pick: 0,
   steel_shovel: 0,
+  hide: 1,
+  leather: 4,
+  vest: 8,
+  hood: 8,
 };
 
 export function goldTxt(n: number): string {
@@ -355,6 +365,7 @@ export const PROF_SKILL: Record<Profession, Skill> = {
   smith: "craft",
   trader: "trade",
   healer: "med",
+  hunter: "survival",
   hireling: "fight",
 };
 

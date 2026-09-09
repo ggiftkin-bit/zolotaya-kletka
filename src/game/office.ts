@@ -49,6 +49,8 @@ export const LIVE_STOCK: ItemId[] = [
   "bucket",
   "knife",
   "helm",
+  "hide",
+  "leather",
 ];
 
 const LIVE = new Set<ItemId>(LIVE_STOCK);

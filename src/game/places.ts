@@ -137,7 +137,7 @@ export function placeHint(tile: Tile) {
 export function wildActs(tile: Tile, world: World) {
   const acts: Array<{ id: string; label: string; sub: string }> = [];
   if (tile.herd && tile.herd.wild && (tile.herd.kind === "hare" || tile.herd.kind === "deer")) {
-    acts.push({ id: "hunt", label: "Охота", sub: "ждёт · копьё быстрее" });
+    acts.push({ id: "hunt", label: "Охота", sub: "еда · охотник ещё шкуру" });
   }
   if (tile.herd && tile.herd.wild && tile.herd.kind === "horse") {
     acts.push({ id: "catch", label: "Ловить лошадь", sub: "верёвка в руке" });

@@ -258,9 +258,9 @@ export function foeById(dummies: Dummy[], others: OtherPawn[], id: string): Dumm
 }
 
 export function gearSlot(id: ItemId): "body" | "shield" | "helm" | null {
-  if (id === "wadded") return "body";
+  if (id === "wadded" || id === "vest") return "body";
   if (id === "board_shield" || id === "bar_shield") return "shield";
-  if (id === "helm") return "helm";
+  if (id === "helm" || id === "hood") return "helm";
   return null;
 }
 
@@ -281,6 +281,8 @@ export function armorMult(def: { shield?: ItemId | null; body?: ItemId | null; h
   if (def.shield === "board_shield") m *= 0.8;
   if (def.shield === "bar_shield") m *= 0.65;
   if (def.body === "wadded") m *= 0.88;
+  if (def.body === "vest") m *= 0.86;
+  if (def.helm === "hood") m *= 0.87;
   if (def.helm === "helm") m *= 0.85;
   return Math.max(0.45, m);
 }

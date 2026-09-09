@@ -1,6 +1,6 @@
 import type { ItemId, Profession, Tile } from "./types";
 
-export type CraftKind = "coal" | "plank" | "bar" | "axe" | "pick" | "bread" | "smoked" | "tonic" | "rope" | "bucket" | "spear" | "shovel" | "rod" | "wheel" | "lock" | "club" | "knife" | "board_shield" | "bar_shield" | "wadded" | "helm" | "brick" | "flour" | "steel_axe" | "steel_pick" | "steel_shovel" | "mill_flour" | "saw_plank";
+export type CraftKind = "coal" | "plank" | "bar" | "axe" | "pick" | "bread" | "smoked" | "tonic" | "rope" | "bucket" | "spear" | "shovel" | "rod" | "wheel" | "lock" | "club" | "knife" | "board_shield" | "bar_shield" | "wadded" | "helm" | "brick" | "flour" | "steel_axe" | "steel_pick" | "steel_shovel" | "mill_flour" | "saw_plank" | "leather" | "vest" | "hood";
 
 /** mill — не здание: дом или печь. grist — мельница. */
 export type BenchId = "home" | "bench" | "forge" | "oven" | "smoke" | "herbs" | "coalpit" | "workshop" | "mill" | "grist" | "sawmill";
@@ -42,6 +42,9 @@ export const CRAFTS: CraftDef[] = [
   { id: "rod", out: "rod", n: 1, need: { wood: 1, rope: 1 }, who: "any", bench: "home", energy: 1, label: "удочка", hint: "1 дерево + 1 верёвка · любой дома. Рыба только ею" },
   { id: "club", out: "club", n: 1, need: { wood: 3 }, who: "any", bench: "home", energy: 1, label: "дубина", hint: "3 дерева · любой дома" },
   { id: "wadded", out: "wadded", n: 1, need: { herb: 6, food: 1 }, who: "any", bench: "home", energy: 1, label: "стёганка", hint: "6 трав + еда · любой дома" },
+  { id: "leather", out: "leather", n: 1, need: { hide: 2, herb: 1 }, who: "any", bench: "home", energy: 1, label: "кожа", hint: "2 шкуры + трава · любой дома" },
+  { id: "vest", out: "vest", n: 1, need: { leather: 3 }, who: "any", bench: "home", energy: 1, label: "жилет", hint: "3 кожи · любой дома" },
+  { id: "hood", out: "hood", n: 1, need: { leather: 2 }, who: "any", bench: "home", energy: 1, label: "клобук", hint: "2 кожи · любой дома" },
   { id: "knife", out: "knife", n: 1, need: { bar: 1 }, who: "smith", bench: "forge", energy: 2, label: "нож", hint: "слиток · кузнец · горн" },
   { id: "helm", out: "helm", n: 1, need: { bar: 1 }, who: "smith", bench: "forge", energy: 2, label: "шлем", hint: "слиток · кузнец · горн" },
   { id: "bar_shield", out: "bar_shield", n: 1, need: { bar: 1, wood: 1 }, who: "smith", bench: "forge", energy: 2, label: "щит кованый", hint: "слиток + дерево · кузнец · горн" },
@@ -49,7 +52,7 @@ export const CRAFTS: CraftDef[] = [
 ];
 
 export const PROF_BLURB: Record<Profession, string> = {
-  wanderer: "Своего станка нет. Дома — верёвка, копьё, ведро, лопата, удочка, дубина, стёганка. Мука — 2 зерна, дом или печь. Мельница: 2 зерна → 2 муки. Пилорама: 3 дерева → 2 доски. Печь: кирпич — любой.",
+  wanderer: "Своего станка нет. Дома — верёвка, копьё, ведро, лопата, удочка, дубина, стёганка, кожа, жилет, клобук. Мука — 2 зерна, дом или печь. Мельница: 2 зерна → 2 муки. Пилорама: 3 дерева → 2 доски. Печь: кирпич — любой.",
   lumberjack: "Дровница: 4 дерева → 1 уголь. Без угля кузнец не льёт.",
   miner: "Сруб у горы. Больше руды. Кристалл ищет только он.",
   fisher: "Коптильня: рыба + дерево → копчёное. Ловят удочкой: дерево + верёвка дома.",
@@ -59,6 +62,7 @@ export const PROF_BLURB: Record<Profession, string> = {
   smith: "Горн: руда+2 угля → слиток, топор, кирка, замок, нож, шлем, щит кованый. Кованый набор: слиток + топор / кирка / лопата. Лавка набор не берёт. Замок — на калитку или сундук. Свой открывается сам.",
   trader: "Прилавок у калитки. Курс как у тракта. Купчина: +1 золото к пачке сырья.",
   healer: "Стол трав: 3 травы → настой. Сдать 3 золота.",
+  hunter: "Охота даёт шкуру. Кожу строгает любой дома: 2 шкуры + трава. Кожевню не ставить.",
   hireling: "Башня. Вахта. Копьё дома сколотит любой.",
 };
 
@@ -73,6 +77,7 @@ export const PROF_STATION: Record<Profession, string> = {
   smith: "горн",
   trader: "прилавок",
   healer: "стол трав",
+  hunter: "дом",
   hireling: "башня",
 };
 

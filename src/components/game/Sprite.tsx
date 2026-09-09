@@ -90,6 +90,10 @@ export const ITEM_ICO: Record<ItemId, number> = {
   steel_axe: ICO.axe,
   steel_pick: ICO.axe,
   steel_shovel: 3,
+  hide: ICO.food,
+  leather: 1,
+  vest: 0,
+  hood: ICO.ore,
 };
 
 export function ExtraIco({ i, className, alt }: { i: number; className?: string; alt?: string }) {
@@ -144,6 +148,10 @@ export function ItemPic({ id, className }: { id: ItemId; className?: string }) {
   if (id === "helm") return <Ico i={ICO.ore} className={className} alt="" />;
   if (id === "brick") return <Ico i={ICO.stone} className={className} alt="" />;
   if (id === "grain" || id === "flour") return <Ico i={ICO.food} className={className} alt="" />;
+  if (id === "hide") return <Ico i={ICO.food} className={className} alt="" />;
+  if (id === "leather") return <ExtraIco i={1} className={className} alt="" />;
+  if (id === "vest") return <GearPic i={GEAR_ICO.rope} className={className} alt="" />;
+  if (id === "hood") return <Ico i={ICO.ore} className={className} alt="" />;
   return <Ico i={ITEM_ICO[id]} className={className} alt="" />;
 }
 
@@ -169,6 +177,7 @@ export const JOB_ICO: Record<Profession, number> = {
   smith: 7,
   trader: 8,
   healer: 9,
+  hunter: 11,
   hireling: 10,
 };
 

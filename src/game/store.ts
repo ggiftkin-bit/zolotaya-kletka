@@ -48,7 +48,7 @@ import { stampVillage, leaveVillage, hamletTitle, hasOwnYard, isOutsideYard, set
 import { cargoWeight, loadRatio, pailKg, stepEnergy, wornKg } from "./travel";
 import { atBench, CRAFTS, EAT_ORDER, EAT_SAT, PROF_BLURB, type CraftKind } from "./craft";
 import { markDepleted, tickGrow, PIT_HEAL_WEEKS, REGROW_WAIT } from "./grow";
-import { planGather } from "./bag";
+import { huntTake, planGather } from "./bag";
 import { fillStock, planBuyFromStock, planDonate, planGift, planSellToStock, seedStock, sellsToday, SELL_DAY_CAP, SELL_DAY_HINT, worldDayOf } from "./office";
 import { planGoldDeed } from "./gold";
 import { canParkOn, claimMount, mountAt, MOUNT_LABEL, ownNearby, ownsMount, parkNear, ridingHorse, ridingKind, settleOldCounts, stripRidden, takeOwnMount, type MountKind } from "./mount";
@@ -2990,7 +2990,20 @@ function equipWear(item: ItemId | null, slot?: "body" | "shield" | "helm") {
     speak(`Нет: ${ITEM_LABEL[item]}.`, c.x, c.y, "нет", "bad");
     return;
   }
-  if (c[resolved]) c = takeOffSlot(c, resolved, tile);
+  if (c[resolved]) {
+    const was = c[resolved]!;
+    const trialInv = {
+      ...c.inventory,
+      [item]: Math.max(0, (c.inventory[item] ?? 0) - 1),
+      [was]: (c.inventory[was] ?? 0) + 1,
+    };
+    const trialWorn = { ...c, inventory: trialInv, [resolved]: item };
+    if (loadRatio(trialInv, c.transport, wornKg(trialWorn) + pailKg(c.pail)) > 1) {
+      speak("Ноша не тянет. Сначала сними.", c.x, c.y, "не влезает", "bad");
+      return;
+    }
+    c = takeOffSlot(c, resolved, tile);
+  }
   const inv = { ...c.inventory, [item]: Math.max(0, (c.inventory[item] ?? 0) - 1) };
   c = { ...c, inventory: inv, [resolved]: item };
   useGame.setState({
@@ -3349,17 +3362,24 @@ function resolveHunt(s: GameState, c0: Character, tile: NonNullable<ReturnType<t
     sealBag("hunt", { x: tile.x, y: tile.y }, c0);
     return;
   }
-  const got = spear ? 2 : 1;
+  const take = huntTake(c0.hand, c0.profession);
   const kind = tile.herd.kind;
   tile.herd.count -= 1;
   if (tile.herd.count <= 0) tile.herd = null;
-  const given = giveOrPile({ ...c0.inventory }, c0.transport, tile, "food", got);
-  const c = bumpSkill({ ...c0, inventory: given.inv }, "survival", 0.15);
+  let inv = { ...c0.inventory };
+  const foodOut = giveOrPile(inv, c0.transport, tile, "food", take.food);
+  inv = foodOut.inv;
+  if (take.hide > 0) {
+    const hideOut = giveOrPile(inv, c0.transport, tile, "hide", take.hide);
+    inv = hideOut.inv;
+  }
+  const c = bumpSkill({ ...c0, inventory: inv }, "survival", 0.15);
+  const loot = take.hide > 0 ? `${take.food} еды и шкуру` : `${take.food} еды`;
   useGame.setState({
     character: c,
     world: { ...s.world, tiles: s.world.tiles },
-    log: pushLog(s.log, `Добыл ${got} еды (${ANIMAL_LABEL[kind]}).`),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: `+${got} еда`, tone: "ok" as const }].slice(-10),
+    log: pushLog(s.log, `Добыл ${loot} (${ANIMAL_LABEL[kind]}).`),
+    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: take.hide > 0 ? `+${take.food} еда +шкура` : `+${take.food} еда`, tone: "ok" as const }].slice(-10),
   });
   noteDeed("hunt");
   markFreshLive(useGame.getState());

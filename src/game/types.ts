@@ -106,6 +106,7 @@ export type Profession =
   | "smith"
   | "trader"
   | "healer"
+  | "hunter"
   | "hireling";
 
 export type Skill =
@@ -158,7 +159,11 @@ export type ItemId =
   | "flour"
   | "steel_axe"
   | "steel_pick"
-  | "steel_shovel";
+  | "steel_shovel"
+  | "hide"
+  | "leather"
+  | "vest"
+  | "hood";
 
 export type GiftId = "gift_pin" | "gift_mug" | "gift_nft";
 
@@ -310,11 +315,11 @@ export type Character = {
   seasonSkillGain: number;
   profWeek: number;
   hand: ItemId | null;
-  /** Стёганка. Пусто — нет. */
+  /** Стёганка или жилет. Пусто — нет. */
   body: ItemId | null;
   /** Тесовый или кованый щит. Двух щитов нет. */
   shield: ItemId | null;
-  /** Шлем на голове. */
+  /** Шлем или клобук. */
   helm: ItemId | null;
   horses: number;
   carts: number;
