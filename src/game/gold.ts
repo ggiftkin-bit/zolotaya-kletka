@@ -1,6 +1,6 @@
 import { CART_GOLD, LOCK_GOLD, WAGON_GOLD, goldTxt } from "./economy";
 import { COW_PRICE, HORSE_PRICE } from "./life";
-import { BAIL_GOLD, BOOST_GOLD, HIRE_GOLD, SKIP_GOLD, deathFee } from "./pace";
+import { BAIL_GOLD, BOOST_GOLD, SKIP_GOLD, deathFee } from "./pace";
 
 /** Старт фишки. Первая запись в книгу — это, не цифра с клиента. */
 export const START_GOLD = 20;
@@ -32,7 +32,7 @@ export function isGoldKind(v: string): v is GoldKind {
 function priceOf(kind: GoldKind, deaths: number): number {
   if (kind === "boost") return BOOST_GOLD;
   if (kind === "skip") return SKIP_GOLD;
-  if (kind === "hire") return HIRE_GOLD;
+  if (kind === "hire") return 0;
   if (kind === "bail") return BAIL_GOLD;
   if (kind === "death") return deathFee(deaths);
   if (kind === "cart") return CART_GOLD;

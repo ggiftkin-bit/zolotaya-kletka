@@ -1340,6 +1340,18 @@ export const writeWorldDeed = createServerFn({ method: "POST" })
         if (row) conflicts.push(asConflictTile(row));
         continue;
       }
+      const stampOn =
+        nextSlim.bd === "shack" ||
+        nextSlim.bd === "house" ||
+        nextSlim.bd === "camp" ||
+        nextSlim.bd === "field" ||
+        nextSlim.bd === "pen" ||
+        nextSlim.bd === "well" ||
+        nextSlim.bd === "net" ||
+        nextSlim.bd === "shed";
+      if (stampOn && nextSlim.bd !== liveSlim.bd && (!liveOn || liveOn === context.userId || liveOn === "you")) {
+        nextSlim = { ...nextSlim, on: context.userId };
+      }
       if (!row) continue;
       const upd = await sql.query<{ ver: number }>(
         `update tile t
@@ -2024,6 +2036,9 @@ export const writeGoldDeed = createServerFn({ method: "POST" })
     const row = await readPawn(sql, userId);
     const want = { x: data.pawn.x, y: data.pawn.y };
     const merged = await mergeBookBody(sql, userId, data.pawn);
+    if (data.kind === "hire") {
+      return { ok: false as const, hint: "рук нет", gold: merged.gold, inventory: merged.inventory };
+    }
     if (data.kind === "skip") {
       const travel = travelOf(data.pawn.body) ?? travelOf(row?.body);
       const last = travel?.path?.[travel.path.length - 1];
@@ -2318,8 +2333,19 @@ export const writeBagDeed = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const userId = context.userId;
+    const mergedEarly = await mergeBookBody(sql, userId, data.pawn);
+    const bagKeep = mergedEarly.inventory;
+    const goldKeep = mergedEarly.gold;
     if (!isBagKind(data.kind)) {
-      return { ok: false as const, hint: "нет такого дела", conflicts: [] as TilePacket[], written: [], credit: 0, gold: 0, inventory: startInv() };
+      return {
+        ok: false as const,
+        hint: "нет такого дела",
+        conflicts: [] as TilePacket[],
+        written: [],
+        credit: mergedEarly.credit,
+        gold: goldKeep,
+        inventory: bagKeep,
+      };
     }
     const t = data.tile;
     const curRows = await sql.query<TileRow>(
@@ -2331,12 +2357,12 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       cur
         ? [{ x: cur.x, y: cur.y, slim: asSlim(cur.slim), ver: cur.ver, updatedAt: cur.updated_at }]
         : [];
-    const emptyFail = (hint: string, gold = 0, inventory = startInv()) => ({
+    const emptyFail = (hint: string, gold = goldKeep, inventory = bagKeep) => ({
       ok: false as const,
       hint,
       conflicts: [] as TilePacket[],
       written: [] as { x: number; y: number; ver: number }[],
-      credit: 0,
+      credit: mergedEarly.credit,
       gold,
       inventory,
     });
@@ -2363,15 +2389,7 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       data.kind === "scrap";
     if (!cur) return emptyFail(takesCell ? CELL_GONE : "клетка уже другая");
     if (cur.ver !== t.ver && !bagSoft) {
-      return {
-        ok: false as const,
-        hint: takesCell ? CELL_GONE : "клетка уже другая",
-        conflicts: asConflict(),
-        written: [],
-        credit: 0,
-        gold: 0,
-        inventory: startInv(),
-      };
+      return { ...emptyFail(takesCell ? CELL_GONE : "клетка уже другая"), conflicts: asConflict() };
     }
     const reach = Math.max(Math.abs(data.pawn.x - t.x), Math.abs(data.pawn.y - t.y));
     if (!bagSoft && reach > 1) {
@@ -2379,10 +2397,10 @@ export const writeBagDeed = createServerFn({ method: "POST" })
     }
     const liveSlim = asSlim(cur.slim);
     const live = fatTile(liveSlim, t.x, t.y);
-    const merged = await mergeBookBody(sql, userId, data.pawn);
+    const merged = mergedEarly;
     const ride = transportOf(merged.body);
-    const bag0 = merged.inventory;
-    const gold0 = merged.gold;
+    const bag0 = bagKeep;
+    const gold0 = goldKeep;
     let inv = bag0;
     let gold = gold0;
     let resting = !!merged.body.resting;

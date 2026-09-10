@@ -3,7 +3,7 @@ import { BAG_CELLS, CAPACITY, GAME_VERSION, ITEM_LABEL, ITEM_WEIGHT, ITEMS, TICK
 import { BUILDING_LABEL, CART_GOLD, CART_WOOD, goldTxt } from "@/game/economy";
 import { EAT_ORDER, EAT_SAT } from "@/game/craft";
 import { nextGoal } from "@/game/goal";
-import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, HIRE_GOLD, SKIP_GOLD, deathFee, formatWait, nextEnergyIn, regenPaused } from "@/game/pace";
+import { BAIL_GOLD, BOOST_GOLD, DOWN_MS, ENERGY_MAX, SKIP_GOLD, deathFee, formatWait, nextEnergyIn, regenPaused } from "@/game/pace";
 import { isHeld, isJailed, isStill, isYours } from "@/game/crime";
 import { countOwn, ownsMount } from "@/game/mount";
 import { TOOL_ITEMS } from "@/game/life";
@@ -356,20 +356,13 @@ export function Hud() {
                 </button>
               </div>
               ) : (
-              <div className="mb-1.5 grid grid-cols-3 gap-1">
+              <div className="mb-1.5 grid grid-cols-2 gap-1">
                 <button
                   type="button"
                   onClick={() => g.skipBusy()}
                   className="h-11 min-w-0 rounded-[16px] border border-border bg-panel px-1.5 text-[12px] font-display leading-tight shadow-panel"
                 >
                   ускорить {goldTxt(SKIP_GOLD)}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => g.hireBusy()}
-                  className="h-11 min-w-0 rounded-[16px] border border-border bg-panel px-1.5 text-[12px] leading-tight shadow-panel"
-                >
-                  руки {goldTxt(HIRE_GOLD)}
                 </button>
                 <button
                   type="button"
@@ -382,13 +375,22 @@ export function Hud() {
               )
             )}
           {g.travel && !bag && !help && !food && !held && (
-              <button
-                type="button"
-                onClick={() => g.skipTravel()}
-                className="mb-1.5 flex h-11 w-full items-center justify-center rounded-[16px] border border-border bg-panel px-3 text-[13px] font-display shadow-panel"
-              >
-                ускорить {goldTxt(SKIP_GOLD)}
-              </button>
+              <div className="mb-1.5 grid grid-cols-2 gap-1">
+                <button
+                  type="button"
+                  onClick={() => g.skipTravel()}
+                  className="h-11 min-w-0 rounded-[16px] border border-border bg-panel px-1.5 text-[12px] font-display leading-tight shadow-panel"
+                >
+                  ускорить {goldTxt(SKIP_GOLD)}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => g.stopWalk()}
+                  className="h-11 min-w-0 rounded-[16px] border border-border bg-panel px-1.5 text-[12px] leading-tight shadow-panel"
+                >
+                  бросить
+                </button>
+              </div>
             )}
             {!bag &&
               !help &&

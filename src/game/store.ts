@@ -40,7 +40,7 @@ import { findPath, pathTotal } from "./path";
 import { canDigReason, fillNeedLine, fillPay, giveOrPile, planDig, takePaid } from "./pit";
 import { asPile, dumpAllOn, pileAdd, pileEmpty, pileSet, pullNeed, applyNeedPull } from "./pile";
 import { canCrossDiag, MAX_PLOT, clearYard, normRect, plotBounds, putGate, setYardGateLock, stampYard, upgradeYard, yardHasGate, yardWoodCost } from "./fence";
-import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, HIRE_GOLD, NO_STRENGTH, SKIP_GOLD, deathFee, energyPeriod, fleshOf, formatWait, splitBodyWater, tickFlesh } from "./pace";
+import { applyRegen, BAIL_GOLD, BOOST_ENERGY, BOOST_GOLD, DAY_MS, DEAD_MS, DOWN_MS, ENERGY_MAX, NO_STRENGTH, SKIP_GOLD, deathFee, energyPeriod, fleshOf, formatWait, splitBodyWater, tickFlesh } from "./pace";
 import { applyCatch, applyDriveFail, DRIVE_LABEL, harmCells, hasLaw, hasTinder, isForeignYard, isHeld, isJailed, isStill, isYours, jailSpot, lootFrom, markCrime, ownerOf, planDriveOff, plotCells, punish, rollCaught, stealChance, takeLoot, takeTinder, TINDER_HINT, unlockKind, fenceBurnCells } from "./crime";
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, TOOL_ITEMS, isWatered, makeHerd, nearWater, tickDayLife } from "./life";
 import { clearGame, loadGame, saveGame } from "./save";
@@ -355,7 +355,7 @@ function walkTo(x: number, y: number) {
     const b = c.busy!;
     const toJob = (b.kind === "haul" || b.kind === "watch" || b.kind === "bring") && b.x === x && b.y === y;
     if (!toJob) {
-      speak(`Занят: ${BUSY_LABEL[c.busy!.kind]}. Жди, брось или найми руки.`, c.x, c.y, BUSY_LABEL[c.busy!.kind], "bad");
+      speak(`Занят: ${BUSY_LABEL[c.busy!.kind]}. Жди, брось или ускорь.`, c.x, c.y, BUSY_LABEL[c.busy!.kind], "bad");
       return;
     }
   }
@@ -416,7 +416,7 @@ function busyBlock(): boolean {
   if (!isBusy(s.character)) return false;
   const b = s.character.busy!;
   speak(
-    `Занят: ${BUSY_LABEL[b.kind]}. Жди, брось или найми руки.`,
+    `Занят: ${BUSY_LABEL[b.kind]}. Жди, брось или ускорь.`,
     s.character.x,
     s.character.y,
     BUSY_LABEL[b.kind],
@@ -1529,6 +1529,7 @@ function advanceTravel(now: number) {
     if (drain > 0 && energy < drain) {
       elapsed = 0;
       cancelNotice("walk");
+      forgetTravel();
       const c = useGame.getState().character;
       speak("Нет силы. Ляг или кружка.", x, y, "нет силы", "bad");
       useGame.setState({
@@ -1552,7 +1553,7 @@ function advanceTravel(now: number) {
     const c = useGame.getState().character;
     cancelNotice("walk");
     maybePingHidden("Пришёл", "Ход кончился — ты на месте.", "walk");
-    rememberTravel(travel);
+    forgetTravel();
     useGame.setState({
       character: { ...c, x, y, px: x, py: y, energy },
       travel: null,
@@ -1583,7 +1584,7 @@ function advanceTravel(now: number) {
     viewPos.y = y;
     const c = useGame.getState().character;
     cancelNotice("walk");
-    rememberTravel(travel);
+    forgetTravel();
     useGame.setState({
       character: { ...c, x, y, px: x, py: y, energy },
       travel: null,
@@ -2736,6 +2737,7 @@ function skipTravel() {
     }
     cancelNotice("walk");
     const live = useGame.getState();
+    forgetTravel();
     useGame.setState({
       travel: null,
       preview: null,
@@ -3306,6 +3308,17 @@ function resolveBuild(s: GameState, c0: Character, tile: NonNullable<ReturnType<
   if (kind === "stall" && tile.market) {
     tile.owner = "you";
     tile.rentUntil = s.clock + MARKET_RENT_TICKS;
+  } else if (
+    kind === "shack" ||
+    kind === "house" ||
+    kind === "camp" ||
+    kind === "field" ||
+    kind === "pen" ||
+    kind === "well" ||
+    kind === "net" ||
+    kind === "shed"
+  ) {
+    tile.owner = "you";
   }
   if (kind === "field") tile.resource = FIELD_CROP;
   const c = bumpSkill(c0, "build", 0.2);
@@ -3626,36 +3639,8 @@ function skipBusy() {
 }
 
 function hireBusy() {
-  const s = useGame.getState();
-  if (isHeld(s.character)) {
-    speak(heldLine(s.character) ?? "Нельзя.", s.character.x, s.character.y, "нельзя", "bad");
-    return;
-  }
-  if (!s.character.busy) return;
-  if (isServiceBusy(s.character.busy)) {
-    speak("Это услуга живого. Не руки за 16.", s.character.x, s.character.y, "услуга", "bad");
-    return;
-  }
-  if (s.character.busy.hired) {
-    speak("Руки уже работают. Можно отойти.", s.character.x, s.character.y, "наняты", "ok");
-    return;
-  }
-  const plan = planGoldDeed("hire", s.character.gold);
-  if (!plan.ok) {
-    speak(`Нанять руки — ${goldTxt(HIRE_GOLD)}.`, s.character.x, s.character.y, "мало золота", "bad");
-    return;
-  }
-  const prior = s.character;
-  useGame.setState({
-    character: {
-      ...s.character,
-      gold: plan.gold,
-      busy: { ...s.character.busy, hired: true },
-    },
-    log: pushLog(s.log, `Нанял руки −${goldTxt(HIRE_GOLD)}. Можно отойти — доделают.`),
-    hint: { text: `Нанял руки −${goldTxt(HIRE_GOLD)}. Можно отойти.`, tone: "gold" },
-  });
-  void commitGold("hire", prior);
+  /* 0.27.2: кнопки на столе нет. Род hire золото не печатает. */
+  return;
 }
 
 function burnHere() {

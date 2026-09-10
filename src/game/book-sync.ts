@@ -236,13 +236,13 @@ function applyClock(clock: WorldClock, prev?: GameState): Partial<GameState> {
 
 function pawnPayload(c: Character) {
   const live = store?.get().travel ?? null;
-  if (live?.path.length) lastTravel = live;
+  const travel = live?.path.length ? live : null;
   return {
     name: c.name,
     color: c.color,
     x: c.x,
     y: c.y,
-    body: packPawn(c, live ?? lastTravel),
+    body: packPawn(c, travel),
   };
 }
 
@@ -712,9 +712,8 @@ export async function commitBag(
     let world = store.get().world;
     if (res.conflicts.length) world = applyLive(world, localizePackets(res.conflicts));
     world = maskLiveFog(world, store.get().character.x, store.get().character.y);
-    const patch: Partial<GameState> = { world };
-    if (prior) patch.character = prior;
-    store.set(patch);
+    store.set({ world });
+    applyOwned(res);
     rememberLive(store.get());
     store.speak?.(res.hint || "клетка уже другая", s.character.x, s.character.y, res.hint || "нет", "bad");
     saveGame(store.get());
@@ -927,8 +926,10 @@ export async function beatBook(_force = false) {
       const live = store.get();
       const c = live.character;
       const walking = !!(live.travel?.path.length);
+      const busy = live.character.busy;
+      const chopping = !!(busy && busy.until > Date.now() && busy.x === c.x && busy.y === c.y);
       if (c.x !== nx || c.y !== ny) {
-        if (!(walking && !hint)) {
+        if (!((walking && !hint) || chopping)) {
           store.set({
             character: { ...c, x: nx, y: ny, px: nx, py: ny },
             travel: hint ? null : live.travel,
