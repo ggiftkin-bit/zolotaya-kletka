@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { authClient, authEnabled } from "@/lib/auth/client";
 import { GAME_VERSION } from "@/game/constants";
+import { PlayGuide } from "./HowTo";
 
 function ruAuthError(raw: string): string {
   const t = raw.toLowerCase();
@@ -20,6 +21,7 @@ export function EmailGate({ title = "Одна поляна" }: { title?: string 
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [help, setHelp] = useState(false);
 
   const go = async () => {
     if (!authEnabled) return;
@@ -126,6 +128,18 @@ export function EmailGate({ title = "Одна поляна" }: { title?: string 
             {mode === "in" ? "Нет входа — завести новый" : "Уже есть — войти"}
           </button>
         </form>
+      )}
+      <button
+        type="button"
+        className="w-full text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
+        onClick={() => setHelp((v) => !v)}
+      >
+        {help ? "Скрыть как играть" : "Как играть"}
+      </button>
+      {help && (
+        <div className="rounded-[16px] bg-raised px-3 py-3">
+          <PlayGuide />
+        </div>
       )}
     </div>
   );

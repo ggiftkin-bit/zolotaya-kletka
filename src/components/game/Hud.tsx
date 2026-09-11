@@ -78,7 +78,7 @@ export function Hud() {
   const [tab, setTab] = useState<"pack" | "tools" | "chest">("pack");
   const [bye, setBye] = useState(false);
   const [help, setHelp] = useState(false);
-  const [bookTab, setBookTab] = useState<BookTab>("table");
+  const [bookTab, setBookTab] = useState<BookTab>("play");
   const [power, setPower] = useState(false);
   const [vitals, setVitals] = useState<"hp" | "water" | null>(null);
   const [food, setFood] = useState(false);

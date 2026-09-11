@@ -87,7 +87,79 @@ const JOBS: Profession[] = [
   "hireling",
 ];
 
-export type BookTab = "table" | "craft" | "who" | "abc";
+export type BookTab = "play" | "table" | "craft" | "who" | "abc";
+
+const PLAY = [
+  {
+    k: "Что это",
+    v: "Живой стол на клетках. Ты — фишка. Победы нет. Смерть двор не стирает. Земля общая: другие почты ходят здесь же. С телефона и со стола — одна фишка.",
+    i: ICO.house,
+  },
+  {
+    k: "Экран",
+    v: "Сверху: золото, сила, сытость, тепло и «?». Ниже — день или ночь и вода тела. Снизу док: Стоп · Ко мне · Съесть · Сумка. «?» — эта книга.",
+    i: ICO.help,
+  },
+  {
+    k: "Как ходить",
+    v: "Тап по клетке открывает лист — сам не ходит. На листе наклейка «Пойти»: фишка идёт по пути. «Ко мне» двигает взгляд, не шаг. В пути — «ускорить 12» (сразу на конец) и «бросить». Стоп в доку — то же.",
+    i: ICO.boots,
+  },
+  {
+    k: "Первый час",
+    v: "Ты на поляне, камень-зал в центре. Здесь мир: бить и жечь нельзя. Тапни лес рядом — рубка, топор уже в руке, жди полосу. Голодно — док «Съесть». Напиться — встань у реки. Сруби 6 дерева, тапни равнину (не поляну) — шалаш. Двора не нужно: лист свой, там сон, сундук и удочка. Лишнее дерево снеси в лавку на тракте — золото.",
+    i: ICO.axe,
+  },
+  {
+    k: "Нужды",
+    v: "Сила капает сама, еда её не копирует. Кружка 8 золота — сразу +4. Сон в шалаше — сила быстрее. Съесть — сытость. Река — вода тела 100. Под крышей тепло. Упал — ползи в шалаш, под крышей поднимешься.",
+    i: ICO.food,
+  },
+  {
+    k: "Не сразу",
+    v: "Пустая поляна вне рынка — не строят, «здесь мир». Восемь клеток у зала — рынок: только прилавок и доска. Чужой шалаш — меню закрыто. В туман «Пойти» не пускает: подойди ближе, пятно едет за фишкой.",
+    i: ICO.stake,
+  },
+  {
+    k: "Дальше",
+    v: "Двор: на листе «Угол двора», второй тап — замкнуть. Без калитки тын не встанет. Станки (верстак, горн, мельница) — только во дворе. Профессия — вкладка «Кем», один раз. Цены и рецепты — «Из чего» и «Азб».",
+    i: ICO.gold,
+  },
+];
+
+export function PlayGuide() {
+  return (
+    <div className="space-y-3">
+      <p className="text-[13px] leading-snug text-muted-foreground">
+        Тап — лист клетки. Ход — «Пойти». Дело — второй тык по наклейке. Старт: 20 золота, еда ×6, топор в руке.
+      </p>
+      <ol className="space-y-2">
+        {[
+          "Лес рядом → рубка.",
+          "Река → напиться.",
+          "6 дерева → шалаш на равнине.",
+          "В шалаше — Спать. Лишнее — в лавку тракта.",
+        ].map((line, i) => (
+          <li key={line} className="flex gap-3 rounded-[14px] bg-raised px-3 py-2">
+            <span className="font-display text-lg leading-none text-muted-foreground">{i + 1}</span>
+            <span className="text-[13px] leading-snug">{line}</span>
+          </li>
+        ))}
+      </ol>
+      <ul className="space-y-3">
+        {PLAY.map((row) => (
+          <li key={row.k} className="flex gap-3">
+            <Ico i={row.i} className="size-12 overflow-hidden rounded-[12px] shadow-sm" alt="" />
+            <div className="min-w-0">
+              <p className="font-display text-lg leading-none">{row.k}</p>
+              <p className="mt-1 text-[13px] leading-snug text-muted-foreground">{row.v}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export function Book({ tab, onTab }: { tab: BookTab; onTab: (t: BookTab) => void }) {
   return (
@@ -95,10 +167,11 @@ export function Book({ tab, onTab }: { tab: BookTab; onTab: (t: BookTab) => void
       <div className="flex gap-1 rounded-[14px] bg-raised p-1">
         {(
           [
+            ["play", "Как"],
             ["table", "Стол"],
             ["craft", "Из чего"],
-            ["who", "Кем быть"],
-            ["abc", "Букварь"],
+            ["who", "Кем"],
+            ["abc", "Азб"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -106,7 +179,7 @@ export function Book({ tab, onTab }: { tab: BookTab; onTab: (t: BookTab) => void
             type="button"
             onClick={() => onTab(id)}
             className={cn(
-              "h-11 flex-1 rounded-[10px] text-sm",
+              "h-11 min-w-0 flex-1 rounded-[10px] px-0.5 text-[12px] leading-tight",
               tab === id ? "bg-accent text-accent-foreground" : "text-muted-foreground",
             )}
           >
@@ -115,6 +188,7 @@ export function Book({ tab, onTab }: { tab: BookTab; onTab: (t: BookTab) => void
         ))}
       </div>
       <div className="mt-4">
+        {tab === "play" && <PlayGuide />}
         {tab === "table" && <TableTab />}
         {tab === "craft" && <CraftTab />}
         {tab === "who" && <WhoTab />}
@@ -286,5 +360,5 @@ function AbcTab() {
 }
 
 export function HowToList() {
-  return <AbcTab />;
+  return <PlayGuide />;
 }
