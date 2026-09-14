@@ -1680,14 +1680,14 @@ function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
     }
   }
   if (art && tile.herd && tile.herd.count > 0) {
-    drawAtlas(ctx, art.life, 3, 3, LIFE_INDEX[tile.herd.kind], x + 6, y + 8, 28, 28);
+    drawAtlas(ctx, art.life, 3, 3, LIFE_INDEX[tile.herd.kind], x + 2, y + 2, 40, 40);
   }
   if (tile.wagon) {
     paintWagon(ctx, x + 8, y + 16, 1);
   } else if (tile.cart) {
     paintWagon(ctx, x + 10, y + 18, 0.72);
   } else if (tile.horse && art) {
-    drawAtlas(ctx, art.life, 3, 3, LIFE_INDEX.horse, x + 8, y + 10, 26, 26);
+    drawAtlas(ctx, art.life, 3, 3, LIFE_INDEX.horse, x + 2, y + 2, 40, 40);
   }
   if (tile.chestLock && tile.building !== "none") {
     const px = x + TILE - 11;

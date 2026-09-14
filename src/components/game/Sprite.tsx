@@ -60,7 +60,7 @@ export const ITEM_ICO: Record<ItemId, number> = {
   food: ICO.food,
   fish: ICO.fish,
   axe: ICO.axe,
-  pick: ICO.axe,
+  pick: 0,
   herb: 0,
   clay: 1,
   sand: 1,
@@ -69,31 +69,31 @@ export const ITEM_ICO: Record<ItemId, number> = {
   bucket: 1,
   spear: 2,
   shovel: 3,
-  rod: ICO.fish,
-  bread: ICO.food,
-  plank: ICO.wood,
-  bar: ICO.ore,
-  tonic: 0,
-  smoked: ICO.fish,
-  coal: ICO.stone,
-  wheel: ICO.road,
-  lock: ICO.stake,
+  rod: 1,
+  bread: 8,
+  plank: 6,
+  bar: 7,
+  tonic: 11,
+  smoked: 9,
+  coal: 10,
+  wheel: 5,
+  lock: 4,
   club: 2,
-  knife: ICO.stake,
-  board_shield: ICO.wood,
-  bar_shield: ICO.wood,
+  knife: 3,
+  board_shield: 2,
+  bar_shield: 2,
   wadded: 0,
-  helm: ICO.ore,
-  brick: ICO.stone,
+  helm: 1,
+  brick: 3,
   grain: ICO.food,
   flour: ICO.food,
   steel_axe: ICO.axe,
-  steel_pick: ICO.axe,
+  steel_pick: 0,
   steel_shovel: 3,
-  hide: ICO.food,
-  leather: 1,
-  vest: 0,
-  hood: ICO.ore,
+  hide: 12,
+  leather: 13,
+  vest: 14,
+  hood: 15,
 };
 
 export function ExtraIco({ i, className, alt }: { i: number; className?: string; alt?: string }) {
@@ -111,47 +111,49 @@ export function GearPic({ i, className, alt }: { i: number; className?: string; 
   return <Sprite src="/game/gear.png" index={i} cols={2} rows={2} className={className} alt={alt} />;
 }
 
+export function GoodsIco({ i, className, alt }: { i: number; className?: string; alt?: string }) {
+  return <Sprite src="/game/goods.png" index={i} cols={4} rows={4} className={className} alt={alt} />;
+}
+
+export function ArmorIco({ i, className, alt }: { i: number; className?: string; alt?: string }) {
+  return <Sprite src="/game/armor.png" index={i} cols={2} rows={2} className={className} alt={alt} />;
+}
+
 export function LifePic({ i, className, alt }: { i: number; className?: string; alt?: string }) {
   return <Sprite src="/game/life.png" index={i} cols={3} rows={3} className={className} alt={alt} />;
 }
 
 export function ItemPic({ id, className }: { id: ItemId; className?: string }) {
-  if (id === "herb" || id === "clay" || id === "sand" || id === "crystal" || id === "tonic") {
-    return <ExtraIco i={id === "tonic" ? 0 : id === "crystal" ? 2 : ITEM_ICO[id]} className={className} alt="" />;
+  if (id === "herb" || id === "clay" || id === "sand" || id === "crystal" || id === "shovel" || id === "steel_shovel") {
+    return <ExtraIco i={ITEM_ICO[id]} className={className} alt="" />;
   }
   if (id === "rope" || id === "bucket" || id === "spear") {
     return <GearPic i={GEAR_ICO[id]} className={className} alt="" />;
   }
-  if (id === "shovel" || id === "steel_shovel") return <ExtraIco i={3} className={className} alt="" />;
-  if (id === "pick" || id === "steel_pick") return <Ico i={ICO.axe} className={className} alt="" />;
-  if (id === "rod") {
-    return (
-      <span
-        role="img"
-        aria-label=""
-        className={cn("inline-block shrink-0 bg-cover bg-center", className)}
-        style={{ backgroundImage: "url(/game/rod.png)" }}
-      />
-    );
+  if (
+    id === "pick" ||
+    id === "steel_pick" ||
+    id === "rod" ||
+    id === "club" ||
+    id === "knife" ||
+    id === "lock" ||
+    id === "wheel" ||
+    id === "plank" ||
+    id === "bar" ||
+    id === "bread" ||
+    id === "smoked" ||
+    id === "coal" ||
+    id === "tonic" ||
+    id === "hide" ||
+    id === "leather" ||
+    id === "vest" ||
+    id === "hood"
+  ) {
+    return <GoodsIco i={ITEM_ICO[id]} className={className} alt="" />;
   }
-  if (id === "coal") return <Ico i={ICO.stone} className={className} alt="" />;
-  if (id === "plank") return <Ico i={ICO.wood} className={className} alt="" />;
-  if (id === "bar") return <Ico i={ICO.ore} className={className} alt="" />;
-  if (id === "bread") return <Ico i={ICO.food} className={className} alt="" />;
-  if (id === "smoked") return <Ico i={ICO.fish} className={className} alt="" />;
-  if (id === "wheel") return <Ico i={ICO.road} className={className} alt="" />;
-  if (id === "lock") return <Ico i={ICO.stake} className={className} alt="" />;
-  if (id === "club") return <GearPic i={GEAR_ICO.spear} className={className} alt="" />;
-  if (id === "knife") return <Ico i={ICO.stake} className={className} alt="" />;
-  if (id === "board_shield" || id === "bar_shield") return <Ico i={ICO.wood} className={className} alt="" />;
-  if (id === "wadded") return <GearPic i={GEAR_ICO.rope} className={className} alt="" />;
-  if (id === "helm") return <Ico i={ICO.ore} className={className} alt="" />;
-  if (id === "brick") return <Ico i={ICO.stone} className={className} alt="" />;
-  if (id === "grain" || id === "flour") return <Ico i={ICO.food} className={className} alt="" />;
-  if (id === "hide") return <Ico i={ICO.food} className={className} alt="" />;
-  if (id === "leather") return <ExtraIco i={1} className={className} alt="" />;
-  if (id === "vest") return <GearPic i={GEAR_ICO.rope} className={className} alt="" />;
-  if (id === "hood") return <Ico i={ICO.ore} className={className} alt="" />;
+  if (id === "wadded" || id === "helm" || id === "board_shield" || id === "bar_shield" || id === "brick") {
+    return <ArmorIco i={ITEM_ICO[id]} className={className} alt="" />;
+  }
   return <Ico i={ITEM_ICO[id]} className={className} alt="" />;
 }
 
