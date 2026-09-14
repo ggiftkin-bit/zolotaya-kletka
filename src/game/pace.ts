@@ -116,6 +116,7 @@ export function regenVigor(
 export const START_SAT = 90;
 export const START_WARMTH = 90;
 export const START_WATER = 100;
+/** Больше не догоняем тело за простой. Константа жива, tickFlesh её не берёт. */
 export const FLESH_CATCHUP_TICKS = 48;
 export const WORK_HUNGER = 6;
 export const RISE_SAT = 50;
@@ -171,7 +172,7 @@ export function fleshOf(
   };
 }
 
-/** Один тик мира, как стол крутил в worldTick. */
+/** Один тик мира. Пропуск не догонять: maxTicks по умолчанию 1, тело не накатывает тёмное время. */
 export function tickFlesh(
   f: Flesh,
   clock: number,
@@ -183,11 +184,15 @@ export function tickFlesh(
     weather: Weather;
     alive: boolean;
     maxTicks?: number;
+    live?: boolean;
   },
 ): Flesh {
-  const cap = opts.maxTicks ?? FLESH_CATCHUP_TICKS;
   if (f.bodyTick <= 0) return { ...f, bodyTick: clock };
-  const ticks = Math.min(cap, Math.max(0, clock - f.bodyTick));
+  const raw = Math.max(0, clock - f.bodyTick);
+  if (raw <= 0) return { ...f, bodyTick: clock };
+  if (opts.live === false) return { ...f, bodyTick: clock };
+  const cap = opts.maxTicks ?? 1;
+  const ticks = Math.min(cap, raw);
   if (ticks <= 0) return { ...f, bodyTick: clock };
   let satiety = f.satiety;
   let warmth = f.warmth;

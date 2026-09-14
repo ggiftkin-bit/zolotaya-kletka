@@ -385,7 +385,7 @@ function tickVigor(
     busyUntil: inBusy?.until,
     hired: !!inBusy?.hired,
   });
-  if (vig.life === "down" && roof && !kept.fellOut && now - (vig.downAt || now) >= 3_000) {
+  if (vig.life === "down" && roof && now - (vig.downAt || now) >= 3_000) {
     vig = { ...vig, life: "alive", hp: Math.max(20, vig.hp), downAt: 0, resting: true, energyAt: now };
     kept = { ...kept, fellOut: false };
   }
@@ -552,6 +552,7 @@ async function mergeBookBody(
   sql: Sql,
   userId: string,
   pawn: { x: number; y: number; body: PawnBody },
+  awake = true,
 ): Promise<{ body: PawnBody; credit: number; gold: number; inventory: Inventory; x: number; y: number; hint?: string }> {
   const row = await readPawn(sql, userId);
   const credit = dueOf(row?.body);
@@ -600,6 +601,7 @@ async function mergeBookBody(
     season: clock.season,
     weather: clock.weather,
     alive: kept.life === "alive",
+    live: awake,
   });
   kept = {
     ...kept,
@@ -626,9 +628,6 @@ async function mergeBookBody(
           [WORLD_ID, pawn.x, pawn.y, JSON.stringify(slimTile(live)), userId],
         );
       }
-      const home = await ownShackOrHall(sql, userId);
-      pawn.x = home.x;
-      pawn.y = home.y;
       kept = {
         ...kept,
         hp: 0,
@@ -645,7 +644,7 @@ async function mergeBookBody(
         travel: null,
       };
     }
-  } else if ((kept.life === "down" || kept.life === "dead") && !shelter) {
+  } else if (kept.life === "dead") {
     const home = await ownShackOrHall(sql, userId);
     pawn.x = home.x;
     pawn.y = home.y;
@@ -1643,6 +1642,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
         since: z.string(),
         pawn: pawnInSchema.optional(),
         clock: clockSchema.optional(),
+        awake: z.boolean().optional(),
       })
       .parse(d),
   )
@@ -1658,7 +1658,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
     let py = data.y;
     let stepHint: string | undefined;
     if (data.pawn) {
-      const merged = await mergeBookBody(sql, context.userId, data.pawn);
+      const merged = await mergeBookBody(sql, context.userId, data.pawn, data.awake !== false);
       credit = merged.credit;
       gold = merged.gold;
       inventory = merged.inventory;
@@ -2139,7 +2139,14 @@ export const writeGoldDeed = createServerFn({ method: "POST" })
       deadUntil: vig.deadUntil,
       satiety,
     };
-    await writePawn(sql, userId, data.pawn, body);
+    let px = merged.x;
+    let py = merged.y;
+    if (body.life === "dead") {
+      const home = await ownShackOrHall(sql, userId);
+      px = home.x;
+      py = home.y;
+    }
+    await writePawn(sql, userId, { ...data.pawn, x: px, y: py }, body);
     await sql.query(
       `insert into deed (world_id, user_id, kind, x, y, payload)
        values ($1, $2, $3, $4, $5, $6::jsonb)`,

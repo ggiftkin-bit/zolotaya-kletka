@@ -207,7 +207,7 @@ function heldLine(c: Character, now = Date.now()): string | null {
 }
 
 function actHeld(c: Character, now = Date.now()): string | null {
-  if (c.life === "down") return "Упал. Под крышей поднимешься.";
+  if (c.life === "down") return "Упал. Ползи к шалашу — там поднимешься.";
   return heldLine(c, now);
 }
 
@@ -299,6 +299,15 @@ function pushLog(logs: string[], line: string) {
 }
 
 let floaterSeq = 1;
+let sleepAt = 0;
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      if (!sleepAt) sleepAt = Date.now();
+    }
+  });
+}
 
 function addFloater(x: number, y: number, text: string, tone: Floater["tone"] = "ok") {
   const s = useGame.getState();
@@ -1388,9 +1397,24 @@ function sealBag(
 }
 
 function catchUpSim(dt: number) {
-  const s = useGame.getState();
+  let s = useGame.getState();
   if (!s.started) return;
   const now = Date.now();
+  const hidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+  if (hidden) {
+    if (!sleepAt) sleepAt = now;
+    advanceTravel(now);
+    return;
+  }
+  if (sleepAt) {
+    const gap = Math.max(0, now - sleepAt);
+    sleepAt = 0;
+    const c0 = s.character;
+    if (c0.life === "down" && c0.downAt) {
+      useGame.setState({ character: { ...c0, downAt: c0.downAt + gap } });
+    }
+    s = useGame.getState();
+  }
   let dummies = s.dummies ?? [];
   let dummyTouched = false;
   dummies = dummies.map((d) => {
@@ -1427,7 +1451,7 @@ function catchUpSim(dt: number) {
   }
   if (live.life === "down") {
     const underRoof = hasRoofAt({ ...s, character: live }, live.x, live.y);
-    if (underRoof && !live.fellOut) {
+    if (underRoof) {
       if (now - (live.downAt || now) >= 3_000) {
         live = { ...live, life: "alive", hp: Math.max(20, live.hp), downAt: 0, resting: true, energyAt: now, fellOut: false };
         dropHint({ force: true });
@@ -1436,24 +1460,11 @@ function catchUpSim(dt: number) {
           hint: { text: "Поднялся под крышей. Лежишь. Сила капает быстрее.", tone: "ok" },
         });
       }
-    } else {
-      const home = ownHomeCell(s.world);
-      if (live.x !== home.x || live.y !== home.y) {
-        viewPos.x = home.x;
-        viewPos.y = home.y;
-        forgetTravel();
-        markAccepted(home.x, home.y, live.stepSeq ?? 0);
-        live = { ...live, x: home.x, y: home.y, px: home.x, py: home.y, fellOut: true };
-        useGame.setState({
-          travel: null,
-          preview: null,
-          selected: { x: home.x, y: home.y },
-        });
-      }
-      if (now - (live.downAt || now) >= DOWN_MS) {
+    } else if (now - (live.downAt || now) >= DOWN_MS) {
       const n = live.deaths ?? 0;
       const plan = planGoldDeed("death", live.gold, n);
       const fee = plan.ok ? -plan.delta : Math.min(live.gold, deathFee(n));
+      const home = ownHomeCell(s.world);
       live = {
         ...live,
         life: "dead",
@@ -1461,10 +1472,21 @@ function catchUpSim(dt: number) {
         hp: 0,
         gold: plan.ok ? plan.gold : live.gold - fee,
         deaths: n + 1,
+        x: home.x,
+        y: home.y,
+        px: home.x,
+        py: home.y,
       };
+      viewPos.x = home.x;
+      viewPos.y = home.y;
+      forgetTravel();
+      markAccepted(home.x, home.y, live.stepSeq ?? 0);
       const feeLine = fee <= 0 ? "Этот раз даром." : `Сняли ${goldTxt(fee)}.`;
       const next = deathFee(n + 1);
       useGame.setState({
+        travel: null,
+        preview: null,
+        selected: { x: home.x, y: home.y },
         log: pushLog(
           useGame.getState().log,
           `Погиб. ${feeLine} Двор стоит. Выйдешь дома через 2 мин, потом сутки без хода. Следующий раз — ${goldTxt(next)}.`,
@@ -1472,7 +1494,6 @@ function catchUpSim(dt: number) {
       });
       maybePingHidden("Погиб", "Двор стоит. Выйдешь дома через 2 мин.", "dead");
       void commitGold("death");
-      }
     }
   }
   if (live.life === "dead" && now >= (live.deadUntil || 0)) {
@@ -1524,7 +1545,6 @@ function catchUpSim(dt: number) {
   const extra = Math.min(6, Math.floor(gapSec / TICK_SEC));
   if (extra > 0) {
     worldAcc = 0;
-    for (let i = 0; i < extra; i++) worldTick();
   } else {
     worldAcc += Math.min(dt, 0.25) * s.timeScale;
     if (worldAcc >= TICK_SEC) {
@@ -1706,52 +1726,36 @@ function worldTick() {
       const stripped = stripRidden(s.world, c, c.x, c.y);
       c = stripped.c;
       parkedMount = stripped.cells;
-      const home = ownHomeCell(s.world);
       c.life = "down";
       c.downAt = Date.now();
       c.hp = 0;
       c.busy = null;
       c.resting = false;
       c.fellOut = true;
-      c.x = home.x;
-      c.y = home.y;
-      c.px = home.x;
-      c.py = home.y;
       cancelNotice("walk");
       forgetTravel();
-      markAccepted(home.x, home.y, c.stepSeq ?? 0);
-      viewPos.x = home.x;
-      viewPos.y = home.y;
-      log = pushLog(log, "Упал. Ноша на клетке падения. Ты у шалаша.");
+      markAccepted(c.x, c.y, c.stepSeq ?? 0);
+      log = pushLog(log, "Упал. Ноша на клетке. Ползи к шалашу — там поднимешься.");
       useGame.setState({
         travel: null,
         preview: null,
-        selected: { x: home.x, y: home.y },
-        hint: { text: "Упал. Ноша на клетке падения.", tone: "bad", keep: "down" },
+        hint: { text: "Упал. Дойди до шалаша — там поднимешься.", tone: "bad", keep: "down" },
       });
     } else {
-      const home = ownHomeCell(s.world);
       c.life = "down";
       c.downAt = Date.now();
       c.hp = 0;
       c.busy = null;
       c.resting = false;
       c.fellOut = true;
-      c.x = home.x;
-      c.y = home.y;
-      c.px = home.x;
-      c.py = home.y;
       cancelNotice("walk");
       forgetTravel();
-      markAccepted(home.x, home.y, c.stepSeq ?? 0);
-      viewPos.x = home.x;
-      viewPos.y = home.y;
-      log = pushLog(log, "Упал. Ноша на клетке падения. Ты у шалаша.");
+      markAccepted(c.x, c.y, c.stepSeq ?? 0);
+      log = pushLog(log, "Упал. Ноша на клетке. Ползи к шалашу — там поднимешься.");
       useGame.setState({
         travel: null,
         preview: null,
-        selected: { x: home.x, y: home.y },
-        hint: { text: "Упал. Ноша на клетке падения.", tone: "bad", keep: "down" },
+        hint: { text: "Упал. Дойди до шалаша — там поднимешься.", tone: "bad", keep: "down" },
       });
     }
   }

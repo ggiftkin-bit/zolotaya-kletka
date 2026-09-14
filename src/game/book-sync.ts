@@ -250,6 +250,10 @@ function pawnPayload(c: Character) {
   };
 }
 
+function tableAwake() {
+  return typeof document === "undefined" || document.visibilityState !== "hidden";
+}
+
 export function rememberTravel(t: Travel | null | undefined) {
   if (t?.path.length) lastTravel = t;
   else lastTravel = null;
@@ -911,6 +915,7 @@ export async function beatBook(_force = false) {
         y: cur.character.y,
         since: cur.bookAt || "1970-01-01T00:00:00.000Z",
         pawn: cur.started ? pawnPayload(cur.character) : undefined,
+        awake: tableAwake(),
       },
     });
     if (!res?.ok) return;
@@ -937,10 +942,10 @@ export async function beatBook(_force = false) {
       const walking = !!(live.travel?.path.length);
       const busy = live.character.busy;
       const chopping = !!(busy && busy.until > Date.now() && busy.x === c.x && busy.y === c.y);
-      const fallen = c.life === "down" || c.life === "dead";
+      const dead = c.life === "dead";
       const just = !!(lastAccepted && (lastAccepted.x !== nx || lastAccepted.y !== ny));
       if (c.x !== nx || c.y !== ny) {
-        if (fallen || hint) {
+        if (dead || hint) {
           store.set({
             character: { ...c, x: nx, y: ny, px: nx, py: ny },
             travel: hint ? null : live.travel,
