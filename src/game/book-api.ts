@@ -10,13 +10,13 @@ import { generateWorld } from "./worldgen";
 import { isItemId, settleService, serviceJobOf, stampTake } from "./market";
 import { fillStock, isGiftId, planBuyFromStock, planDonate, planGift, planSellDay, planSellToStock, stockOf, worldDayOf, STOCK_CAP, STOCK_START } from "./office";
 import { isGoldKind, planGoldDeed, START_GOLD } from "./gold";
-import { bagOf, canCraftHere, CISTERN_CAP, CISTERN_POUR, CELL_GONE, craftDefOf, eatSatiety, giveOrSpill, GRANT_WOOD, huntTake, isBagKind, isDrinkTile, PAIL_FULL, planCook, planEat, planGather, planScrap, planTonic, SIP_WATER, startInv, takeBag } from "./bag";
+import { bagOf, canCraftHere, CISTERN_CAP, CISTERN_POUR, CELL_GONE, chestStock, craftDefOf, eatSatiety, giveOrSpill, GRANT_WOOD, huntTake, isBagKind, isDrinkTile, PAIL_FULL, planChestPut, planChestTake, planCook, planEat, planGather, planScrap, planTonic, SIP_WATER, startInv, takeBag } from "./bag";
 import { BOOST_ENERGY, busyEnergy, DEAD_MS, ENERGY_MAX, fleshOf, regenVigor, RISE_SAT, RISE_WATER, RISE_WARMTH, tickFlesh, vigorOf, WORK_HUNGER } from "./pace";
 import { stepEnergy } from "./travel";
 import { isHamletOwner, isLivingOwner } from "./pact";
 import { tickCowBirth, tickHorseBirth, tickWildHerds, tickWolfMorning, tickWolfSpawn } from "./life";
 import { defaultMatter, MATTER_HP, isRoof } from "./work";
-import { asPile, dumpAllOn, pileAdd, pileEmpty, pileSet, pullNeed, SHED_REACH, applyNeedPull } from "./pile";
+import { asPile, dumpAllOn, dumpFallOn, pileAdd, pileEmpty, pileSet, pullNeed, SHED_REACH, applyNeedPull } from "./pile";
 import { planDig } from "./pit";
 import { STRIKE_CAP } from "./fight";
 import { makeJobs } from "./economy";
@@ -37,7 +37,7 @@ import {
   type TilePacket,
   type WorldClock,
 } from "./book";
-import { chebyshev, patchStepWorld, planBookStep, STEP_HINT } from "./step";
+import { chebyshev, patchStepWorld, planBookStep, STEP_HINT, stepSeqOf } from "./step";
 import {
   BOARD_CAP,
   BOARD_CAP_HINT,
@@ -322,6 +322,8 @@ function keepBookPurse(incoming: PawnBody, book: PawnBody | null | undefined): P
     pail: flesh.pail,
     sipTick: flesh.sipTick,
     bodyTick: flesh.bodyTick,
+    fellOut: !!book?.fellOut,
+    stepSeq: Math.max(stepSeqOf(incoming), stepSeqOf(book)),
   };
 }
 
@@ -334,6 +336,7 @@ function vigorOut(body: PawnBody) {
     hp: v.hp,
     life: v.life,
     deaths: v.deaths,
+    fellOut: !!body.fellOut,
   };
 }
 
@@ -382,8 +385,9 @@ function tickVigor(
     busyUntil: inBusy?.until,
     hired: !!inBusy?.hired,
   });
-  if (vig.life === "down" && roof && now - (vig.downAt || now) >= 3_000) {
+  if (vig.life === "down" && roof && !kept.fellOut && now - (vig.downAt || now) >= 3_000) {
     vig = { ...vig, life: "alive", hp: Math.max(20, vig.hp), downAt: 0, resting: true, energyAt: now };
+    kept = { ...kept, fellOut: false };
   }
   if (vig.life === "dead" && vig.deadUntil > 0 && now >= vig.deadUntil) {
     vig = {
@@ -395,6 +399,7 @@ function tickVigor(
       deadUntil: 0,
       resting: false,
     };
+    kept = { ...kept, fellOut: false };
   }
   return {
     ...kept,
@@ -514,11 +519,18 @@ async function clampPawnPos(
   from: { x: number; y: number } | null,
   pawn: { x: number; y: number; body: PawnBody },
   travel = travelOf(pawn.body),
+  fallback?: ReturnType<typeof travelOf>,
+  stale = false,
 ): Promise<{ x: number; y: number; hint?: string }> {
   if (!from) return { x: pawn.x, y: pawn.y };
   let span = Math.max(1, chebyshev(from.x, from.y, pawn.x, pawn.y));
   if (travel?.path?.length) {
     for (const p of travel.path) {
+      span = Math.max(span, chebyshev(from.x, from.y, p.x, p.y));
+    }
+  }
+  if (fallback?.path?.length) {
+    for (const p of fallback.path) {
       span = Math.max(span, chebyshev(from.x, from.y, p.x, p.y));
     }
   }
@@ -533,7 +545,7 @@ async function clampPawnPos(
     cells.push(fatTile({ b: "plains" }, from.x, from.y));
   }
   const world = patchStepWorld(MAP_W, MAP_H, cells);
-  return planBookStep(world, from, { x: pawn.x, y: pawn.y }, travel, userId);
+  return planBookStep(world, from, { x: pawn.x, y: pawn.y }, travel, userId, fallback, stale);
 }
 
 async function mergeBookBody(
@@ -543,8 +555,18 @@ async function mergeBookBody(
 ): Promise<{ body: PawnBody; credit: number; gold: number; inventory: Inventory; x: number; y: number; hint?: string }> {
   const row = await readPawn(sql, userId);
   const credit = dueOf(row?.body);
-  const travel = travelOf(pawn.body) ?? travelOf(row?.body);
-  const step = await clampPawnPos(sql, userId, row ? { x: row.x, y: row.y } : null, pawn, travel);
+  const travel = travelOf(pawn.body);
+  const bookTravel = travelOf(row?.body);
+  const stale = stepSeqOf(pawn.body) > stepSeqOf(row?.body);
+  const step = await clampPawnPos(
+    sql,
+    userId,
+    row ? { x: row.x, y: row.y } : null,
+    pawn,
+    travel,
+    bookTravel,
+    stale,
+  );
   pawn.x = step.x;
   pawn.y = step.y;
   let kept = keepBookPurse(pawn.body, row?.body);
@@ -595,10 +617,7 @@ async function mergeBookBody(
     } else if (kept.hp <= 0) {
       const live = slim ? fatTile(slim, pawn.x, pawn.y) : null;
       if (live) {
-        dumpAllOn(live, bagOf(kept));
-        for (const id of [kept.body, kept.shield, kept.helm]) {
-          if (id) pileAdd(live, id, 1);
-        }
+        dumpFallOn(live, bagOf(kept), [kept.body, kept.shield, kept.helm]);
         await sql.query(
           `update tile t
            set slim = ${keepSlimKeys("$4::jsonb", CIVIC_KEYS)},
@@ -607,6 +626,9 @@ async function mergeBookBody(
           [WORLD_ID, pawn.x, pawn.y, JSON.stringify(slimTile(live)), userId],
         );
       }
+      const home = await ownShackOrHall(sql, userId);
+      pawn.x = home.x;
+      pawn.y = home.y;
       kept = {
         ...kept,
         hp: 0,
@@ -619,8 +641,14 @@ async function mergeBookBody(
         hand: null,
         busy: null,
         resting: false,
+        fellOut: true,
+        travel: null,
       };
     }
+  } else if ((kept.life === "down" || kept.life === "dead") && !shelter) {
+    const home = await ownShackOrHall(sql, userId);
+    pawn.x = home.x;
+    pawn.y = home.y;
   }
   return { body: kept, credit, gold: kept.gold, inventory: kept.inventory, x: pawn.x, y: pawn.y, hint: step.hint };
 }
@@ -1075,6 +1103,25 @@ async function migrateMeadowStations(sql: Sql) {
       [WORLD_ID, p.x, p.y],
     );
   }
+}
+
+async function ownShackOrHall(sql: Sql, userId: string): Promise<{ x: number; y: number }> {
+  const shack = await sql.query<{ x: number; y: number }>(
+    `select x, y from tile
+     where world_id = $1
+       and slim->>'on' = $2
+       and slim->>'bd' in ('shack', 'house')
+       and coalesce(slim->>'br', '0') <> '1'
+     order by case when slim->>'bd' = 'house' then 0 else 1 end
+     limit 1`,
+    [WORLD_ID, userId],
+  );
+  if (shack[0]) return shack[0];
+  const hall = await sql.query<{ x: number; y: number }>(
+    `select x, y from tile where world_id = $1 and slim->>'bd' = 'hall' limit 1`,
+    [WORLD_ID],
+  );
+  return hall[0] ?? hallPos();
 }
 
 async function loadFatCell(sql: Sql, x: number, y: number): Promise<{ live: Tile; slim: SlimTile; ver: number } | null> {
@@ -1606,6 +1653,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
     let inventory = startInv();
     let vigor = vigorOf(null);
     let flesh = fleshOf(null);
+    let fellOut = false;
     let px = data.x;
     let py = data.y;
     let stepHint: string | undefined;
@@ -1616,6 +1664,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       inventory = merged.inventory;
       vigor = vigorOf(merged.body);
       flesh = fleshOf(merged.body);
+      fellOut = !!merged.body.fellOut;
       px = merged.x;
       py = merged.y;
       stepHint = merged.hint;
@@ -1642,6 +1691,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       inventory = bagOf(row?.body);
       vigor = vigorOf(row?.body);
       flesh = fleshOf(row?.body);
+      fellOut = !!row?.body?.fellOut;
       if (due > 0 && row?.body) {
         const body = { ...row.body, gold, due: 0 };
         await writePawn(sql, context.userId, { name: row.name, color: row.color, x: px, y: py }, body);
@@ -1713,6 +1763,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
       hp: vigor.hp,
       life: vigor.life,
       deaths: vigor.deaths,
+      fellOut,
       satiety: flesh.satiety,
       warmth: flesh.warmth,
       water: flesh.water,
@@ -2384,11 +2435,11 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       data.kind === "hunt" ||
       data.kind === "fish" ||
       data.kind === "pickup" ||
-      data.kind === "chest-take" ||
       data.kind === "craft" ||
       data.kind === "scrap";
+    const chestKind = data.kind === "chest-put" || data.kind === "chest-take";
     if (!cur) return emptyFail(takesCell ? CELL_GONE : "клетка уже другая");
-    if (cur.ver !== t.ver && !bagSoft) {
+    if (cur.ver !== t.ver && !bagSoft && !chestKind) {
       return { ...emptyFail(takesCell ? CELL_GONE : "клетка уже другая"), conflicts: asConflict() };
     }
     const reach = Math.max(Math.abs(data.pawn.x - t.x), Math.abs(data.pawn.y - t.y));
@@ -2580,22 +2631,52 @@ export const writeBagDeed = createServerFn({ method: "POST" })
       const item = data.item ?? "";
       const qty = Math.max(0, Math.floor(data.qty ?? 1));
       if (!isItemId(item) || qty < 1) return emptyFail("пусто", gold, inv);
-      if (data.kind === "chest-put") {
-        const n = Math.min(qty, inv[item] ?? 0);
-        if (n < 1) return emptyFail("Нечего класть.", gold, inv);
-        const paid = takeBag(inv, { [item]: n });
-        if (!paid.ok) return emptyFail(paid.hint, gold, inv);
-        inv = paid.inv;
-        live.chest = { ...live.chest, [item]: (live.chest[item] ?? 0) + n };
-      } else {
-        const n = Math.min(qty, live.chest[item] ?? 0);
-        if (n < 1) return lost();
-        live.chest = { ...live.chest, [item]: Math.max(0, (live.chest[item] ?? 0) - n) };
-        spill(item, n);
+      const applyChest = (tile: Tile, bag: Inventory) => {
+        if (data.kind === "chest-put") {
+          const plan = planChestPut(bag, item, qty);
+          if (!plan.ok) return { ok: false as const, hint: plan.hint, gone: false, inv: bag, tile };
+          tile.chest = { ...tile.chest, [item]: (tile.chest[item] ?? 0) + plan.n };
+          return { ok: true as const, hint: "", gone: false, inv: plan.inv, tile };
+        }
+        const plan = planChestTake(tile.chest, item, qty);
+        if (!plan.ok) return { ok: false as const, hint: plan.hint, gone: true, inv: bag, tile };
+        tile.chest = { ...tile.chest, [item]: Math.max(0, (tile.chest[item] ?? 0) - plan.n) };
+        const g = giveOrSpill(bag, ride, item, plan.n);
+        if (g.spill > 0) pileAdd(tile, item, g.spill);
+        return { ok: true as const, hint: "", gone: false, inv: g.inv, tile };
+      };
+      const tryBump = async (tile: Tile, ver: number, bag: Inventory) => {
+        const plan = applyChest(tile, bag);
+        if (!plan.ok) return plan;
+        const next = await bump(plan.tile, ver);
+        if (next == null) return { ok: false as const, hint: "", gone: false, raced: true as const, inv: bag, tile };
+        written.push({ x: t.x, y: t.y, ver: next });
+        return { ...plan, raced: false as const };
+      };
+      let result = await tryBump(live, t.ver, inv);
+      if ("raced" in result && result.raced) {
+        const rows = await sql.query<TileRow>(
+          `select x, y, slim, ver, updated_at::text as updated_at from tile where world_id = $1 and x = $2 and y = $3`,
+          [WORLD_ID, t.x, t.y],
+        );
+        const nowRow = rows[0];
+        if (!nowRow) return lost();
+        const fresh = fatTile(asSlim(nowRow.slim), t.x, t.y);
+        if (chestStock(data.kind, inv, fresh.chest, item) <= 0) return lost();
+        result = await tryBump(fresh, nowRow.ver, inv);
+        if ("raced" in result && result.raced) {
+          const again = await sql.query<TileRow>(
+            `select x, y, slim, ver, updated_at::text as updated_at from tile where world_id = $1 and x = $2 and y = $3`,
+            [WORLD_ID, t.x, t.y],
+          );
+          const last = again[0];
+          const lastFat = last ? fatTile(asSlim(last.slim), t.x, t.y) : null;
+          if (!lastFat || chestStock(data.kind, inv, lastFat.chest, item) <= 0) return lost();
+          return failCell("клетка уже другая");
+        }
       }
-      const ver = await bump(live, t.ver);
-      if (ver == null) return lost();
-      written.push({ x: t.x, y: t.y, ver });
+      if (!result.ok) return result.gone ? lost() : emptyFail(result.hint, gold, inv);
+      inv = result.inv;
     } else if (data.kind === "craft") {
       const id = data.craft ?? "";
       const def = craftDefOf(id);

@@ -672,6 +672,7 @@ export function Hud() {
                     onDrink={() => g.drinkTonic()}
                     onDrop={(q) => g.dropItem(cell, q)}
                     onChest={(q) => g.storeItem(cell, q)}
+                    chestBusy={!!g.chestFlight?.[cell]}
                     onHand={() => g.equipHand(g.character.hand === cell ? null : cell)}
                     onWear={() =>
                       g.equipWear(gearSlot(cell) && wornOf(g.character, cell) ? null : cell, gearSlot(cell) ?? undefined)
@@ -770,11 +771,11 @@ export function Hud() {
                       {ITEM_WEIGHT[cell]} кг · в сундуке {here.chest[cell]}
                     </p>
                     <div className="mt-2 flex gap-1.5">
-                      <Button className="h-12 flex-1" onClick={() => g.takeChest(cell, 1)}>
+                      <Button className="h-12 flex-1" disabled={!!g.chestFlight?.[cell]} onClick={() => g.takeChest(cell, 1)}>
                         из сундука
                       </Button>
                       {(here.chest[cell] ?? 0) > 1 && (
-                        <Button className="h-12 flex-1" variant="secondary" onClick={() => g.takeChest(cell, here.chest[cell])}>
+                        <Button className="h-12 flex-1" variant="secondary" disabled={!!g.chestFlight?.[cell]} onClick={() => g.takeChest(cell, here.chest[cell])}>
                           всё
                         </Button>
                       )}
@@ -1041,6 +1042,7 @@ function BagActs({
   onChest,
   onHand,
   onWear,
+  chestBusy,
 }: {
   k: ItemId;
   n: number;
@@ -1055,6 +1057,7 @@ function BagActs({
   onChest: (q: number) => void;
   onHand: () => void;
   onWear: () => void;
+  chestBusy?: boolean;
 }) {
   const food = (EAT_ORDER as readonly string[]).includes(k);
   const wearLbl = wearSlot === "helm" ? "на голову" : wearSlot === "shield" ? "в щит" : "на тело";
@@ -1094,12 +1097,12 @@ function BagActs({
           </Button>
         )}
         {canChest && (
-          <Button className="h-12 flex-1" variant="secondary" disabled={n <= 0} onClick={() => onChest(1)}>
+          <Button className="h-12 flex-1" variant="secondary" disabled={n <= 0 || !!chestBusy} onClick={() => onChest(1)}>
             в сундук
           </Button>
         )}
         {canChest && n > 1 && (
-          <Button className="h-12 flex-1" variant="secondary" onClick={() => onChest(n)}>
+          <Button className="h-12 flex-1" variant="secondary" disabled={!!chestBusy} onClick={() => onChest(n)}>
             всё в сундук
           </Button>
         )}

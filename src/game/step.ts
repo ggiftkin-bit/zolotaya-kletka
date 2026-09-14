@@ -8,6 +8,15 @@ export function chebyshev(ax: number, ay: number, bx: number, by: number) {
   return Math.max(Math.abs(ax - bx), Math.abs(ay - by));
 }
 
+export function stepSeqOf(body: { stepSeq?: number } | null | undefined): number {
+  const n = Number(body?.stepSeq);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+export function onTravelPath(travel: Travel | null | undefined, cell: { x: number; y: number }): boolean {
+  return !!travel?.path?.some((p) => p && p.x === cell.x && p.y === cell.y);
+}
+
 /** Если в теле путь — только следующая клетка, не конец маршрута. */
 export function nextTravelCell(
   from: { x: number; y: number },
@@ -67,16 +76,24 @@ export function planBookStep(
   want: { x: number; y: number },
   travel: Travel | null | undefined,
   who: string,
+  fallback?: Travel | null,
+  stale = false,
 ): { x: number; y: number; hint?: string } {
   if (from.x === want.x && from.y === want.y) return from;
-  const path = travel?.path;
-  if (path?.length) {
-    const landed = walkBookPath(world, from, want, path, who);
+  if (travel?.path?.length) {
+    const landed = walkBookPath(world, from, want, travel.path, who);
     if (landed) return landed;
-    return { ...from, hint: STEP_HINT };
+  }
+  if (fallback?.path?.length) {
+    const landed = walkBookPath(world, from, want, fallback.path, who);
+    if (landed) return landed;
   }
   const d = chebyshev(from.x, from.y, want.x, want.y);
   if (d === 0) return from;
+  if (d === 1 && stepOk(world, from, want, who)) return { x: want.x, y: want.y };
+  if (stale && (onTravelPath(travel, want) || onTravelPath(fallback, want))) {
+    return { x: want.x, y: want.y };
+  }
   if (d > 1) return { ...from, hint: STEP_HINT };
   if (!stepOk(world, from, want, who)) return { ...from, hint: STEP_HINT };
   return { x: want.x, y: want.y };

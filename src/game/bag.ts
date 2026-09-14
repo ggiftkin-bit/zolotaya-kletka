@@ -233,4 +233,37 @@ export function planScrap(tile: Tile, selfId: string): ScrapPlan {
 /** Испытание «выдать дерево». Книга кладёт столько, не стол. */
 export const GRANT_WOOD = 20;
 
+/** Один тык сундука: книга считает, стол не убавляет заранее. */
+export function planChestPut(
+  inv: Inventory,
+  item: ItemId,
+  qty: number,
+): { ok: true; n: number; inv: Inventory } | { ok: false; hint: string } {
+  const n = Math.min(Math.max(0, Math.floor(qty)), inv[item] ?? 0);
+  if (n < 1) return { ok: false, hint: "Нечего класть." };
+  const paid = takeBag(inv, { [item]: n });
+  if (!paid.ok) return { ok: false, hint: paid.hint };
+  return { ok: true, n, inv: paid.inv };
+}
+
+/** Из сундука в ношу. Запас ноль — «уже нет». */
+export function planChestTake(
+  chest: Partial<Inventory> | null | undefined,
+  item: ItemId,
+  qty: number,
+): { ok: true; n: number } | { ok: false; hint: string } {
+  const n = Math.min(Math.max(0, Math.floor(qty)), chest?.[item] ?? 0);
+  if (n < 1) return { ok: false, hint: CELL_GONE };
+  return { ok: true, n };
+}
+
+export function chestStock(
+  kind: "chest-put" | "chest-take",
+  inv: Inventory,
+  chest: Partial<Inventory> | null | undefined,
+  item: ItemId,
+): number {
+  return kind === "chest-put" ? inv[item] ?? 0 : chest?.[item] ?? 0;
+}
+
 export { FIELD_CROP };

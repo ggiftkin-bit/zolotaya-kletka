@@ -59,6 +59,7 @@ import {
   STALL_ONE_HINT,
   STALL_RENT_HINT,
   canPlaceMarketStall,
+  hallPos,
   isPeace,
   liveBoardCount,
   liveMarketStall,
@@ -124,7 +125,7 @@ import { chebyshev, dummyHome, foeById, gearSlot, ghostLiveFoe, isWolfId, leaveC
 import { viewPos } from "./view-pos";
 import { generateWorld, isWalkable, spawnPoint, tileAt, warmupWorld, ensureHamlets, migrateStations } from "./worldgen";
 import { FOG_DARK, FOG_LIVE, allDarkFog, fogAt, maskLiveFog, rememberFog } from "./book";
-import { bindBookStore, commitBag, commitGold, commitHarm, commitOffice, commitRoad, commitService, commitStall, commitVillage, flushBook, forgetTravel, lookStreet, markFreshLive, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, rememberTravel, resetBookPawn } from "./book-sync";
+import { bindBookStore, commitBag, commitGold, commitHarm, commitOffice, commitRoad, commitService, commitStall, commitVillage, flushBook, forgetTravel, lookStreet, markAccepted, markFreshLive, noteDeed, openBookFromServer, postCloseFight, postOpenFight, postStrikeFight, pullSpot, rememberTravel, resetBookPawn } from "./book-sync";
 import {
   applyCargoPile,
   canReachStall,
@@ -172,6 +173,32 @@ function hasChest(t: { owned: boolean; building: string; owner?: string }) {
   return t.building === "shack" || t.building === "house" || t.building === "shed" || t.owned;
 }
 
+function ownHomeCell(world: GameState["world"]): { x: number; y: number } {
+  const shack =
+    world.tiles.find(
+      (t) => t.owner === "you" && (t.building === "house" || t.building === "shack") && !t.burned,
+    ) || null;
+  if (shack) return { x: shack.x, y: shack.y };
+  const hall = world.tiles.find((t) => t.building === "hall");
+  if (hall) return { x: hall.x, y: hall.y };
+  return hallPos();
+}
+
+function beginChest(item: ItemId): boolean {
+  const s = useGame.getState();
+  if (s.chestFlight?.[item]) return false;
+  useGame.setState({ chestFlight: { ...s.chestFlight, [item]: true } });
+  return true;
+}
+
+function endChest(item: ItemId) {
+  const s = useGame.getState();
+  if (!s.chestFlight?.[item]) return;
+  const flight = { ...s.chestFlight };
+  delete flight[item];
+  useGame.setState({ chestFlight: flight });
+}
+
 function heldLine(c: Character, now = Date.now()): string | null {
   if (c.life === "dead") return "Погиб. Двор стоит — выйдешь дома.";
   if (isJailed(c, now)) return c.jailWhy ? `Сидишь. ${c.jailWhy}. Залог ${goldTxt(BAIL_GOLD)}.` : `Сидишь. Залог ${goldTxt(BAIL_GOLD)}.`;
@@ -180,7 +207,7 @@ function heldLine(c: Character, now = Date.now()): string | null {
 }
 
 function actHeld(c: Character, now = Date.now()): string | null {
-  if (c.life === "down") return "Упал. Ползи к шалашу — под крышей поднимешься.";
+  if (c.life === "down") return "Упал. Под крышей поднимешься.";
   return heldLine(c, now);
 }
 
@@ -262,6 +289,8 @@ function makeCharacter(name: string, color: string): Character {
     village: "",
     gifts: {},
     staff: false,
+    stepSeq: 0,
+    fellOut: false,
   };
 }
 
@@ -674,6 +703,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
   meet: null,
   dummies: [],
   selfId: "",
+  chestFlight: {},
 
   boot: () => {
     const saved = loadGame();
@@ -945,6 +975,7 @@ export const useGame = create<GameState & Actions>((set, get) => ({
     if (!s.travel) return;
     cancelNotice("walk");
     forgetTravel();
+    markAccepted(s.character.x, s.character.y, s.character.stepSeq ?? 0);
     set({ travel: null, preview: null });
     speak("Стою.", s.character.x, s.character.y, "стой", "ok");
   },
@@ -1352,7 +1383,7 @@ function sealBag(
   extra?: { item?: ItemId; qty?: number; craft?: string; need?: Partial<Record<ItemId, number>>; job?: string },
 ) {
   void commitBag(kind, cell, prior, extra).then((ok) => {
-    if (!ok) void pullSpot(true);
+    if (!ok || kind === "chest-put" || kind === "chest-take") void pullSpot(true);
   });
 }
 
@@ -1396,16 +1427,30 @@ function catchUpSim(dt: number) {
   }
   if (live.life === "down") {
     const underRoof = hasRoofAt({ ...s, character: live }, live.x, live.y);
-    if (underRoof) {
+    if (underRoof && !live.fellOut) {
       if (now - (live.downAt || now) >= 3_000) {
-        live = { ...live, life: "alive", hp: Math.max(20, live.hp), downAt: 0, resting: true, energyAt: now };
+        live = { ...live, life: "alive", hp: Math.max(20, live.hp), downAt: 0, resting: true, energyAt: now, fellOut: false };
         dropHint({ force: true });
         useGame.setState({
           log: pushLog(useGame.getState().log, "Поднялся под крышей. Лежишь — сила капает быстрее."),
           hint: { text: "Поднялся под крышей. Лежишь. Сила капает быстрее.", tone: "ok" },
         });
       }
-    } else if (now - (live.downAt || now) >= DOWN_MS) {
+    } else {
+      const home = ownHomeCell(s.world);
+      if (live.x !== home.x || live.y !== home.y) {
+        viewPos.x = home.x;
+        viewPos.y = home.y;
+        forgetTravel();
+        markAccepted(home.x, home.y, live.stepSeq ?? 0);
+        live = { ...live, x: home.x, y: home.y, px: home.x, py: home.y, fellOut: true };
+        useGame.setState({
+          travel: null,
+          preview: null,
+          selected: { x: home.x, y: home.y },
+        });
+      }
+      if (now - (live.downAt || now) >= DOWN_MS) {
       const n = live.deaths ?? 0;
       const plan = planGoldDeed("death", live.gold, n);
       const fee = plan.ok ? -plan.delta : Math.min(live.gold, deathFee(n));
@@ -1427,14 +1472,11 @@ function catchUpSim(dt: number) {
       });
       maybePingHidden("Погиб", "Двор стоит. Выйдешь дома через 2 мин.", "dead");
       void commitGold("death");
+      }
     }
   }
   if (live.life === "dead" && now >= (live.deadUntil || 0)) {
-    const home =
-      s.world.tiles.find((t) => t.plot && t.owner === "you" && (t.building === "house" || t.building === "shack") && !t.burned) ||
-      s.world.tiles.find((t) => t.plot && t.owner === "you") ||
-      null;
-    const p = home ? { x: home.x, y: home.y } : spawnPoint();
+    const p = ownHomeCell(s.world);
     live = {
       ...live,
       life: "alive",
@@ -1446,6 +1488,7 @@ function catchUpSim(dt: number) {
       downAt: 0,
       deadUntil: 0,
       stillUntil: now + DAY_MS,
+      fellOut: false,
       x: p.x,
       y: p.y,
       px: p.x,
@@ -1522,6 +1565,7 @@ function advanceTravel(now: number) {
   let y = s.character.y;
   let energy = s.character.energy;
   let stepped = false;
+  let seq = s.character.stepSeq ?? 0;
   const drain = s.character.life === "down" ? 0 : stepEnergy(s.character.transport);
   while (index < travel.path.length) {
     const cur = travel.path[index]!;
@@ -1530,10 +1574,11 @@ function advanceTravel(now: number) {
       elapsed = 0;
       cancelNotice("walk");
       forgetTravel();
+      markAccepted(x, y, seq);
       const c = useGame.getState().character;
       speak("Нет силы. Ляг или кружка.", x, y, "нет силы", "bad");
       useGame.setState({
-        character: { ...c, x, y, px: x, py: y, energy },
+        character: { ...c, x, y, px: x, py: y, energy, stepSeq: seq },
         travel: null,
         preview: null,
         selected: { x, y },
@@ -1544,6 +1589,7 @@ function advanceTravel(now: number) {
     x = cur.x;
     y = cur.y;
     index += 1;
+    seq += 1;
     energy = Math.max(0, energy - drain);
     stepped = true;
   }
@@ -1554,8 +1600,9 @@ function advanceTravel(now: number) {
     cancelNotice("walk");
     maybePingHidden("Пришёл", "Ход кончился — ты на месте.", "walk");
     forgetTravel();
+    markAccepted(x, y, seq);
     useGame.setState({
-      character: { ...c, x, y, px: x, py: y, energy },
+      character: { ...c, x, y, px: x, py: y, energy, stepSeq: seq },
       travel: null,
       preview: null,
       selected: { x, y },
@@ -1585,8 +1632,9 @@ function advanceTravel(now: number) {
     const c = useGame.getState().character;
     cancelNotice("walk");
     forgetTravel();
+    markAccepted(x, y, seq);
     useGame.setState({
-      character: { ...c, x, y, px: x, py: y, energy },
+      character: { ...c, x, y, px: x, py: y, energy, stepSeq: seq },
       travel: null,
       preview: null,
       selected: { x, y },
@@ -1601,8 +1649,9 @@ function advanceTravel(now: number) {
   viewPos.y = y + (cur.y - y) * t;
   if (stepped) {
     const curS = useGame.getState();
+    markAccepted(x, y, seq);
     useGame.setState({
-      character: { ...curS.character, x, y, px: x, py: y, energy },
+      character: { ...curS.character, x, y, px: x, py: y, energy, stepSeq: seq },
       travel: { ...travel, index, elapsed, t0: now },
     });
     void pullSpot();
@@ -1657,30 +1706,52 @@ function worldTick() {
       const stripped = stripRidden(s.world, c, c.x, c.y);
       c = stripped.c;
       parkedMount = stripped.cells;
+      const home = ownHomeCell(s.world);
       c.life = "down";
       c.downAt = Date.now();
       c.hp = 0;
       c.busy = null;
       c.resting = false;
+      c.fellOut = true;
+      c.x = home.x;
+      c.y = home.y;
+      c.px = home.x;
+      c.py = home.y;
       cancelNotice("walk");
-      log = pushLog(log, "Упал. Ноша на клетке. Ползи к шалашу — там поднимешься. Без крыши через 90 с — погиб.");
+      forgetTravel();
+      markAccepted(home.x, home.y, c.stepSeq ?? 0);
+      viewPos.x = home.x;
+      viewPos.y = home.y;
+      log = pushLog(log, "Упал. Ноша на клетке падения. Ты у шалаша.");
       useGame.setState({
         travel: null,
         preview: null,
-        hint: { text: "Упал. Ползи к шалашу.", tone: "bad", keep: "down" },
+        selected: { x: home.x, y: home.y },
+        hint: { text: "Упал. Ноша на клетке падения.", tone: "bad", keep: "down" },
       });
     } else {
+      const home = ownHomeCell(s.world);
       c.life = "down";
       c.downAt = Date.now();
       c.hp = 0;
       c.busy = null;
       c.resting = false;
+      c.fellOut = true;
+      c.x = home.x;
+      c.y = home.y;
+      c.px = home.x;
+      c.py = home.y;
       cancelNotice("walk");
-      log = pushLog(log, "Упал. Ноша на клетке. Ползи к шалашу — там поднимешься. Без крыши через 90 с — погиб.");
+      forgetTravel();
+      markAccepted(home.x, home.y, c.stepSeq ?? 0);
+      viewPos.x = home.x;
+      viewPos.y = home.y;
+      log = pushLog(log, "Упал. Ноша на клетке падения. Ты у шалаша.");
       useGame.setState({
         travel: null,
         preview: null,
-        hint: { text: "Упал. Ползи к шалашу.", tone: "bad", keep: "down" },
+        selected: { x: home.x, y: home.y },
+        hint: { text: "Упал. Ноша на клетке падения.", tone: "bad", keep: "down" },
       });
     }
   }
@@ -2316,28 +2387,44 @@ function storeItem(item: ItemId, qty: number) {
     speak("Сундук — в своём шалаше, доме или складе.", s.character.x, s.character.y, "нет сундука", "bad");
     return;
   }
+  if (s.chestFlight?.[item]) return;
   const have = s.character.inventory[item];
   const n = Math.min(qty, have);
   if (n <= 0) {
     speak("Нечего класть.", tile.x, tile.y, "пусто", "bad");
     return;
   }
-  let c = s.character;
-  const extras = have - (c.hand === item ? 1 : 0);
-  if (n > extras && isWearId(item) && c.hand === item) c = stashHand(c);
-  const inv = { ...c.inventory, [item]: have - n };
-  if ((inv[item] ?? 0) <= 0 && c.hand === item) c = { ...c, hand: null };
-  const chest = chestOf(tile);
-  chest[item] += n;
-  tile.chest = chest;
-  useGame.setState({
-    character: { ...c, inventory: inv },
-    log: pushLog(s.log, `В сундук: ${n} ${ITEM_LABEL[item]}.`),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "в сундук", tone: "ok" as const }].slice(-10),
-    world: { ...s.world, tiles: s.world.tiles },
+  if (!s.bookOn) {
+    let c = s.character;
+    const extras = have - (c.hand === item ? 1 : 0);
+    if (n > extras && isWearId(item) && c.hand === item) c = stashHand(c);
+    const inv = { ...c.inventory, [item]: have - n };
+    if ((inv[item] ?? 0) <= 0 && c.hand === item) c = { ...c, hand: null };
+    const chest = chestOf(tile);
+    chest[item] += n;
+    tile.chest = chest;
+    useGame.setState({
+      character: { ...c, inventory: inv },
+      log: pushLog(s.log, `В сундук: ${n} ${ITEM_LABEL[item]}.`),
+      floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "в сундук", tone: "ok" as const }].slice(-10),
+      world: { ...s.world, tiles: s.world.tiles },
+    });
+    markFreshLive(useGame.getState());
+    return;
+  }
+  if (!beginChest(item)) return;
+  noteDeed("chest-put");
+  void commitBag("chest-put", { x: tile.x, y: tile.y }, s.character, { item, qty: n }).then((ok) => {
+    endChest(item);
+    void pullSpot(true);
+    if (ok) {
+      const live = useGame.getState();
+      useGame.setState({
+        log: pushLog(live.log, `В сундук: ${n} ${ITEM_LABEL[item]}.`),
+        floaters: [...live.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "в сундук", tone: "ok" as const }].slice(-10),
+      });
+    }
   });
-  markFreshLive(useGame.getState());
-  sealBag("chest-put", { x: tile.x, y: tile.y }, s.character, { item, qty: n });
 }
 
 function takeChest(item: ItemId, qty: number) {
@@ -2347,23 +2434,39 @@ function takeChest(item: ItemId, qty: number) {
     speak("Сундука здесь нет.", s.character.x, s.character.y, "нет сундука", "bad");
     return;
   }
+  if (s.chestFlight?.[item]) return;
   const chest = chestOf(tile);
   const n = Math.min(qty, chest[item]);
   if (n <= 0) {
     speak("В сундуке пусто.", tile.x, tile.y, "пусто", "bad");
     return;
   }
-  chest[item] -= n;
-  tile.chest = chest;
-  const inv = { ...s.character.inventory, [item]: s.character.inventory[item] + n };
-  useGame.setState({
-    character: { ...s.character, inventory: inv },
-    log: pushLog(s.log, `Из сундука: ${n} ${ITEM_LABEL[item]}.`),
-    floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "из сундука", tone: "ok" as const }].slice(-10),
-    world: { ...s.world, tiles: s.world.tiles },
+  if (!s.bookOn) {
+    chest[item] -= n;
+    tile.chest = chest;
+    const inv = { ...s.character.inventory, [item]: s.character.inventory[item] + n };
+    useGame.setState({
+      character: { ...s.character, inventory: inv },
+      log: pushLog(s.log, `Из сундука: ${n} ${ITEM_LABEL[item]}.`),
+      floaters: [...s.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "из сундука", tone: "ok" as const }].slice(-10),
+      world: { ...s.world, tiles: s.world.tiles },
+    });
+    markFreshLive(useGame.getState());
+    return;
+  }
+  if (!beginChest(item)) return;
+  noteDeed("chest-take");
+  void commitBag("chest-take", { x: tile.x, y: tile.y }, s.character, { item, qty: n }).then((ok) => {
+    endChest(item);
+    void pullSpot(true);
+    if (ok) {
+      const live = useGame.getState();
+      useGame.setState({
+        log: pushLog(live.log, `Из сундука: ${n} ${ITEM_LABEL[item]}.`),
+        floaters: [...live.floaters, { id: ++floaterSeq, x: tile.x, y: tile.y, text: "из сундука", tone: "ok" as const }].slice(-10),
+      });
+    }
   });
-  markFreshLive(useGame.getState());
-  sealBag("chest-take", { x: tile.x, y: tile.y }, s.character, { item, qty: n });
 }
 
 function buildOn(x: number, y: number, kind: BuildingKind) {
@@ -2738,9 +2841,11 @@ function skipTravel() {
     cancelNotice("walk");
     const live = useGame.getState();
     forgetTravel();
+    markAccepted(last.x, last.y, (live.character.stepSeq ?? 0) + 1);
     useGame.setState({
       travel: null,
       preview: null,
+      character: { ...live.character, stepSeq: (live.character.stepSeq ?? 0) + 1 },
       log: pushLog(live.log, `Подорожная −${goldTxt(SKIP_GOLD)}. Пришёл сразу.`),
       floaters: [...live.floaters, { id: ++floaterSeq, x: last.x, y: last.y, text: "сразу", tone: "gold" as const }].slice(-10),
     });

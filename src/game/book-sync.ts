@@ -50,6 +50,7 @@ let lastHitKey = "";
 let beating = false;
 let beatAgain = false;
 let lastTravel: Travel | null = null;
+let lastAccepted: { x: number; y: number; seq: number } | null = null;
 
 function selfIdOf(): string {
   return store?.get().selfId || "";
@@ -108,6 +109,7 @@ function applyVigor(res: {
   hp?: number;
   life?: Character["life"];
   deaths?: number;
+  fellOut?: boolean;
 }) {
   if (typeof res.energy !== "number" || !Number.isFinite(res.energy) || !store) return;
   const c = store.get().character;
@@ -118,6 +120,7 @@ function applyVigor(res: {
     res.life === "alive" || res.life === "down" || res.life === "jailed" || res.life === "dead" ? res.life : c.life;
   const deaths =
     typeof res.deaths === "number" && Number.isFinite(res.deaths) ? Math.max(0, Math.floor(res.deaths)) : c.deaths;
+  const fellOut = typeof res.fellOut === "boolean" ? res.fellOut : c.fellOut;
   const resting = typeof res.resting === "boolean" ? res.resting : c.resting;
   const energyAt = typeof res.energyAt === "number" && res.energyAt > 0 ? res.energyAt : c.energyAt;
   if (
@@ -125,12 +128,13 @@ function applyVigor(res: {
     c.hp === hp &&
     c.life === life &&
     c.deaths === deaths &&
+    c.fellOut === fellOut &&
     c.resting === resting &&
     c.energyAt === energyAt
   ) {
     return;
   }
-  store.set({ character: { ...c, energy, hp, life, deaths, resting, energyAt } });
+  store.set({ character: { ...c, energy, hp, life, deaths, fellOut, resting, energyAt } });
 }
 
 function applyFlesh(res: { satiety?: number; warmth?: number; water?: number; pail?: number }) {
@@ -248,10 +252,15 @@ function pawnPayload(c: Character) {
 
 export function rememberTravel(t: Travel | null | undefined) {
   if (t?.path.length) lastTravel = t;
+  else lastTravel = null;
 }
 
 export function forgetTravel() {
   lastTravel = null;
+}
+
+export function markAccepted(x: number, y: number, seq: number) {
+  lastAccepted = { x, y, seq };
 }
 
 function travelFromPocket(pocket: ReturnType<typeof loadGame>, x: number, y: number): Travel | null {
@@ -928,8 +937,17 @@ export async function beatBook(_force = false) {
       const walking = !!(live.travel?.path.length);
       const busy = live.character.busy;
       const chopping = !!(busy && busy.until > Date.now() && busy.x === c.x && busy.y === c.y);
+      const fallen = c.life === "down" || c.life === "dead";
+      const just = !!(lastAccepted && (lastAccepted.x !== nx || lastAccepted.y !== ny));
       if (c.x !== nx || c.y !== ny) {
-        if (!((walking && !hint) || chopping)) {
+        if (fallen || hint) {
+          store.set({
+            character: { ...c, x: nx, y: ny, px: nx, py: ny },
+            travel: hint ? null : live.travel,
+            preview: hint ? null : live.preview,
+          });
+          lastAccepted = { x: nx, y: ny, seq: c.stepSeq ?? 0 };
+        } else if (!((walking && !hint) || chopping || just)) {
           store.set({
             character: { ...c, x: nx, y: ny, px: nx, py: ny },
             travel: hint ? null : live.travel,
@@ -938,6 +956,8 @@ export async function beatBook(_force = false) {
         }
       }
       if (hint) store.speak?.(hint, nx, ny, hint, "bad");
+      if (lastAccepted && nx === lastAccepted.x && ny === lastAccepted.y) lastAccepted = null;
+      if (lastTravel && !lastTravel.path.length) lastTravel = null;
       if (lastTravel?.path.length) {
         const end = lastTravel.path[lastTravel.path.length - 1];
         if (hint || (end && nx === end.x && ny === end.y)) lastTravel = null;

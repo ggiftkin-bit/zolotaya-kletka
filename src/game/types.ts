@@ -378,6 +378,10 @@ export type Character = {
   sellDay?: number;
   /** Метка книги. Кнопкой стола не ставят. */
   staff?: boolean;
+  /** Счёт принятого шага. Книга старше — стол клетку из неё не берёт. */
+  stepSeq?: number;
+  /** Упал в поле, не под крышей. 0.24.1 не поднимает после ухода домой. */
+  fellOut?: boolean;
 };
 
 export type Floater = {
@@ -493,4 +497,6 @@ export type GameState = {
   dummies: Dummy[];
   /** Кто вошёл. Двор в книге пишется этим id, на столе это «ты». */
   selfId: string;
+  /** Пока дело сундука в полёте — обе кнопки этой строки молчат. */
+  chestFlight: Partial<Record<ItemId, boolean>>;
 };

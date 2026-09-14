@@ -109,6 +109,14 @@ export function dumpAllOn(tile: Tile, inv: Inventory, gold = 0) {
   }
 }
 
+/** Ноша падения: сумка и надетое на клетку, один раз. */
+export function dumpFallOn(tile: Tile, inv: Inventory, gear: Array<ItemId | null | undefined> = []) {
+  dumpAllOn(tile, inv);
+  for (const id of gear) {
+    if (id) pileAdd(tile, id, 1);
+  }
+}
+
 /** Склад кормит станок. Не сундук и не витрина. */
 export const SHED_REACH = 2;
 

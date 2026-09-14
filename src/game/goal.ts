@@ -48,14 +48,13 @@ export function nextGoal(s: GameState): string {
       !t.burned &&
       (!t.owner || t.owner === "you"),
   );
-  const wet = s.weather === "rain" || s.weather === "snow";
   if ((c.stillUntil ?? 0) > Date.now() && c.life === "alive") return "Отлёживаешься. Сутки без хода";
   if (c.life === "dead") return "Погиб. Двор стоит";
   if (c.life === "down") {
     if (roofNow) return "Упал. Под крышей поднимешься";
     return ownRoof ? "Упал. Дойди до шалаша — там поднимешься" : "Упал. Нужна крыша";
   }
-  if (!roofNow && (c.warmth < 35 || ((s.phase === "night" || wet) && c.warmth < 70))) {
+  if (!roofNow && c.warmth < 35) {
     if (ownRoof) return "Зайди в шалаш — там тепло и сон";
     return "Холодно. Нужен шалаш";
   }

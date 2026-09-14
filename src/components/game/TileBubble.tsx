@@ -1976,10 +1976,10 @@ function ChestGrid({ tile }: { tile: Tile }) {
                 {ITEM_LABEL[k]} · сундук {chest[k] ?? 0} · ноша {inv[k] ?? 0}
               </span>
               <span className="flex gap-1">
-                <Button size="sm" variant="outline" className="h-9" disabled={(chest[k] ?? 0) <= 0} onClick={() => g.takeChest(k, 1)}>
+                <Button size="sm" variant="outline" className="h-9" disabled={!!g.chestFlight?.[k] || (chest[k] ?? 0) <= 0} onClick={() => g.takeChest(k, 1)}>
                   в ношу
                 </Button>
-                <Button size="sm" variant="outline" className="h-9" disabled={(inv[k] ?? 0) <= 0} onClick={() => g.storeItem(k, 1)}>
+                <Button size="sm" variant="outline" className="h-9" disabled={!!g.chestFlight?.[k] || (inv[k] ?? 0) <= 0} onClick={() => g.storeItem(k, 1)}>
                   из ноши
                 </Button>
               </span>

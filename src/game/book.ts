@@ -180,6 +180,10 @@ export type PawnBody = {
   sellDay?: number;
   /** Метка книги. Кнопкой стола не ставят. */
   staff?: boolean;
+  /** Счёт принятого шага. */
+  stepSeq?: number;
+  /** Упал в поле. После ухода домой 0.24.1 не поднимает. */
+  fellOut?: boolean;
 };
 
 export type PawnRow = {
@@ -388,6 +392,8 @@ export function packPawn(c: Character, travel: Travel | null = null): PawnBody {
     sells: c.sells,
     sellDay: c.sellDay,
     staff: !!c.staff,
+    stepSeq: c.stepSeq ?? 0,
+    fellOut: !!c.fellOut,
   };
 }
 
@@ -456,6 +462,8 @@ export function unpackPawn(row: PawnRow): Character {
     sells: typeof packed.sells === "number" ? Math.max(0, Math.floor(packed.sells)) : 0,
     sellDay: typeof packed.sellDay === "number" ? Math.floor(packed.sellDay) : 0,
     staff: !!(packed as { staff?: boolean }).staff,
+    stepSeq: typeof (packed as { stepSeq?: number }).stepSeq === "number" ? Math.max(0, Math.floor((packed as { stepSeq?: number }).stepSeq ?? 0)) : 0,
+    fellOut: !!(packed as { fellOut?: boolean }).fellOut,
   };
 }
 
