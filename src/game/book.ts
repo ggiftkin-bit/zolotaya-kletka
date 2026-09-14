@@ -281,6 +281,86 @@ export function canSee(world: World, px: number, py: number, x: number, y: numbe
   return true;
 }
 
+/** Чужой двор закрыт, пока фишка не стоит на клетке этого же хозяина. */
+export function yardCovered(world: World, px: number, py: number, x: number, y: number, selfId = "you"): boolean {
+  const tile = tileOf(world, x, y);
+  if (!tile?.plot || !tile.owner) return false;
+  if (tile.owner === "you" || (selfId && tile.owner === selfId)) return false;
+  const here = tileOf(world, px, py);
+  if (here?.plot && here.owner && here.owner === tile.owner) return false;
+  return true;
+}
+
+/** Хозяин двора, на клетке которого стоит фишка. Нет двора — пусто. */
+export function insideYardOwner(
+  packets: Array<{ x: number; y: number; slim: SlimTile }>,
+  px: number,
+  py: number,
+): string {
+  for (const p of packets) {
+    if (p.x === px && p.y === py && p.slim.pt && p.slim.on) return p.slim.on;
+  }
+  return "";
+}
+
+function stripYardInterior(slim: SlimTile): SlimTile {
+  const next: SlimTile = { b: slim.b };
+  if (slim.rd) next.rd = slim.rd;
+  if (slim.co) next.co = slim.co;
+  if (slim.ow) next.ow = slim.ow;
+  if (slim.pt) next.pt = slim.pt;
+  if (slim.fn) next.fn = slim.fn;
+  if (slim.fw) next.fw = slim.fw;
+  if (slim.on) next.on = slim.on;
+  if (slim.lw) next.lw = slim.lw;
+  if (slim.gl) next.gl = slim.gl;
+  if (slim.vg) next.vg = slim.vg;
+  if (slim.bd) next.bd = slim.bd;
+  if (slim.mt) next.mt = slim.mt;
+  if (slim.hp != null) next.hp = slim.hp;
+  if (slim.sv && (slim.fn === "gate" || slim.fw === "gate")) next.sv = slim.sv;
+  return next;
+}
+
+/** Снаружи чужого двора в пакете нет кучи, сундука, золота и витрины. */
+export function veilYardSlim(slim: SlimTile, selfId: string, insideOwner: string): SlimTile {
+  const owner = slim.on;
+  if (!slim.pt || !owner) return slim;
+  if (owner === "you" || (selfId && owner === selfId)) return slim;
+  if (insideOwner && owner === insideOwner) return slim;
+  return stripYardInterior(slim);
+}
+
+export function veilYardPackets<T extends { x: number; y: number; slim: SlimTile }>(
+  packets: T[],
+  selfId: string,
+  insideOwner: string,
+): T[] {
+  return packets.map((p) => {
+    const slim = veilYardSlim(p.slim, selfId, insideOwner);
+    return slim === p.slim ? p : { ...p, slim };
+  });
+}
+
+/** Фишка за чужим тыном снаружи не отдаётся. */
+export function othersBehindYard(
+  others: OtherPawn[],
+  packets: Array<{ x: number; y: number; slim: SlimTile }>,
+  selfId: string,
+  insideOwner: string,
+): OtherPawn[] {
+  if (!others.length) return others;
+  const at = new Map<string, SlimTile>();
+  for (const p of packets) at.set(`${p.x},${p.y}`, p.slim);
+  return others.filter((o) => {
+    const slim = at.get(`${o.x},${o.y}`);
+    if (!slim?.pt || !slim.on) return true;
+    if (slim.on === selfId || slim.on === "you") return true;
+    if (insideOwner && slim.on === insideOwner) return true;
+    return false;
+  });
+}
+
 export function maskLiveFog(world: World, px: number, py: number): World {
   if (!world.fog) return world;
   const fog = world.fog.slice();

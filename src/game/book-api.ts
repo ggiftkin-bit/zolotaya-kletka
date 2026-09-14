@@ -27,7 +27,10 @@ import {
   WORLD_SEED,
   darkWorld,
   fightPairId,
+  insideYardOwner,
+  othersBehindYard,
   travelOf,
+  veilYardPackets,
   type BookFight,
   type BookSnapshot,
   type FightSnap,
@@ -1224,7 +1227,12 @@ async function loadSpot(
     [WORLD_ID, userId, px, py, FOG_FETCH],
   );
   const others: OtherPawn[] = otherRows.map(pawnAsOther);
-  return { live, memory, others };
+  const inside = insideYardOwner(live, px, py);
+  return {
+    live: veilYardPackets(live, userId, inside),
+    memory: veilYardPackets(memory, userId, inside),
+    others: othersBehindYard(others, live, userId, inside),
+  };
 }
 
 async function imprintSpot(sql: Sql, userId: string, px: number, py: number) {
@@ -1712,7 +1720,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
          and updated_at > $5::timestamptz`,
       [WORLD_ID, px, py, FOG_FETCH, data.since || "1970-01-01T00:00:00.000Z"],
     );
-    const live: TilePacket[] = liveRows.map((r) => ({
+    const liveRaw: TilePacket[] = liveRows.map((r) => ({
       x: r.x,
       y: r.y,
       slim: asSlim(r.slim),
@@ -1727,7 +1735,7 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
          and greatest(abs(x - $2), abs(y - $3)) <= $4`,
       [WORLD_ID, px, py, FOG_FETCH],
     );
-    const fill: TilePacket[] = fillRows.map((r) => ({
+    const fillRaw: TilePacket[] = fillRows.map((r) => ({
       x: r.x,
       y: r.y,
       slim: asSlim(r.slim),
@@ -1741,7 +1749,11 @@ export const heartbeatWorld = createServerFn({ method: "POST" })
          and seen_at > now() - interval '2 minutes'`,
       [WORLD_ID, context.userId, px, py, FOG_FETCH],
     );
-    const others: OtherPawn[] = otherRows.map(pawnAsOther);
+    const othersRaw: OtherPawn[] = otherRows.map(pawnAsOther);
+    const inside = insideYardOwner(fillRaw, px, py);
+    const live = veilYardPackets(liveRaw, context.userId, inside);
+    const fill = veilYardPackets(fillRaw, context.userId, inside);
+    const others = othersBehindYard(othersRaw, fillRaw, context.userId, inside);
     await imprintSpot(sql, context.userId, px, py);
     const fight = await loadOpenFight(sql, context.userId);
     const stock = await ensureStock(sql);

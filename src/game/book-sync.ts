@@ -70,6 +70,7 @@ function publishTiles(state: GameState) {
   const selfId = selfIdOf();
   return liveTilesOf(state.world, state.character.x, state.character.y)
     .filter((t) => fogAt(state.world, t.x, t.y) === FOG_LIVE)
+    .filter((t) => !(t.plot && t.owner && t.owner !== "you"))
     .map((t) => {
       const slim = slimOf(t);
       const sig = JSON.stringify(slim);
@@ -920,8 +921,11 @@ export async function beatBook(_force = false) {
     });
     if (!res?.ok) return;
     let world = store.get().world;
-    const newcomers = localizePackets(res.fill ?? []).filter((p) => fogAt(world, p.x, p.y) !== FOG_LIVE);
+    const fillPkgs = localizePackets(res.fill ?? []);
+    const newcomers = fillPkgs.filter((p) => fogAt(world, p.x, p.y) !== FOG_LIVE);
+    const yardFill = fillPkgs.filter((p) => !!p.slim.pt && !!p.slim.on && p.slim.on !== "you");
     if (newcomers.length) world = applyLive(world, newcomers);
+    if (yardFill.length) world = applyLive(world, yardFill);
     if (res.live.length) world = applyLive(world, localizePackets(res.live));
     world = maskLiveFog(world, store.get().character.x, store.get().character.y);
     const live = store.get();

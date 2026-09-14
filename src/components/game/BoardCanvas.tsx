@@ -9,7 +9,7 @@ import { useGame } from "@/game/store";
 import type { Biome, FenceKind, Tile, World } from "@/game/types";
 import { viewPos } from "@/game/view-pos";
 import { tileAt } from "@/game/worldgen";
-import { FOG_DARK, FOG_MEM, FOG_LIVE, fogAt } from "@/game/book";
+import { FOG_DARK, FOG_MEM, FOG_LIVE, fogAt, yardCovered } from "@/game/book";
 import { asPile, pileTotal } from "@/game/pile";
 
 const BIOME_FILL: Record<Biome, string> = {
@@ -611,7 +611,7 @@ function draw(
       }
       const tile = tileAt(g.world, x, y);
       if (!tile) continue;
-      paintTile(ctx, tile, g.world);
+      paintTile(ctx, tile, g.world, g.character.x, g.character.y);
     }
   }
   const propDraws: Array<{ fy: number; draw: () => void }> = [];
@@ -703,6 +703,7 @@ function draw(
 
   for (const o of g.others ?? []) {
     if (fogAt(g.world, o.x, o.y) !== 2) continue;
+    if (yardCovered(g.world, g.character.x, g.character.y, o.x, o.y)) continue;
     const same = o.x === g.character.x && o.y === g.character.y;
     const ox = o.x * TILE + TILE / 2 + (same ? TILE * 0.42 : 0);
     const oy = o.y * TILE + TILE / 2 + (same ? -TILE * 0.18 : 0);
@@ -732,6 +733,7 @@ function draw(
 
   for (const d of g.dummies ?? []) {
     if (fogAt(g.world, d.x, d.y) !== 2 && fogAt(g.world, d.x, d.y) !== 1) continue;
+    if (yardCovered(g.world, g.character.x, g.character.y, d.x, d.y)) continue;
     const same = d.x === g.character.x && d.y === g.character.y;
     const ox = d.x * TILE + TILE / 2 + (same ? TILE * 0.42 : 0);
     const oy = d.y * TILE + TILE / 2 + (same ? -TILE * 0.18 : 0);
@@ -1461,7 +1463,24 @@ function paintPackedDirt(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y
   ctx.fillRect(x + 16, y + 26, 10, 2);
 }
 
-function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
+/** Снаружи чужого двора — только покров и тын. */
+function paintCoveredYard(ctx: CanvasRenderingContext2D, tile: Tile, world: World) {
+  const x = tile.x * TILE;
+  const y = tile.y * TILE;
+  if (isWater(tile)) {
+    paintRiverGround(ctx, tile, world, x, y, getArt());
+  } else {
+    paintCobbles(ctx, tile, x, y, false);
+  }
+  if (!isWater(tile)) paintWaterShade(ctx, tile, world, x, y);
+  paintFence(ctx, tile, x, y, world);
+}
+
+function paintTile(ctx: CanvasRenderingContext2D, tile: Tile, world: World, ox: number, oy: number) {
+  if (yardCovered(world, ox, oy, tile.x, tile.y)) {
+    paintCoveredYard(ctx, tile, world);
+    return;
+  }
   const x = tile.x * TILE;
   const y = tile.y * TILE;
   const art = getArt();
@@ -2256,16 +2275,18 @@ function drawMinimap(
       if (fog === FOG_DARK) continue;
       const t = tileAt(g.world, x, y);
       if (!t) continue;
+      const covered = yardCovered(g.world, g.character.x, g.character.y, x, y);
       ctx.fillStyle = BIOME_FILL[t.biome === "forest" && t.amount < 4 ? "plains" : t.biome];
       if (t.plot && t.building !== "field" && !t.pit && t.biome !== "river" && t.biome !== "ford") ctx.fillStyle = "#8a7d64";
       else if (t.commons && !t.plot && t.biome !== "river") ctx.fillStyle = "#b09e82";
-      if (t.market) ctx.fillStyle = "#9a8a6e";
-      if (t.building === "hall") ctx.fillStyle = "#6e5a3a";
+      if (!covered && t.market) ctx.fillStyle = "#9a8a6e";
+      if (!covered && t.building === "hall") ctx.fillStyle = "#6e5a3a";
+      if (covered) ctx.fillStyle = "#8a7d64";
       if (fog === FOG_MEM) ctx.fillStyle = "#3a3228";
-      if (t.bank && !t.pit) ctx.fillStyle = "#c9b06a";
-      if (t.pit) ctx.fillStyle = "#3a3228";
+      if (!covered && t.bank && !t.pit) ctx.fillStyle = "#c9b06a";
+      if (!covered && t.pit) ctx.fillStyle = "#3a3228";
       ctx.fillRect(ox + x * s, oy + y * s, s * step, s * step);
-      if (t.road !== "none") {
+      if (!covered && t.road !== "none") {
         ctx.fillStyle = fog === FOG_MEM ? "#4a3c2c" : "#5c4a32";
         ctx.fillRect(ox + x * s, oy + y * s, s * step, s * step);
       }

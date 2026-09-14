@@ -5,7 +5,7 @@ import { BUILD_COST, BUILDING_LABEL, CART_GOLD, CART_WOOD, LOCK_GOLD, WAGON_GOLD
 import { ANIMAL_LABEL, COW_PRICE, HORSE_PRICE, waterHint } from "@/game/life";
 import { LIFE_INDEX } from "@/game/art";
 import { canOpenPlace, lootOn, placeHint, placeTitle, wildActs } from "@/game/places";
-import { FOG_DARK, FOG_LIVE, fogAt } from "@/game/book";
+import { FOG_DARK, FOG_LIVE, fogAt, yardCovered } from "@/game/book";
 import { bagGoods, bringDestLine, bringDests, boardNotices, BRING_GOODS, BRING_N, canPostFromBoard, canReadBoard, canSeeService, craftsAtTile, firstOwnGate, firstOwnShed, isCraftStation, isGateTile, SERVICE_DO, SERVICE_GOLD, SERVICE_LABEL, serviceJobOf, serviceLine, stallLine, stallOrderOf, STALL_PRICES } from "@/game/market";
 import { DONATE_GOLD, GIFTS, giftOrdered, LIVE_STOCK, stockOf } from "@/game/office";
 import { occupantHere } from "@/game/fight";
@@ -91,6 +91,9 @@ function Sheet({ tile }: { tile: Tile }) {
   const g = useGame();
   if (fogAt(g.world, tile.x, tile.y) === FOG_DARK) {
     return <UnknownSheet tile={tile} />;
+  }
+  if (yardCovered(g.world, g.character.x, g.character.y, tile.x, tile.y)) {
+    return <CoveredYardSheet tile={tile} />;
   }
   const here = g.character.x === tile.x && g.character.y === tile.y;
   const near = Math.max(Math.abs(g.character.x - tile.x), Math.abs(g.character.y - tile.y)) <= 1;
@@ -201,6 +204,73 @@ function Sheet({ tile }: { tile: Tile }) {
       {pane === "build" && <BuildPane tile={tile} />}
       {pane === "yard" && <YardPane tile={tile} />}
       {pane === "service" && <ServiceBody tile={tile} />}
+    </div>
+  );
+}
+
+function CoveredYardSheet({ tile }: { tile: Tile }) {
+  const g = useGame();
+  const here = g.character.x === tile.x && g.character.y === tile.y;
+  const near = Math.max(Math.abs(g.character.x - tile.x), Math.abs(g.character.y - tile.y)) <= 1;
+  const locked =
+    (g.character.jailedUntil ?? 0) > Date.now() ||
+    g.character.life === "jailed" ||
+    g.character.life === "dead" ||
+    (g.character.stillUntil ?? 0) > Date.now();
+  const who = ownerFace(tile.owner, g.others) || "чужой";
+  return (
+    <div
+      className="absolute inset-x-0 bottom-0 mx-auto max-h-full max-w-lg overflow-y-auto rounded-t-[24px] border border-border bg-panel px-4 pb-4 pt-3 shadow-panel"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" />
+      <div className="flex items-start gap-3">
+        <BiomePic
+          biome={tile.biome}
+          commons={false}
+          className="size-16 overflow-hidden rounded-[16px] shadow-sm"
+        />
+        <div className="min-w-0 flex-1">
+          <p className="font-display text-2xl leading-none tracking-tight">чужой двор</p>
+          <p className="mt-1 text-[12px] text-muted-foreground">
+            {here ? "ты здесь" : near ? "рядом" : "далеко"} · {who}
+            {tile.gateLock ? " · калитка на засове" : ""}
+            {tile.village ? ` · ${tile.village}` : ""}
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-label="Закрыть"
+          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-raised text-xl leading-none text-muted-foreground"
+          onClick={() => g.closeInspect()}
+        >
+          ×
+        </button>
+      </div>
+      <div className="mt-4 flex flex-col gap-2">
+        <p className="text-[13px] text-muted-foreground">
+          За забором не видно. Зайди внутрь — через калитку, если пустили, или без засова, или взломай.
+        </p>
+        {!here && isWalkable(tile, g.world) && !locked && (
+          <Sticker
+            title="Пойти"
+            sub="внутрь — увидишь двор"
+            ico={<Ico i={ICO.boots} className="size-11 overflow-hidden rounded-[12px]" />}
+            onClick={() => g.goTo(tile.x, tile.y)}
+          />
+        )}
+        {near && !isPeace(tile) && tile.gateLock && (
+          <Sticker
+            title="Взломать калитку"
+            sub="засов. если поймают — яма, замок цел"
+            ico={<Ico i={ICO.stake} className="size-11 overflow-hidden rounded-[12px]" />}
+            onClick={() => g.pickLock("gate")}
+          />
+        )}
+        {tile.owner && tile.owner !== "you" && near && g.character.pacts[tile.owner] !== "friend" && (
+          <Sticker title="Дружить" sub={`${who} кивнёт`} onClick={() => g.offerFriend()} />
+        )}
+      </div>
     </div>
   );
 }
